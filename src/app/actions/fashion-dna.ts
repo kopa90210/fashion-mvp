@@ -28,30 +28,30 @@ export async function getFashionDnaSummary(
 
   const userId = userData.user.id
 
-  const { data: dnaRow, error: dnaError } = await supabase
-    .from('fashion_dna')
-    .select('vector')
-    .eq('user_id', userId)
-    .single()
+  const [dnaResult, feedbackResult] = await Promise.all([
+    supabase
+      .from('fashion_dna')
+      .select('vector')
+      .eq('user_id', userId)
+      .single(),
+    supabase
+      .from('feedback')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', userId),
+  ])
 
-  if (dnaError || !dnaRow) {
+  if (dnaResult.error || !dnaResult.data) {
     throw new Error('Fashion DNA not found')
   }
 
-  const vector = (dnaRow.vector ?? {}) as Record<string, number>
-
-  // Count feedback rows for the "still learning" threshold
-  const { count, error: countError } = await supabase
-    .from('feedback')
-    .select('id', { count: 'exact', head: true })
-    .eq('user_id', userId)
-
-  if (countError) {
-    console.error('feedback count error:', countError)
+  if (feedbackResult.error) {
+    console.error('feedback count error:', feedbackResult.error)
   }
+
+  const vector = (dnaResult.data.vector ?? {}) as Record<string, number>
 
   return {
     signals: vectorToSignals(vector, topN),
-    feedbackCount: count ?? 0,
+    feedbackCount: feedbackResult.count ?? 0,
   }
 }

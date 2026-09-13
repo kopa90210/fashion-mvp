@@ -267,24 +267,27 @@ export async function getRankedPieces(
   const items = [...(primaryResult.data ?? []), ...(legacyResult.data ?? [])]
   if (itemsError) throw new Error('Could not fetch wardrobe items')
 
-  // 3. Filter to requested category and score; dedupe by stable item id.
+  // 3. Filter to requested category and score; dedupe by stable item id in a single pass.
   const seenIds = new Set<string>()
-  const excludeSet = new Set(excludeIds)
-  const categoryItems = items
-    .filter((item) => mapWardrobeCategory(item) === category)
-     .filter((item) => !excludeSet.has(item.id))
-    .filter((item) => {
-      if (seenIds.has(item.id)) return false
-      seenIds.add(item.id)
-      return true
-    })
-    .map((item) => ({
+  const excludeSet = excludeIds.length > 0 ? new Set(excludeIds) : null
+  const categoryItems: Array<{ id: string; image_url: string | null; display_name: string; score: number }> = []
+
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i]
+    if (excludeSet && excludeSet.has(item.id)) continue
+    if (seenIds.has(item.id)) continue
+    if (mapWardrobeCategory(item) !== category) continue
+
+    seenIds.add(item.id)
+    categoryItems.push({
       id: item.id,
       image_url: item.image_url,
       display_name: item.display_name,
       score: scoreItem(item.style_tags as Record<string, number>, userVector),
-    }))
-    .sort((a, b) => b.score - a.score)
+    })
+  }
+
+  categoryItems.sort((a, b) => b.score - a.score)
 
   if (categoryItems.length === 0) {
     return { items: [], hasMore: false }
@@ -295,8 +298,16 @@ export async function getRankedPieces(
   const threshold = topScore * THRESHOLD_RATIO
 
   // 5. Split into threshold items and below-threshold items
-  const aboveThreshold = categoryItems.filter((item) => item.score >= threshold)
-  const belowThreshold = categoryItems.filter((item) => item.score < threshold)
+  const aboveThreshold: typeof categoryItems = []
+  const belowThreshold: typeof categoryItems = []
+  for (let i = 0; i < categoryItems.length; i++) {
+    const item = categoryItems[i]
+    if (item.score >= threshold) {
+      aboveThreshold.push(item)
+    } else {
+      belowThreshold.push(item)
+    }
+  }
 
   // 6. Build batches
   //    Batch 0: threshold items (clamped to [BATCH_FLOOR, BATCH_CEILING])
@@ -350,7 +361,7 @@ export async function getRankedPieces(
 
 /**
  * Search for items by display_name or subcategory within a single
- * mapped category. Case-insensitive ILIKE matching.
+ * mapped category. Case-insensitive ILIKE matching pushed down to SQL.
  *
  * Returns the same CuratedItem shape — never exposes scores or
  * internal fields.
@@ -370,39 +381,41 @@ export async function searchPieces(
     throw new Error('Not authenticated')
   }
 
-  // Fetch all items and filter client-side by mapped category + text match
-  // (Supabase PostgREST doesn't support ILIKE on computed/mapped categories,
-  // so we fetch the full set and filter. Acceptable for MVP catalog sizes.)
+  const cleanQuery = query.trim()
+  const lowerQuery = cleanQuery.toLowerCase()
+
+  // Use database-side filtering with ILIKE and limit to avoid fetching the entire database
   const { data: items, error: itemsError } = await supabase
     .from('wardrobe_items')
     .select('id, category, subcategory, image_url, display_name, layer_role')
+    .or(`display_name.ilike.%${cleanQuery}%,subcategory.ilike.%${cleanQuery}%`)
 
   if (itemsError || !items) {
     throw new Error('Could not fetch wardrobe items')
   }
 
-  const lowerQuery = query.trim().toLowerCase()
-
   const seenIds = new Set<string>()
+  const results: CuratedItem[] = []
 
-  return items
-    .filter((item) => {
-      if (mapWardrobeCategory(item) !== category) return false
-      const nameMatch = item.display_name?.toLowerCase().includes(lowerQuery)
-      const subMatch = item.subcategory?.toLowerCase().includes(lowerQuery)
-      return nameMatch || subMatch
-    })
-    .filter((item) => {
-      if (seenIds.has(item.id)) return false
-      seenIds.add(item.id)
-      return true
-    })
-    .map((item) => ({
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i]
+    if (seenIds.has(item.id)) continue
+    if (mapWardrobeCategory(item) !== category) continue
+
+    const nameMatch = item.display_name?.toLowerCase().includes(lowerQuery)
+    const subMatch = item.subcategory?.toLowerCase().includes(lowerQuery)
+    if (!nameMatch && !subMatch) continue
+
+    seenIds.add(item.id)
+    results.push({
       id: item.id,
       category,
       image_url: item.image_url,
       display_name: item.display_name,
-    }))
+    })
+  }
+
+  return results
 }
 
 // ---------------------------------------------------------------------------

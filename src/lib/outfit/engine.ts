@@ -66,25 +66,93 @@ export interface Outfit {
  *
  * If either vector has zero magnitude, returns 0.
  */
+/**
+ * Score a single item against a fashion DNA vector.
+ *
+ * Uses a normalised dot product (cosine similarity) so that items with
+ * more style_tags do not automatically outscore sparse items.
+ *
+ * score = dot(item.style_tags, dna) / (|item.style_tags| * |dna|)
+ *
+ * If either vector has zero magnitude, returns 0.
+ */
 export function scoreItem(item: WardrobeItem, dna: StyleVector): number {
   const tags = item.style_tags;
+  if (!tags) return 0;
 
   let dot = 0;
   let tagMagSq = 0;
-  let dnaMagSq = 0;
 
-  // Collect all dimension keys from both vectors
-  const dims = new Set([...Object.keys(tags), ...Object.keys(dna)]);
-
-  for (const dim of dims) {
+  for (const dim in tags) {
     const t = tags[dim] ?? 0;
-    const d = dna[dim] ?? 0;
-    dot += t * d;
-    tagMagSq += t * t;
-    dnaMagSq += d * d;
+    if (t !== 0) {
+      tagMagSq += t * t;
+      const d = dna[dim];
+      if (d) {
+        dot += t * d;
+      }
+    }
   }
 
+  if (tagMagSq === 0) return 0;
+
+  let dnaMagSq = 0;
+  for (const dim in dna) {
+    const d = dna[dim] ?? 0;
+    if (d !== 0) {
+      dnaMagSq += d * d;
+    }
+  }
+
+  if (dnaMagSq === 0) return 0;
+
   const mag = Math.sqrt(tagMagSq) * Math.sqrt(dnaMagSq);
+  return mag === 0 ? 0 : dot / mag;
+}
+
+/** Precomputed representation of a StyleVector for fast repeated scoring. */
+export interface CompiledStyleVector {
+  vector: StyleVector;
+  magnitude: number;
+}
+
+/** Precomputes vector magnitude once for invariant reuse across many items. */
+export function compileStyleVector(dna: StyleVector): CompiledStyleVector {
+  let dnaMagSq = 0;
+  for (const dim in dna) {
+    const d = dna[dim] ?? 0;
+    if (d !== 0) {
+      dnaMagSq += d * d;
+    }
+  }
+  return {
+    vector: dna,
+    magnitude: Math.sqrt(dnaMagSq),
+  };
+}
+
+/** Fast item scoring against precompiled fashion DNA. */
+export function scoreItemCompiled(item: WardrobeItem, compiled: CompiledStyleVector): number {
+  const tags = item.style_tags;
+  if (!tags || compiled.magnitude === 0) return 0;
+
+  let dot = 0;
+  let tagMagSq = 0;
+  const dna = compiled.vector;
+
+  for (const dim in tags) {
+    const t = tags[dim] ?? 0;
+    if (t !== 0) {
+      tagMagSq += t * t;
+      const d = dna[dim];
+      if (d) {
+        dot += t * d;
+      }
+    }
+  }
+
+  if (tagMagSq === 0) return 0;
+  const mag = Math.sqrt(tagMagSq) * compiled.magnitude;
   return mag === 0 ? 0 : dot / mag;
 }
 
@@ -94,7 +162,11 @@ export function scoreItem(item: WardrobeItem, dna: StyleVector): number {
  */
 export function scoreOutfit(items: WardrobeItem[], dna: StyleVector): number {
   if (items.length === 0) return 0;
-  const sum = items.reduce((acc, item) => acc + scoreItem(item, dna), 0);
+  const compiled = compileStyleVector(dna);
+  let sum = 0;
+  for (let i = 0; i < items.length; i++) {
+    sum += scoreItemCompiled(items[i], compiled);
+  }
   return Math.round((sum / items.length) * 10_000) / 10_000;
 }
 
@@ -102,10 +174,8 @@ export function scoreOutfit(items: WardrobeItem[], dna: StyleVector): number {
  * Produce a stable string key for an outfit to detect duplicates.
  * Sorted so that slot order doesn't create phantom duplicates.
  */
-// function outfitKey(items: WardrobeItem[]): string {
- export function outfitKey(items: { id: string }[]): string {
-
-return items
+export function outfitKey(items: { id: string }[]): string {
+  return items
     .map((i) => i.id)
     .sort()
     .join('|');
@@ -120,9 +190,21 @@ export interface RecommendOutfitsOptions {
   topN?: number;
 }
 
+interface ScoredWardrobeItem {
+  item: WardrobeItem;
+  score: number;
+}
+
 /**
  * Given a list of the user's wardrobe items and their fashion DNA vector,
  * return the top N valid outfit combinations ranked by score descending.
+ *
+ * Employs bounded top-K candidate search:
+ * - Precomputes DNA magnitude and individual item scores once.
+ * - Because outfit score is linear-separable across slots, no item below
+ *   rank topN within its role can ever be part of a topN outfit.
+ * - Evaluates bounded candidate space with an in-place min-tracked buffer
+ *   instead of generating, allocating, and sorting millions of combinations.
  *
  * @param items - The user's own wardrobe items (NOT the global catalog).
  * @param dna   - The user's fashion DNA vector from fashion_dna.vector.
@@ -136,9 +218,12 @@ export function recommendOutfits(
   opts: RecommendOutfitsOptions = {},
 ): Outfit[] {
   const topN = opts.topN ?? 5;
+  if (items.length === 0 || topN <= 0) return [];
 
-  // Partition items by layer role.
-  const byRole: Record<LayerRole, WardrobeItem[]> = {
+  const compiledDna = compileStyleVector(dna);
+
+  // Partition items by layer role and precompute individual item scores.
+  const byRole: Record<LayerRole, ScoredWardrobeItem[]> = {
     base_layer: [],
     bottom: [],
     footwear: [],
@@ -146,52 +231,120 @@ export function recommendOutfits(
     accessory: [],
   };
 
-  for (const item of items) {
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
     const role = item.layer_role as LayerRole;
     if (role in byRole) {
-      byRole[role].push(item);
+      const score = scoreItemCompiled(item, compiledDna);
+      byRole[role].push({ item, score });
     }
-    // Items with an unrecognised layer_role are silently skipped.
   }
 
-  const bases = byRole['base_layer'];
-  const bottoms = byRole['bottom'];
-  const footwearItems = byRole['footwear'];
-  const outerwear = byRole['outerwear'];
-  const accessories = byRole['accessory'];
+  // Validity check: required slots must be present.
+  if (
+    byRole.base_layer.length === 0 ||
+    byRole.bottom.length === 0 ||
+    byRole.footwear.length === 0
+  ) {
+    return [];
+  }
 
-  // Optional slots get a null sentinel so we can iterate "no item" without
-  // duplicating the inner loop body.
-  const outerwearSlots: (WardrobeItem | null)[] = [null, ...outerwear];
-  const accessorySlots: (WardrobeItem | null)[] = [null, ...accessories];
+  // Sort each slot's candidates descending by score once: O(M log M).
+  byRole.base_layer.sort((a, b) => b.score - a.score);
+  byRole.bottom.sort((a, b) => b.score - a.score);
+  byRole.footwear.sort((a, b) => b.score - a.score);
+  byRole.outerwear.sort((a, b) => b.score - a.score);
+  byRole.accessory.sort((a, b) => b.score - a.score);
 
-  const seenKeys = new Set<string>();
-  const outfits: Outfit[] = [];
+  // Candidate bounding: within each slot, at most topN candidates are needed.
+  const bases = byRole.base_layer.slice(0, topN);
+  const bottoms = byRole.bottom.slice(0, topN);
+  const footwearItems = byRole.footwear.slice(0, topN);
+  const outerwear = byRole.outerwear.slice(0, topN);
+  const accessories = byRole.accessory.slice(0, topN);
 
-  // Enumerate all valid combinations.
-  // Worst-case: |bases| × |bottoms| × |footwear| × (|outerwear|+1) × (|accessories|+1)
-  // For a typical personal wardrobe this is well under 10 k iterations.
-  for (const base of bases) {
-    for (const bottom of bottoms) {
-      for (const shoe of footwearItems) {
-        for (const outer of outerwearSlots) {
-          for (const accessory of accessorySlots) {
-            const slotItems: WardrobeItem[] = [base, bottom, shoe];
-            if (outer) slotItems.push(outer);
-            if (accessory) slotItems.push(accessory);
+  const outerwearSlots: (ScoredWardrobeItem | null)[] = [null, ...outerwear];
+  const accessorySlots: (ScoredWardrobeItem | null)[] = [null, ...accessories];
 
-            const key = outfitKey(slotItems);
-            if (seenKeys.has(key)) continue;
-            seenKeys.add(key);
+  interface CandidateOutfit {
+    score: number;
+    base: WardrobeItem;
+    bottom: WardrobeItem;
+    shoe: WardrobeItem;
+    outer: WardrobeItem | null;
+    acc: WardrobeItem | null;
+  }
 
-            outfits.push({ items: slotItems, score: scoreOutfit(slotItems, dna) });
+  // Bounded buffer to collect topN candidates without allocating unused combinations.
+  const topCandidates: CandidateOutfit[] = [];
+  let minScoreInTop = -1;
+
+  for (let bi = 0; bi < bases.length; bi++) {
+    const base = bases[bi];
+    for (let boi = 0; boi < bottoms.length; boi++) {
+      const bottom = bottoms[boi];
+      for (let fi = 0; fi < footwearItems.length; fi++) {
+        const shoe = footwearItems[fi];
+        for (let oi = 0; oi < outerwearSlots.length; oi++) {
+          const outer = outerwearSlots[oi];
+          for (let ai = 0; ai < accessorySlots.length; ai++) {
+            const acc = accessorySlots[ai];
+
+            let sum = base.score + bottom.score + shoe.score;
+            let count = 3;
+            if (outer) {
+              sum += outer.score;
+              count += 1;
+            }
+            if (acc) {
+              sum += acc.score;
+              count += 1;
+            }
+
+            const score = Math.round((sum / count) * 10_000) / 10_000;
+
+            if (topCandidates.length < topN) {
+              topCandidates.push({
+                score,
+                base: base.item,
+                bottom: bottom.item,
+                shoe: shoe.item,
+                outer: outer ? outer.item : null,
+                acc: acc ? acc.item : null,
+              });
+              if (topCandidates.length === topN) {
+                topCandidates.sort((x, y) => x.score - y.score);
+                minScoreInTop = topCandidates[0].score;
+              }
+            } else if (score > minScoreInTop) {
+              topCandidates[0] = {
+                score,
+                base: base.item,
+                bottom: bottom.item,
+                shoe: shoe.item,
+                outer: outer ? outer.item : null,
+                acc: acc ? acc.item : null,
+              };
+              topCandidates.sort((x, y) => x.score - y.score);
+              minScoreInTop = topCandidates[0].score;
+            }
           }
         }
       }
     }
   }
 
-  // Sort descending by score, then take the top N.
-  outfits.sort((a, b) => b.score - a.score);
-  return outfits.slice(0, topN);
+  // Final sort descending by score
+  topCandidates.sort((a, b) => b.score - a.score);
+
+  return topCandidates.map((c) => {
+    const slotItems: WardrobeItem[] = [c.base, c.bottom, c.shoe];
+    if (c.outer) slotItems.push(c.outer);
+    if (c.acc) slotItems.push(c.acc);
+    return {
+      items: slotItems,
+      score: c.score,
+    };
+  });
 }
+

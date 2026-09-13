@@ -15,7 +15,7 @@ function ItemCard({ item, selected, selecting, onToggle, onEdit }: { item: UserW
   const label = item.display_name || item.subcategory || 'Wardrobe item'
   return <button type="button" onClick={selecting ? onToggle : onEdit} className={`relative min-w-0 text-left ${selecting ? 'cursor-pointer' : 'cursor-default'}`}>
     <div className="relative aspect-[4/5] overflow-hidden rounded-lg border border-[#d8cec2] bg-[#ebe3d8]">
-      {item.image_url ? <Image src={item.image_url} alt={label} fill unoptimized sizes="(min-width: 768px) 30vw, 45vw" className="object-cover" /> : <div className="flex h-full items-center justify-center text-xs text-[#7a6f62]">No image</div>}
+      {item.image_url ? <Image src={item.image_url} alt={label} fill sizes="(min-width: 768px) 30vw, 45vw" className="object-cover" /> : <div className="flex h-full items-center justify-center text-xs text-[#7a6f62]">No image</div>}
       {item.quantity > 1 && <span className="absolute right-2 top-2 flex size-7 items-center justify-center rounded-full bg-[#1d1b18] text-xs font-semibold text-white">{item.quantity}</span>}
       {selecting && <span className={`absolute left-2 top-2 flex size-6 items-center justify-center rounded-full border ${selected ? 'border-[#1d1b18] bg-[#1d1b18] text-white' : 'border-white bg-white/80 text-transparent'}`}><Check className="size-4" /></span>}
     </div>

@@ -10,7 +10,10 @@ export default async function OutfitsPage() {
     redirect('/outfits/calibration')
   }
 
-  const outfit = await getDailyOutfit()
+  const [outfit, dnaSummary] = await Promise.all([
+    getDailyOutfit(),
+    getFashionDnaSummary(),
+  ])
 
   if (!outfit) {
     return (
@@ -33,13 +36,11 @@ export default async function OutfitsPage() {
     )
   }
 
-  const { signals, feedbackCount } = await getFashionDnaSummary()
-
   return (
     <DailyOutfitScreen
       outfit={outfit}
-      initialSignals={signals}
-      feedbackCount={feedbackCount}
+      initialSignals={dnaSummary.signals}
+      feedbackCount={dnaSummary.feedbackCount}
     />
   )
 }

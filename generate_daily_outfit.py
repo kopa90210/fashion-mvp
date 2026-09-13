@@ -39,21 +39,44 @@ def validate_config() -> tuple[str, str, str]:
     )
 
 
-def score_item(item: dict[str, Any], dna: dict[str, float]) -> float:
+def score_item(item: dict[str, Any], dna: dict[str, float], dna_mag: float | None = None) -> float:
     tags = item.get("style_tags") or {}
-    dims = set(tags) | set(dna)
-    dot = sum(float(tags.get(dim, 0) or 0) * float(dna.get(dim, 0) or 0) for dim in dims)
-    tag_mag = math.sqrt(sum(float(tags.get(dim, 0) or 0) ** 2 for dim in dims))
-    dna_mag = math.sqrt(sum(float(dna.get(dim, 0) or 0) ** 2 for dim in dims))
-    if tag_mag == 0 or dna_mag == 0:
+    if not tags:
         return 0.0
-    return dot / (tag_mag * dna_mag)
+
+    dot = 0.0
+    tag_mag_sq = 0.0
+    for dim, weight in tags.items():
+        w = float(weight or 0)
+        if w != 0.0:
+            tag_mag_sq += w * w
+            d = float(dna.get(dim, 0) or 0)
+            if d != 0.0:
+                dot += w * d
+
+    if tag_mag_sq == 0.0:
+        return 0.0
+
+    if dna_mag is None:
+        dna_mag_sq = sum(float(d or 0) ** 2 for d in dna.values())
+        if dna_mag_sq == 0.0:
+            return 0.0
+        dna_mag = math.sqrt(dna_mag_sq)
+
+    if dna_mag == 0.0:
+        return 0.0
+
+    mag = math.sqrt(tag_mag_sq) * dna_mag
+    return dot / mag if mag > 0 else 0.0
 
 
 def score_outfit(items: list[dict[str, Any]], dna: dict[str, float]) -> float:
     if not items:
         return 0.0
-    return round(sum(score_item(item, dna) for item in items) / len(items), 4)
+    dna_mag = math.sqrt(sum(float(d or 0) ** 2 for d in dna.values()))
+    if dna_mag == 0.0:
+        return 0.0
+    return round(sum(score_item(item, dna, dna_mag) for item in items) / len(items), 4)
 
 
 def validate_ai_response(
@@ -101,11 +124,12 @@ def deterministic_fallback(
     if any(not by_role[role] for role in REQUIRED_ROLES):
         return None
 
-    picks = [max(by_role[role], key=lambda item: score_item(item, dna)) for role in REQUIRED_ROLES]
+    dna_mag = math.sqrt(sum(float(d or 0) ** 2 for d in dna.values()))
+    picks = [max(by_role[role], key=lambda item: score_item(item, dna, dna_mag)) for role in REQUIRED_ROLES]
     for role in OPTIONAL_ROLES:
         if by_role[role]:
-            candidate = max(by_role[role], key=lambda item: score_item(item, dna))
-            if score_item(candidate, dna) >= 0.2:
+            candidate = max(by_role[role], key=lambda item: score_item(item, dna, dna_mag))
+            if score_item(candidate, dna, dna_mag) >= 0.2:
                 picks.append(candidate)
 
     return {

@@ -15,7 +15,7 @@ export default function FlatLay({ items }: { items: WardrobeItem[] }) {
       const zone = zones[item.layer_role] ?? { top: `${8 + index * 8}%`, left: '25%', width: '45%', zIndex: index + 1 }
       return <div key={item.id} className="absolute overflow-hidden rounded-lg border border-[#ded5ca] bg-[#fbfaf7] shadow-md" style={zone}>
         <div className="relative aspect-[4/5]">
-          {item.image_url ? <Image src={item.image_url} alt={item.display_name} fill unoptimized sizes="(min-width: 1024px) 260px, 55vw" className="object-cover" /> : <div className="flex h-full items-center justify-center text-xs text-[#7a6f62]">No image</div>}
+          {item.image_url ? <Image src={item.image_url} alt={item.display_name} fill sizes="(min-width: 1024px) 260px, 55vw" className="object-cover" /> : <div className="flex h-full items-center justify-center text-xs text-[#7a6f62]">No image</div>}
         </div>
         <p className="truncate px-2 py-1.5 text-center text-xs font-medium">{item.display_name}</p>
       </div>

@@ -225,28 +225,35 @@ async function fetchWardrobeItems(
   return items
 }
 
-async function getUserDnaAndWardrobe() {
-  const { supabase, userId } = await getAuthedUserId()
+async function getUserDnaAndWardrobeInternal(
+  supabase: SupabaseClient,
+  userId: string,
+) {
+  const [dnaResult, items] = await Promise.all([
+    supabase
+      .from('fashion_dna')
+      .select('vector')
+      .eq('user_id', userId)
+      .single(),
+    fetchWardrobeItems(supabase, userId),
+  ])
 
-  const { data: dnaRow, error: dnaError } = await supabase
-    .from('fashion_dna')
-    .select('vector')
-    .eq('user_id', userId)
-    .single()
-
-  if (dnaError || !dnaRow) {
-    console.error('outfit action - DNA fetch error:', dnaError)
+  if (dnaResult.error || !dnaResult.data) {
+    console.error('outfit action - DNA fetch error:', dnaResult.error)
     throw new Error('Fashion DNA not found')
   }
-
-  const items = await fetchWardrobeItems(supabase, userId)
 
   return {
     supabase,
     userId,
-    dna: dnaRow.vector as StyleVector,
+    dna: dnaResult.data.vector as StyleVector,
     items,
   }
+}
+
+async function getUserDnaAndWardrobe() {
+  const { supabase, userId } = await getAuthedUserId()
+  return getUserDnaAndWardrobeInternal(supabase, userId)
 }
 
 /**
@@ -261,7 +268,7 @@ export async function getRecommendedOutfits(topN = 5): Promise<Outfit[]> {
 }
 
 export async function shouldShowOutfitCalibration(): Promise<boolean> {
-  const { supabase, userId, dna, items } = await getUserDnaAndWardrobe()
+  const { supabase, userId } = await getAuthedUserId()
 
   const { data: userRow, error: userError } = await supabase
     .from('users')
@@ -273,6 +280,7 @@ export async function shouldShowOutfitCalibration(): Promise<boolean> {
     return false
   }
 
+  const { dna, items } = await getUserDnaAndWardrobeInternal(supabase, userId)
   return recommendOutfits(items, dna, { topN: 3 }).length >= 1
 }
 
@@ -319,7 +327,9 @@ export async function getCalibrationOutfits(): Promise<CalibrationOutfit[]> {
 }
 
 export async function getDailyOutfit(): Promise<DailyOutfit | null> {
+  const t0 = performance.now()
   const { supabase, userId, dna, items } = await getUserDnaAndWardrobe()
+  const tData = performance.now() - t0
 
   const startOfDay = new Date()
   startOfDay.setHours(0, 0, 0, 0)
@@ -327,13 +337,19 @@ export async function getDailyOutfit(): Promise<DailyOutfit | null> {
   if (process.env.ENABLE_AI_DAILY_OUTFITS === 'true') {
     const storedOutfit = await getStoredDailyOutfit(supabase, userId, items, dna, startOfDay)
     if (storedOutfit) {
+      if (process.env.NODE_ENV !== 'production' || process.env.DEBUG_PERF === 'true') {
+        console.log(`[outfit] total=${Math.round(performance.now() - t0)}ms data=${Math.round(tData)}ms hit=stored_daily`)
+      }
       return storedOutfit
     }
   }
 
   const excludeKeys = await getShownOutfitKeys(supabase, userId, startOfDay)
 
+  const tEngine0 = performance.now()
   const candidates = recommendOutfits(items, dna, { topN: 10 })
+  const tEngine = performance.now() - tEngine0
+
   const outfit =
     candidates.find((candidate) => !excludeKeys.has(outfitKey(candidate.items))) ??
     candidates[0]
@@ -341,6 +357,7 @@ export async function getDailyOutfit(): Promise<DailyOutfit | null> {
     return null
   }
 
+  const tInsert0 = performance.now()
   const itemIds = outfit.items.map((item) => item.id)
   const { data: savedOutfit, error: outfitError } = await supabase
     .from('outfits')
@@ -353,6 +370,13 @@ export async function getDailyOutfit(): Promise<DailyOutfit | null> {
 
   if (outfitError || !savedOutfit) {
     throw new Error(`Failed to save daily outfit: ${outfitError?.message ?? 'unknown error'}`)
+  }
+  const tInsert = performance.now() - tInsert0
+
+  if (process.env.NODE_ENV !== 'production' || process.env.DEBUG_PERF === 'true') {
+    console.log(
+      `[outfit] total=${Math.round(performance.now() - t0)}ms data=${Math.round(tData)}ms engine=${tEngine.toFixed(2)}ms persistence=${Math.round(tInsert)}ms candidates=${candidates.length}`,
+    )
   }
 
   return {

@@ -366,6 +366,9 @@ def upload_photo(supabase: Any, photo: Path, item_id: str) -> str:
     return supabase.storage.from_(BUCKET_NAME).get_public_url(storage_path)
 
 
+_CATEGORY_ITEMS_CACHE: dict[str, list[dict[str, Any]]] = {}
+
+
 def insert_wardrobe_item(
     supabase: Any,
     item_id: str,
@@ -385,6 +388,16 @@ def insert_wardrobe_item(
     }
     supabase.table("wardrobe_items").insert(row).execute()
 
+    category = attributes.get("category")
+    if category and category in _CATEGORY_ITEMS_CACHE:
+        _CATEGORY_ITEMS_CACHE[category].append(
+            {
+                "display_name": attributes.get("display_name"),
+                "color": attributes.get("color"),
+                "material": attributes.get("material"),
+            }
+        )
+
 
 def find_duplicate_display_name(
     supabase: Any,
@@ -397,16 +410,20 @@ def find_duplicate_display_name(
     if not new_display_name or not category:
         return None, 0.0
 
-    try:
-        response = (
-            supabase.table("wardrobe_items")
-           .select("display_name, color, material")
-            .eq("category", category)
-            .execute()
-        )
-        rows = response.data or []
-    except Exception:
-        return None, 0.0
+    if category in _CATEGORY_ITEMS_CACHE:
+        rows = _CATEGORY_ITEMS_CACHE[category]
+    else:
+        try:
+            response = (
+                supabase.table("wardrobe_items")
+                .select("display_name, color, material")
+                .eq("category", category)
+                .execute()
+            )
+            rows = response.data or []
+            _CATEGORY_ITEMS_CACHE[category] = rows
+        except Exception:
+            return None, 0.0
 
     new_name_clean = new_display_name.strip().lower()
     for row in rows:
