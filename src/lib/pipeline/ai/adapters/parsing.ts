@@ -57,7 +57,7 @@ export function parseDetectionResponse(payload: unknown): Detection[] {
     Array.isArray(unwrapped) 
       ? unwrapped 
       : unwrapped && typeof unwrapped === 'object' && 'detections' in unwrapped
-        ? (unwrapped as any).detections
+        ? (unwrapped as Record<string, unknown>).detections
         : null;
 
   if (!Array.isArray(detections)) {

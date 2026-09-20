@@ -1,7 +1,6 @@
 import type { PrettifyResult } from '../../contracts';
 import { assertValid, validateImageUrl, validatePrettifyResult } from '../../validation';
 import type { GarmentPrettifier } from '../prettifier';
-import type { GroqVisionTransport } from './groq-transport';
 
 /**
  * Real prettifier adapter.
@@ -16,8 +15,6 @@ import type { GroqVisionTransport } from './groq-transport';
  * Do not fabricate image URLs.
  */
 export class RealGroqPrettifier implements GarmentPrettifier {
-  constructor(private readonly transport?: GroqVisionTransport) {}
-
   async prettify(rawImageUrl: string): Promise<PrettifyResult> {
     assertValid(validateImageUrl(rawImageUrl, 'rawImageUrl'), 'Prettifier input');
 
@@ -32,7 +29,7 @@ export class RealGroqPrettifier implements GarmentPrettifier {
 
     // Validate result
     return assertValid(
-      { success: true, data: result },
+      validatePrettifyResult(result),
       'RealGroqPrettifier'
     );
   }

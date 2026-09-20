@@ -6,7 +6,7 @@ import { parseExtractionResponse } from './parsing';
 import type { GroqVisionTransport } from './groq-transport';
 
 export class RealGroqExtractor implements AttributeExtractor {
-  constructor(private readonly transport: GroqVisionTransport) {}
+  constructor(private readonly transport: Pick<GroqVisionTransport, 'generate'>) {}
 
   async extract(rawImageUrl: string): Promise<ExtractionResult> {
     assertValid(validateImageUrl(rawImageUrl, 'rawImageUrl'), 'Extractor input');

@@ -364,7 +364,7 @@ async function main() {
 
   // D1: Client calls legacy 2-param transition_processing (Must fail: dropped / revoked)
   {
-    const { data, error } = await clientA.rpc('transition_wardrobe_item_processing_state', {
+    const { error } = await clientA.rpc('transition_wardrobe_item_processing_state', {
       p_item_id: wardrobeItemAId,
       p_target_status: 'isolating',
     });
@@ -374,7 +374,7 @@ async function main() {
 
   // D2: Client calls new 3-param transition_processing (Must fail: permission denied 42501)
   {
-    const { data, error } = await clientA.rpc('transition_wardrobe_item_processing_state', {
+    const { error } = await clientA.rpc('transition_wardrobe_item_processing_state', {
       p_item_id: wardrobeItemAId,
       p_target_status: 'isolating',
       p_user_id: userAId,
@@ -385,7 +385,7 @@ async function main() {
 
   // D3: Client calls legacy 2-param transition_prettify (Must fail: dropped / revoked)
   {
-    const { data, error } = await clientA.rpc('transition_wardrobe_item_prettify_state', {
+    const { error } = await clientA.rpc('transition_wardrobe_item_prettify_state', {
       p_item_id: wardrobeItemAId,
       p_target_status: 'processing',
     });
@@ -395,7 +395,7 @@ async function main() {
 
   // D4: Client calls new 3-param transition_prettify (Must fail: permission denied 42501)
   {
-    const { data, error } = await clientA.rpc('transition_wardrobe_item_prettify_state', {
+    const { error } = await clientA.rpc('transition_wardrobe_item_prettify_state', {
       p_item_id: wardrobeItemAId,
       p_target_status: 'processing',
       p_user_id: userAId,

@@ -44,6 +44,8 @@ export class MockDetector implements GarmentDetector {
   }
 
   async detect(imageUrl: string): Promise<Detection[]> {
+    void imageUrl;
+
     if (this.mode === 'failure') {
       throw new AIProviderError(this.failureMessage, 'MockDetector');
     }

@@ -1,5 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+const privateMediaMocks = vi.hoisted(() => ({
+  uploadValidatedPrivateImage: vi.fn(),
+  deletePrivateObject: vi.fn(),
+  signedOwnedPrivateUrl: vi.fn(),
+}))
+
+vi.mock('server-only', () => ({}))
+vi.mock('@/src/lib/media/private-media', () => privateMediaMocks)
+
 let responses: Record<string, { data: unknown; error: unknown }> = {}
 let calls: Array<{ table: string; method: string; payload?: unknown }> = []
 
@@ -37,6 +46,9 @@ beforeEach(() => {
   responses = {}
   calls = []
   supabase.auth.getUser.mockResolvedValue({ data: { user: { id: 'user-1' } }, error: null })
+  privateMediaMocks.uploadValidatedPrivateImage.mockResolvedValue({ bucket: 'private-wardrobe-media', path: 'user-1/asset.jpg', mimeType: 'image/jpeg', byteSize: 5, sha256: 'hash', width: 1, height: 1, stableUrl: 'private://private-wardrobe-media/user-1/asset.jpg' })
+  privateMediaMocks.deletePrivateObject.mockResolvedValue(undefined)
+  privateMediaMocks.signedOwnedPrivateUrl.mockResolvedValue('https://signed.test/item.jpg')
 })
 
 describe('wishlist actions', () => {
@@ -48,11 +60,13 @@ describe('wishlist actions', () => {
   })
 
   it('uploads a photo and inserts it for the authenticated owner', async () => {
+    responses.media_assets = { data: { id: 'asset-1' }, error: null }
     responses.wishlist_items = { data: null, error: null }
     const result = await addWishlistItem(new File(['photo'], 'coat.jpg', { type: 'image/jpeg' }))
     expect(result.success).toBe(true)
     expect(result.itemId).toMatch(/^[0-9a-f-]{36}$/)
-    expect(calls[0].payload).toEqual(expect.objectContaining({ user_id: 'user-1', image_url: 'https://images.test/item.jpg' }))
+    expect(calls[0]).toEqual(expect.objectContaining({ table: 'media_assets', method: 'insert' }))
+    expect(calls[1].payload).toEqual(expect.objectContaining({ user_id: 'user-1', image_url: 'private://private-wardrobe-media/user-1/asset.jpg', media_asset_id: 'asset-1' }))
   })
 
   it('normalizes category and updates only allowed wishlist attributes', async () => {

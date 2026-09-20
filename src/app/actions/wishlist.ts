@@ -2,6 +2,7 @@
 
 import { createClient } from '@/src/lib/supabase/server'
 import { normalizeWardrobeItem } from '@/src/lib/wardrobe/normalize'
+import { deletePrivateObject, signedOwnedPrivateUrl, uploadValidatedPrivateImage } from '@/src/lib/media/private-media'
 import type { WardrobeAttributeUpdates } from './wardrobe'
 
 export type WishlistItem = {
@@ -26,14 +27,16 @@ async function getAuthenticatedClient() {
   return { supabase, userId: data.user.id }
 }
 
-function mapWishlistItem(row: Record<string, unknown>): WishlistItem {
+async function mapWishlistItem(row: Record<string, unknown>, supabase: Awaited<ReturnType<typeof createClient>>): Promise<WishlistItem> {
   return {
     id: String(row.id),
     category: (row.category as string | null) ?? null,
     subcategory: (row.subcategory as string | null) ?? null,
     brand: (row.brand as string | null) ?? null,
     display_name: (row.display_name as string | null) ?? null,
-    image_url: (row.image_url as string | null) ?? null,
+    image_url: row.media_asset_id
+      ? await signedOwnedPrivateUrl(supabase, String(row.media_asset_id))
+      : (row.image_url as string | null) ?? null,
     color: row.color ?? {},
     fit: row.fit ?? {},
     style_tags: row.style_tags ?? {},
@@ -45,24 +48,26 @@ function mapWishlistItem(row: Record<string, unknown>): WishlistItem {
 
 export async function getWishlistItems(category?: string, subcategory?: string) {
   const { supabase, userId } = await getAuthenticatedClient()
-  let query = supabase.from('wishlist_items').select('id, category, subcategory, brand, display_name, image_url, color, fit, style_tags, layer_role, created_at').eq('user_id', userId).order('created_at', { ascending: false })
+  let query = supabase.from('wishlist_items').select('id, category, subcategory, brand, display_name, image_url, media_asset_id, color, fit, style_tags, layer_role, created_at').eq('user_id', userId).order('created_at', { ascending: false })
   if (category) query = query.eq('category', category)
   if (subcategory) query = query.eq('subcategory', subcategory)
   const { data, error } = await query
   if (error) throw new Error('Could not fetch wishlist items')
-  return ((data ?? []) as Record<string, unknown>[]).map(mapWishlistItem)
+  return Promise.all(((data ?? []) as Record<string, unknown>[]).map((row) => mapWishlistItem(row, supabase)))
 }
 
 export async function addWishlistItem(imageFile: File) {
   const { supabase, userId } = await getAuthenticatedClient()
-  const extension = imageFile.name.split('.').pop()?.toLowerCase() || 'jpg'
-  const path = `${userId}/wishlist/${crypto.randomUUID()}.${extension}`
-  const { error: uploadError } = await supabase.storage.from('wardrobe-images').upload(path, imageFile, { contentType: imageFile.type })
-  if (uploadError) throw new Error('Could not upload wishlist image')
-  const { data: urlData } = supabase.storage.from('wardrobe-images').getPublicUrl(path)
+  const media = await uploadValidatedPrivateImage(userId, imageFile)
+  const { data: asset, error: assetError } = await supabase.from('media_assets').insert({ owner_id: userId, bucket_id: media.bucket, object_path: media.path, kind: 'wishlist_item', mime_type: media.mimeType, byte_size: media.byteSize, sha256: media.sha256, width: media.width, height: media.height }).select('id').single()
+  if (assetError || !asset) { await deletePrivateObject(userId, media.path); throw new Error('Could not record private image') }
   const itemId = crypto.randomUUID()
-  const { error } = await supabase.from('wishlist_items').insert({ id: itemId, user_id: userId, image_url: urlData.publicUrl })
-  if (error) throw new Error(`Could not create wishlist item: ${error.message}`)
+  const { error } = await supabase.from('wishlist_items').insert({ id: itemId, user_id: userId, image_url: media.stableUrl, media_asset_id: asset.id })
+  if (error) {
+    await supabase.from('media_assets').delete().eq('id', asset.id)
+    await deletePrivateObject(userId, media.path)
+    throw new Error(`Could not create wishlist item: ${error.message}`)
+  }
   return { success: true, itemId }
 }
 

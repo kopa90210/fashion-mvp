@@ -52,30 +52,27 @@ class OutfitService:
 
         if ai_result is not None:
             logger.info(
-                "user_id=%s source=daily_ai ai_ms=%d confidence=%.4f",
-                request.user_id,
+                "source=daily_ai ai_ms=%d confidence=%.4f",
                 ai_ms,
                 ai_result.get("confidence", 0),
             )
             return OutfitResponse(**ai_result, source="daily_ai")
 
-        logger.warning("user_id=%s AI outfit generation failed; running deterministic fallback.", request.user_id)
+        logger.warning("AI outfit generation failed; running deterministic fallback")
 
         # --- Fallback path ---
         fallback_result = deterministic_fallback(item_pool, dna)
 
         if fallback_result is not None:
             logger.info(
-                "user_id=%s source=daily_fallback confidence=%.4f",
-                request.user_id,
+                "source=daily_fallback confidence=%.4f",
                 fallback_result.get("confidence", 0),
             )
             return OutfitResponse(**fallback_result, source="daily_fallback")
 
         logger.error(
-            "user_id=%s Both AI and deterministic fallback failed to produce a valid outfit. "
+            "Both AI and deterministic fallback failed to produce a valid outfit. "
             "Wardrobe may be missing required roles.",
-            request.user_id,
         )
         raise HTTPException(
             status_code=422,

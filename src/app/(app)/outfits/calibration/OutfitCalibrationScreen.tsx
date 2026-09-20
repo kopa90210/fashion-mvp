@@ -72,10 +72,12 @@ export default function OutfitCalibrationScreen({
 
   function handleFeedback(liked: boolean) {
     if (!visible || isFinishing) return
+    const priorVector = vector
 
     const activeOutfit = outfit
     const isFinalOutfit = outfitIndex >= totalOutfits - 1
     const changedTags = getChangedTags(activeOutfit)
+    const idempotencyKey = `outfit-feedback:${activeOutfit.id}`
 
     setLastFeedback(liked)
     setErrorMessage(null)
@@ -88,6 +90,7 @@ export default function OutfitCalibrationScreen({
         activeOutfit.id,
         liked,
         isFinalOutfit,
+        idempotencyKey,
       ),
     )
 
@@ -110,6 +113,10 @@ export default function OutfitCalibrationScreen({
             }
 
             setVector(result.vector)
+          } catch (error) {
+            setVector(priorVector)
+            setSwipeCount((c) => c - 1)
+            setErrorMessage(error instanceof Error ? error.message : 'Calibration could not be saved. Try again.')
           } finally {
             setLastFeedback(null)
             setVisible(true)
@@ -128,6 +135,8 @@ export default function OutfitCalibrationScreen({
         } catch (error) {
           setIsFinishing(false)
           setVisible(true)
+          setVector(priorVector)
+          setSwipeCount((c) => c - 1)
           setErrorMessage(
             error instanceof Error
               ? error.message

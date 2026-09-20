@@ -1,7 +1,6 @@
 import type { CropBox, IsolationResult } from '../../contracts';
-import { assertValid, validateCropBox, validateImageUrl, validateConfidence } from '../../validation';
+import { assertValid, validateCropBox, validateImageUrl } from '../../validation';
 import type { GarmentIsolator } from '../isolator';
-import type { GroqVisionTransport } from './groq-transport';
 
 /**
  * Real image cropping isolator.
@@ -63,8 +62,6 @@ export class RealLocalIsolator implements GarmentIsolator {
  * Kept for backward compatibility if needed.
  */
 export class RealGroqIsolator implements GarmentIsolator {
-  constructor(private readonly transport: GroqVisionTransport) {}
-
   async isolate(imageUrl: string, box: CropBox): Promise<IsolationResult> {
     assertValid(validateImageUrl(imageUrl, 'imageUrl'), 'Isolator input URL');
     assertValid(validateCropBox(box), 'Isolator crop box');

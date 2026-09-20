@@ -45,6 +45,8 @@ export default function DailyOutfitScreen({
 
   function handleFeedback(liked: boolean) {
     if (selectedFeedback !== null) return
+    const priorVector = vector
+    const idempotencyKey = `outfit-feedback:${currentOutfit.id}`
 
     setSelectedFeedback(liked)
     setErrorMessage(null)
@@ -60,7 +62,7 @@ export default function DailyOutfitScreen({
 
     startTransition(async () => {
       try {
-        const result = await submitOutfitFeedback(currentOutfit.id, liked)
+        const result = await submitOutfitFeedback(currentOutfit.id, liked, idempotencyKey)
         setVector(result.vector)
         
         if (liked) {
@@ -84,10 +86,9 @@ export default function DailyOutfitScreen({
         )
         setPendingMessage(null)
         setSwipeCount((c) => c - 1)
-        if (!liked) {
-          setViewState('outfit')
-          setSelectedFeedback(null)
-        }
+        setVector(priorVector)
+        setSelectedFeedback(null)
+        setViewState('outfit')
       }
     })
   }

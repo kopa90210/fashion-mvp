@@ -28,6 +28,7 @@ __pycache__/
 *.pem
 
 # debug
+.last_groq_response.json
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*

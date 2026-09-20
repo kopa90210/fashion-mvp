@@ -8,6 +8,15 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
+const privateMediaMocks = vi.hoisted(() => ({
+  uploadValidatedPrivateImage: vi.fn(),
+  deletePrivateObject: vi.fn(),
+  signedOwnedPrivateUrl: vi.fn(),
+}))
+
+vi.mock('server-only', () => ({}))
+vi.mock('@/src/lib/media/private-media', () => privateMediaMocks)
+
 // ---------------------------------------------------------------------------
 // Supabase mock setup
 // ---------------------------------------------------------------------------
@@ -18,6 +27,7 @@ let tableResponses: Record<
 > = {}
 
 let upsertCalls: Record<string, unknown[]> = {}
+let rpcCalls: Array<{ name: string; args: unknown }> = []
 
 function createQueryBuilder(tableName: string) {
   const response = () =>
@@ -47,6 +57,10 @@ const mockSupabase = {
     getUser: vi.fn(),
   },
   from: vi.fn().mockImplementation((table: string) => createQueryBuilder(table)),
+  rpc: vi.fn().mockImplementation((name: string, args: unknown) => {
+    rpcCalls.push({ name, args })
+    return Promise.resolve({ data: null, error: null })
+  }),
   storage: {
     from: vi.fn(() => ({
       upload: vi.fn().mockResolvedValue({ error: null }),
@@ -63,7 +77,7 @@ vi.mock('@/src/lib/supabase/server', () => ({
 // Import functions under test
 // ---------------------------------------------------------------------------
 
-const { getCuratedPieces, getRankedPieces, searchPieces, saveWardrobeSelection, findOrphanedWardrobeItems, replaceWardrobeItemPhoto, updateWardrobeItemAttributes } = await import(
+const { getCuratedPieces, getRankedPieces, searchPieces, saveWardrobeSelection, findOrphanedWardrobeItems, replaceWardrobeItemPhoto, updateWardrobeItemAttributes, removeWardrobeItem, uploadDraftWardrobeItem, uploadOutfitPhoto, confirmOutfitPhotoDraft, confirmDraftItem } = await import(
   '@/src/app/actions/wardrobe'
 )
 
@@ -108,6 +122,22 @@ beforeEach(() => {
   vi.clearAllMocks()
   tableResponses = {}
   upsertCalls = {}
+  rpcCalls = []
+  privateMediaMocks.uploadValidatedPrivateImage.mockResolvedValue({ bucket: 'private-wardrobe-media', path: `${TEST_USER_ID}/asset.jpg`, mimeType: 'image/jpeg', byteSize: 5, sha256: 'hash', width: 1, height: 1, stableUrl: `private://private-wardrobe-media/${TEST_USER_ID}/asset.jpg` })
+  privateMediaMocks.deletePrivateObject.mockResolvedValue(undefined)
+  privateMediaMocks.signedOwnedPrivateUrl.mockResolvedValue('https://signed.test/item.jpg')
+})
+
+describe('removeWardrobeItem', () => {
+  it('uses the atomic ownership-preserving removal RPC', async () => {
+    mockAuthenticatedUser()
+
+    await removeWardrobeItem('item-123')
+
+    expect(rpcCalls).toEqual([
+      { name: 'remove_user_wardrobe_item', args: { p_item_id: 'item-123' } },
+    ])
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -337,10 +367,78 @@ describe('findOrphanedWardrobeItems', () => {
 })
 
 describe('replaceWardrobeItemPhoto', () => {
-  it('uploads a replacement and updates only the image URL', async () => {
+  it('records private media and attaches it through the ownership RPC', async () => {
     mockAuthenticatedUser()
+    tableResponses['media_assets'] = { data: { id: 'asset-1' }, error: null }
     await expect(replaceWardrobeItemPhoto('item-1', new File(['photo'], 'new.jpg', { type: 'image/jpeg' }))).resolves.toEqual({ success: true })
-    expect(mockSupabase.storage.from).toHaveBeenCalledWith('wardrobe-images')
+    expect(privateMediaMocks.uploadValidatedPrivateImage).toHaveBeenCalledWith(TEST_USER_ID, expect.any(File))
+    expect(rpcCalls).toContainEqual({ name: 'attach_media_asset_to_wardrobe_item', args: { p_item_id: 'item-1', p_media_asset_id: 'asset-1' } })
+  })
+})
+
+describe('uploadDraftWardrobeItem', () => {
+  it('queues extraction only after the private media is attached', async () => {
+    mockAuthenticatedUser()
+    tableResponses['media_assets'] = { data: { id: 'asset-1' }, error: null }
+    mockSupabase.rpc.mockImplementation(async (name: string, args: unknown) => {
+      rpcCalls.push({ name, args })
+      return { data: name === 'create_draft_wardrobe_item' ? 'item-1' : null, error: null }
+    })
+    await expect(uploadDraftWardrobeItem(new File(['photo'], 'new.jpg', { type: 'image/jpeg' })))
+      .resolves.toEqual({ success: true, itemId: 'item-1' })
+    expect(rpcCalls.map(({ name }) => name)).toEqual([
+      'create_draft_wardrobe_item',
+      'attach_media_asset_to_wardrobe_item',
+      'enqueue_wardrobe_extraction_job',
+    ])
+    expect(rpcCalls[2].args).toEqual({ p_item_id: 'item-1' })
+  })
+})
+
+describe('outfit photo upload', () => {
+  it('persists private source media before enqueueing a multi-garment job', async () => {
+    vi.stubEnv('ENABLE_OUTFIT_PHOTO_UPLOAD', 'true')
+    mockAuthenticatedUser()
+    tableResponses['media_assets'] = { data: { id: 'asset-1' }, error: null }
+    tableResponses['source_photos'] = { data: { id: 'photo-1' }, error: null }
+    mockSupabase.rpc.mockImplementation(async (name: string, args: unknown) => {
+      rpcCalls.push({ name, args })
+      return { data: 'job-1', error: null }
+    })
+    await expect(uploadOutfitPhoto(new File(['photo'], 'outfit.jpg', { type: 'image/jpeg' })))
+      .resolves.toEqual({ sourcePhotoId: 'photo-1', jobId: 'job-1' })
+    expect(rpcCalls).toContainEqual({ name: 'enqueue_outfit_photo_job', args: { p_source_photo_id: 'photo-1' } })
+    expect(mockSupabase.from).toHaveBeenCalledWith('source_photos')
+    vi.unstubAllEnvs()
+  })
+
+  it('requires the feature flag before storing user media', async () => {
+    vi.stubEnv('ENABLE_OUTFIT_PHOTO_UPLOAD', 'false')
+    await expect(uploadOutfitPhoto(new File(['photo'], 'outfit.jpg', { type: 'image/jpeg' })))
+      .rejects.toThrow('not enabled')
+    expect(privateMediaMocks.uploadValidatedPrivateImage).not.toHaveBeenCalled()
+    vi.unstubAllEnvs()
+  })
+
+  it('confirms a reviewed garment through the ownership RPC', async () => {
+    mockAuthenticatedUser()
+    mockSupabase.rpc.mockImplementation(async (name: string, args: unknown) => {
+      rpcCalls.push({ name, args })
+      return { data: null, error: null }
+    })
+    await expect(confirmOutfitPhotoDraft('item-1', false)).resolves.toEqual({ success: true })
+    expect(rpcCalls).toContainEqual({ name: 'confirm_outfit_photo_draft', args: {
+      p_item_id: 'item-1', p_use_reconstructed: false,
+    } })
+  })
+
+  it('routes a generic confirm for an outfit draft through the same ownership RPC', async () => {
+    mockAuthenticatedUser()
+    tableResponses['wardrobe_items'] = { data: { source_photo_id: 'photo-1' }, error: null }
+    await expect(confirmDraftItem('item-1')).resolves.toEqual({ success: true })
+    expect(rpcCalls).toContainEqual({ name: 'confirm_outfit_photo_draft', args: {
+      p_item_id: 'item-1', p_use_reconstructed: false,
+    } })
   })
 })
 

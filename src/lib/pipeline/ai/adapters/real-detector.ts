@@ -6,7 +6,7 @@ import { parseDetectionResponse } from './parsing';
 import type { GroqVisionTransport } from './groq-transport';
 
 export class RealGroqDetector implements GarmentDetector {
-  constructor(private readonly transport: GroqVisionTransport) {}
+  constructor(private readonly transport: Pick<GroqVisionTransport, 'generate'>) {}
 
   async detect(imageUrl: string): Promise<Detection[]> {
     assertValid(validateImageUrl(imageUrl, 'imageUrl'), 'Detector input');

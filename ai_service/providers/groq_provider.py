@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 import logging
-import sys
 import time
 from typing import Any
 
@@ -36,6 +35,7 @@ class GroqProvider:
         self.temperature = temperature
         self.max_retries = max_retries
         self.backoff_seconds = backoff_seconds
+        self.last_usage: dict[str, int] = {}
 
     # ------------------------------------------------------------------
     # Public API
@@ -55,6 +55,7 @@ class GroqProvider:
         Returns:
             A validated outfit dict, or ``None`` if all attempts fail.
         """
+        self.last_usage = {}
         for attempt in range(self.max_retries):
             try:
                 result = self._call_once(items, dna)
@@ -62,10 +63,10 @@ class GroqProvider:
                     return result
             except Exception as exc:
                 if attempt < self.max_retries - 1:
-                    logger.warning("Groq request failed (attempt %d), retrying: %s", attempt + 1, exc)
+                    logger.warning("Groq request failed (attempt %d), retrying", attempt + 1)
                     time.sleep(self.backoff_seconds)
                 else:
-                    logger.error("Groq request failed after %d attempts: %s", self.max_retries, exc)
+                    logger.error("Groq request failed after %d attempts", self.max_retries)
         return None
 
     # ------------------------------------------------------------------
@@ -116,7 +117,7 @@ class GroqProvider:
             )
         except Exception as exc:
             text_exc = str(exc)
-            logger.error("Groq API error: %s", exc, exc_info=True)
+            logger.error("Groq API request failed")
 
             # If the model failed JSON validation, retry without response_format
             # and attempt to parse the raw text locally.
@@ -125,14 +126,14 @@ class GroqProvider:
 
             raise  # re-raise so the retry loop in generate_outfit can handle it
 
+        self._capture_usage(response)
         content = self._extract_content(response)
         if not content:
             return None
 
         parsed = self._parse_content(content)
         if parsed is None:
-            logger.error("Failed to parse Groq content as JSON. Raw content: %s", content)
-            self._write_debug_file(content)
+            logger.error("Groq response was not valid JSON")
             return None
 
         return validate_ai_response(parsed, items)
@@ -150,20 +151,29 @@ class GroqProvider:
                 messages=messages,
             )
         except Exception as exc2:
-            logger.error("Groq fallback request also failed: %s", exc2)
+            logger.error("Groq fallback request failed")
             return None
 
+        self._capture_usage(fallback_resp)
         content = self._extract_content(fallback_resp)
         if not content:
             return None
 
         parsed = self._parse_content(content)
         if parsed is None:
-            logger.error("Failed to parse Groq fallback content as JSON. Raw content: %s", content)
-            self._write_debug_file(content)
+            logger.error("Groq fallback response was not valid JSON")
             return None
 
         return validate_ai_response(parsed, items)
+
+    def _capture_usage(self, response: Any) -> None:
+        usage = getattr(response, "usage", None)
+        values = {}
+        for field in ("prompt_tokens", "completion_tokens", "total_tokens"):
+            count = getattr(usage, field, None)
+            if isinstance(count, int) and not isinstance(count, bool) and count >= 0:
+                values[field] = count
+        self.last_usage = values
 
     @staticmethod
     def _extract_content(response: Any) -> str | None:
@@ -171,20 +181,11 @@ class GroqProvider:
         try:
             content = response.choices[0].message.content
         except Exception:
-            logger.error("Groq response missing expected structure: %s", response)
+            logger.error("Groq response missing expected structure")
             return None
 
         if not content:
-            logger.error("Groq returned empty content. Full response: %s", response)
+            logger.error("Groq returned empty content")
             return None
 
         return content
-
-    @staticmethod
-    def _write_debug_file(content: str) -> None:
-        """Write unparseable content to a debug file (best-effort)."""
-        try:
-            with open(".last_groq_response.json", "w", encoding="utf-8") as fh:
-                fh.write(content)
-        except Exception as exc:
-            print(f"Failed to write debug file: {exc}", file=sys.stderr)

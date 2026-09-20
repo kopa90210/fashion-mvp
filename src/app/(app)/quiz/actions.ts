@@ -38,7 +38,7 @@ const VALID_RISK_TOLERANCES = new Set([
 ])
 
 /**
- * Upsert the user's quiz results into the `fashion_dna` table.
+ * Save quiz results and the next Fashion DNA version in one database operation.
  *
  * Called from the client after the quiz is completed and scored.
  */
@@ -69,28 +69,11 @@ export async function submitStyleQuiz(vector: StyleVector, answers: QuizAnswer[]
   // Extract metadata safely server-side
   const { shoppingMotivation, riskTolerance } = extractQuizMetadata(answers)
   
-  const payload: Record<string, unknown> = {
-    user_id: authData.user.id,
-    vector,
-    updated_at: new Date().toISOString(),
-  }
-
-  // Validate and conditionally include derived metadata
-  if (shoppingMotivation && VALID_SHOPPING_MOTIVATIONS.has(shoppingMotivation)) {
-    payload.shopping_motivation = shoppingMotivation
-  }
-  
-  if (riskTolerance && VALID_RISK_TOLERANCES.has(riskTolerance)) {
-    payload.risk_tolerance = riskTolerance
-  }
-
-  // Upsert into fashion_dna
-  const { error } = await supabase
-    .from('fashion_dna')
-    .upsert(
-      payload,
-      { onConflict: 'user_id' },
-    )
+  const { error } = await supabase.rpc('submit_style_quiz', {
+    p_vector: vector,
+    p_shopping_motivation: shoppingMotivation && VALID_SHOPPING_MOTIVATIONS.has(shoppingMotivation) ? shoppingMotivation : null,
+    p_risk_tolerance: riskTolerance && VALID_RISK_TOLERANCES.has(riskTolerance) ? riskTolerance : null,
+  })
 
   if (error) {
     throw new Error(`Failed to save style data: ${error.message}`)

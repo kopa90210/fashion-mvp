@@ -7,6 +7,6 @@ export default defineConfig({
     include: ['src/lib/pipeline/ai/adapters/real-adapters.test.ts'],
   },
   resolve: {
-    alias: { '@': path.resolve(__dirname, '.') },
+    alias: { '@': path.resolve(import.meta.dirname, '.') },
   },
 });

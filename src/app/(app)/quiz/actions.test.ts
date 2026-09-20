@@ -14,6 +14,7 @@ let tableResponses: Record<
 > = {}
 
 let upsertCalls: Record<string, unknown[]> = {}
+let rpcCalls: Array<{ name: string; payload: Record<string, unknown> }> = []
 
 function createQueryBuilder(tableName: string) {
   const response = () =>
@@ -49,6 +50,10 @@ const mockSupabase = {
     getUser: vi.fn(),
   },
   from: vi.fn().mockImplementation((table: string) => createQueryBuilder(table)),
+  rpc: vi.fn().mockImplementation((name: string, payload: Record<string, unknown>) => {
+    rpcCalls.push({ name, payload })
+    return Promise.resolve({ data: 1, error: null })
+  }),
 }
 
 vi.mock('@/src/lib/supabase/server', () => ({
@@ -77,6 +82,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   tableResponses = {}
   upsertCalls = {}
+  rpcCalls = []
 })
 
 describe('submitStyleQuiz', () => {
@@ -95,14 +101,13 @@ describe('submitStyleQuiz', () => {
 
     await submitStyleQuiz(validVector, answers)
 
-    const calls = upsertCalls['fashion_dna']
+    const calls = rpcCalls
     expect(calls).toHaveLength(1)
-    const payload = (calls[0] as { payload: Record<string, unknown> }).payload
-
-    expect(payload.shopping_motivation).toBe('matches-wardrobe')
-    expect(payload.risk_tolerance).toBe('safe-combinations')
-    expect(payload.user_id).toBe(TEST_USER_ID)
-    expect(payload.vector).toEqual(validVector)
+    const payload = calls[0].payload
+    expect(calls[0].name).toBe('submit_style_quiz')
+    expect(payload.p_shopping_motivation).toBe('matches-wardrobe')
+    expect(payload.p_risk_tolerance).toBe('safe-combinations')
+    expect(payload.p_vector).toEqual(validVector)
   })
 
   it('valid vector + answers missing one or both of those questions -> upsert payload omits the missing field(s) entirely, does not send null', async () => {
@@ -114,12 +119,11 @@ describe('submitStyleQuiz', () => {
 
     await submitStyleQuiz(validVector, answers)
 
-    const calls = upsertCalls['fashion_dna']
+    const calls = rpcCalls
     expect(calls).toHaveLength(1)
-    const payload = (calls[0] as { payload: Record<string, unknown> }).payload
-
-    expect(payload.shopping_motivation).toBe('quality-worth-it')
-    expect(payload).not.toHaveProperty('risk_tolerance')
+    const payload = calls[0].payload
+    expect(payload.p_shopping_motivation).toBe('quality-worth-it')
+    expect(payload.p_risk_tolerance).toBeNull()
   })
 
   it('a tampered/invalid derived value -> the invalid field is silently omitted from the upsert', async () => {
@@ -131,13 +135,13 @@ describe('submitStyleQuiz', () => {
 
     await submitStyleQuiz(validVector, answers)
 
-    const calls = upsertCalls['fashion_dna']
+    const calls = rpcCalls
     expect(calls).toHaveLength(1)
-    const payload = (calls[0] as { payload: Record<string, unknown> }).payload
+    const payload = calls[0].payload
 
     // Invalid shopping behavior is omitted
-    expect(payload).not.toHaveProperty('shopping_motivation')
+    expect(payload.p_shopping_motivation).toBeNull()
     // Valid risk tolerance is still included
-    expect(payload.risk_tolerance).toBe('safe-combinations')
+    expect(payload.p_risk_tolerance).toBe('safe-combinations')
   })
 })
