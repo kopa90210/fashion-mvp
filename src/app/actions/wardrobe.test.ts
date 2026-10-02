@@ -371,7 +371,11 @@ describe('replaceWardrobeItemPhoto', () => {
     mockAuthenticatedUser()
     tableResponses['media_assets'] = { data: { id: 'asset-1' }, error: null }
     await expect(replaceWardrobeItemPhoto('item-1', new File(['photo'], 'new.jpg', { type: 'image/jpeg' }))).resolves.toEqual({ success: true })
-    expect(privateMediaMocks.uploadValidatedPrivateImage).toHaveBeenCalledWith(TEST_USER_ID, expect.any(File))
+    expect(privateMediaMocks.uploadValidatedPrivateImage).toHaveBeenCalledWith(
+      mockSupabase,
+      TEST_USER_ID,
+      expect.any(File),
+    )
     expect(rpcCalls).toContainEqual({ name: 'attach_media_asset_to_wardrobe_item', args: { p_item_id: 'item-1', p_media_asset_id: 'asset-1' } })
   })
 })

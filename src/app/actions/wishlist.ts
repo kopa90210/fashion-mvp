@@ -58,14 +58,14 @@ export async function getWishlistItems(category?: string, subcategory?: string) 
 
 export async function addWishlistItem(imageFile: File) {
   const { supabase, userId } = await getAuthenticatedClient()
-  const media = await uploadValidatedPrivateImage(userId, imageFile)
+  const media = await uploadValidatedPrivateImage(supabase, userId, imageFile)
   const { data: asset, error: assetError } = await supabase.from('media_assets').insert({ owner_id: userId, bucket_id: media.bucket, object_path: media.path, kind: 'wishlist_item', mime_type: media.mimeType, byte_size: media.byteSize, sha256: media.sha256, width: media.width, height: media.height }).select('id').single()
-  if (assetError || !asset) { await deletePrivateObject(userId, media.path); throw new Error('Could not record private image') }
+  if (assetError || !asset) { await deletePrivateObject(supabase, userId, media.path); throw new Error('Could not record private image') }
   const itemId = crypto.randomUUID()
   const { error } = await supabase.from('wishlist_items').insert({ id: itemId, user_id: userId, image_url: media.stableUrl, media_asset_id: asset.id })
   if (error) {
     await supabase.from('media_assets').delete().eq('id', asset.id)
-    await deletePrivateObject(userId, media.path)
+    await deletePrivateObject(supabase, userId, media.path)
     throw new Error(`Could not create wishlist item: ${error.message}`)
   }
   return { success: true, itemId }

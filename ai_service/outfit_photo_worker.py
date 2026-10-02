@@ -167,8 +167,21 @@ def extract_outfit_photo(
     owns_client = client is None
     client = client or httpx.Client(timeout=600, follow_redirects=False)
     try:
-        with client.stream("POST", endpoint_url.rstrip("/") + "/v1/outfit-extract",
-            headers={"X-Internal-Token": token}, files={"file": ("outfit", image, mime)}) as response:
+        with client.stream(
+    "POST",
+    endpoint_url.rstrip("/") + "/v1/outfit-extract",
+    headers={
+        "X-Internal-Token": token,
+        "ngrok-skip-browser-warning": "true",
+    },
+    files={
+        "file": (
+            "outfit",
+            image,
+            mime,
+        )
+    },
+) as response:
             if response.status_code != 200:
                 raise RemoteProviderUnavailable("Remote pipeline request failed")
             body = bytearray()

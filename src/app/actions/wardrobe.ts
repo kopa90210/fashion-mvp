@@ -144,11 +144,11 @@ export async function updateWardrobeItemAttributes(itemId: string, updates: Ward
 
 export async function replaceWardrobeItemPhoto(itemId: string, imageFile: File) {
   const { supabase, userId } = await getAuthenticatedClient()
-  const media = await uploadValidatedPrivateImage(userId, imageFile)
+  const media = await uploadValidatedPrivateImage(supabase, userId, imageFile)
   const { data: asset, error: assetError } = await supabase.from('media_assets').insert({ owner_id: userId, bucket_id: media.bucket, object_path: media.path, kind: 'wardrobe_item', mime_type: media.mimeType, byte_size: media.byteSize, sha256: media.sha256, width: media.width, height: media.height }).select('id').single()
-  if (assetError || !asset) { await deletePrivateObject(userId, media.path); throw new Error('Could not record private image') }
+  if (assetError || !asset) { await deletePrivateObject(supabase, userId, media.path); throw new Error('Could not record private image') }
   const { error } = await supabase.rpc('attach_media_asset_to_wardrobe_item', { p_item_id: itemId, p_media_asset_id: asset.id })
-  if (error) { await supabase.from('media_assets').delete().eq('id', asset.id); await deletePrivateObject(userId, media.path); throw new Error('Could not replace wardrobe image') }
+  if (error) { await supabase.from('media_assets').delete().eq('id', asset.id); await deletePrivateObject(supabase, userId, media.path); throw new Error('Could not replace wardrobe image') }
   return { success: true }
 }
 
@@ -169,28 +169,28 @@ export async function updateItemQuantity(itemId: string, quantity: number) {
 
 export async function uploadDraftWardrobeItem(imageFile: File) {
   const { supabase, userId } = await getAuthenticatedClient()
-  const media = await uploadValidatedPrivateImage(userId, imageFile)
+  const media = await uploadValidatedPrivateImage(supabase, userId, imageFile)
   const { data: asset, error: assetError } = await supabase.from('media_assets').insert({ owner_id: userId, bucket_id: media.bucket, object_path: media.path, kind: 'wardrobe_item', mime_type: media.mimeType, byte_size: media.byteSize, sha256: media.sha256, width: media.width, height: media.height }).select('id').single()
-  if (assetError || !asset) { await deletePrivateObject(userId, media.path); throw new Error('Could not record private image') }
+  if (assetError || !asset) { await deletePrivateObject(supabase, userId, media.path); throw new Error('Could not record private image') }
   const { data: itemId, error: itemError } = await supabase.rpc('create_draft_wardrobe_item', {
     p_image_url: media.stableUrl,
   })
   if (itemError || !itemId) {
-    await supabase.from('media_assets').delete().eq('id', asset.id); await deletePrivateObject(userId, media.path)
+    await supabase.from('media_assets').delete().eq('id', asset.id); await deletePrivateObject(supabase, userId, media.path)
     throw new Error(itemError?.message || 'Could not create draft wardrobe item')
   }
   const { error: linkError } = await supabase.rpc('attach_media_asset_to_wardrobe_item', { p_item_id: itemId, p_media_asset_id: asset.id })
   if (linkError) {
     await supabase.rpc('remove_user_wardrobe_item', { p_item_id: itemId })
     await supabase.from('media_assets').delete().eq('id', asset.id)
-    await deletePrivateObject(userId, media.path)
+    await deletePrivateObject(supabase, userId, media.path)
     throw new Error('Could not link private image to wardrobe item')
   }
   const { error: queueError } = await supabase.rpc('enqueue_wardrobe_extraction_job', { p_item_id: itemId })
   if (queueError) {
     await supabase.rpc('remove_user_wardrobe_item', { p_item_id: itemId })
     await supabase.from('media_assets').delete().eq('id', asset.id)
-    await deletePrivateObject(userId, media.path)
+    await deletePrivateObject(supabase, userId, media.path)
     throw new Error('Could not queue wardrobe extraction')
   }
   return { success: true, itemId }
@@ -200,14 +200,14 @@ export async function uploadDraftWardrobeItem(imageFile: File) {
 export async function uploadOutfitPhoto(imageFile: File) {
   if (process.env.ENABLE_OUTFIT_PHOTO_UPLOAD !== 'true') throw new Error('Outfit photo upload is not enabled')
   const { supabase, userId } = await getAuthenticatedClient()
-  const media = await uploadValidatedPrivateImage(userId, imageFile)
+  const media = await uploadValidatedPrivateImage(supabase, userId, imageFile)
   const { data: asset, error: assetError } = await supabase.from('media_assets').insert({
     owner_id: userId, bucket_id: media.bucket, object_path: media.path,
     kind: 'source_photo', mime_type: media.mimeType, byte_size: media.byteSize,
     sha256: media.sha256, width: media.width, height: media.height,
   }).select('id').single()
   if (assetError || !asset) {
-    await deletePrivateObject(userId, media.path)
+    await deletePrivateObject(supabase, userId, media.path)
     throw new Error('Could not record outfit photo')
   }
   const { data: photo, error: photoError } = await supabase.from('source_photos').insert({
@@ -216,7 +216,7 @@ export async function uploadOutfitPhoto(imageFile: File) {
   }).select('id').single()
   if (photoError || !photo) {
     await supabase.from('media_assets').delete().eq('id', asset.id)
-    await deletePrivateObject(userId, media.path)
+    await deletePrivateObject(supabase, userId, media.path)
     throw new Error('Could not record outfit source photo')
   }
   const { data: jobId, error: queueError } = await supabase.rpc('enqueue_outfit_photo_job', {
@@ -225,7 +225,7 @@ export async function uploadOutfitPhoto(imageFile: File) {
   if (queueError || !jobId) {
     await supabase.from('source_photos').delete().eq('id', photo.id)
     await supabase.from('media_assets').delete().eq('id', asset.id)
-    await deletePrivateObject(userId, media.path)
+    await deletePrivateObject(supabase, userId, media.path)
     throw new Error('Could not queue outfit processing')
   }
   return { sourcePhotoId: String(photo.id), jobId: String(jobId) }

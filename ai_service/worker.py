@@ -53,15 +53,34 @@ def safe_usage(response: Any) -> dict[str, int]:
 
 
 class SupabaseRest:
-    def __init__(self, url: str, service_key: str) -> None:
+    def __init__(
+        self,
+        url: str,
+        service_key: str,
+    ) -> None:
+
         if not url or not service_key:
-            raise RuntimeError("Supabase worker configuration is missing")
+            raise RuntimeError(
+                "Supabase worker configuration is missing"
+            )
+
         self._base = url.rstrip("/")
-        self._client = httpx.Client(timeout=30, headers={
+
+        headers = {
             "apikey": service_key,
-            "Authorization": f"Bearer {service_key}",
             "Content-Type": "application/json",
-        })
+        }
+
+        # Legacy Supabase service-role JWT.
+        if service_key.startswith("eyJ"):
+            headers["Authorization"] = (
+                f"Bearer {service_key}"
+            )
+
+        self._client = httpx.Client(
+            timeout=30,
+            headers=headers,
+        )
 
     def close(self) -> None:
         self._client.close()
@@ -264,11 +283,26 @@ def main() -> None:
     settings = get_settings()
     if not settings.groq_api_key:
         raise RuntimeError("GROQ_API_KEY is required")
-    vision_model = os.environ.get("GROQ_VISION_MODEL", "")
+    vision_model = os.environ.get("GROQ_VISION_MODEL", "qwen/qwen3.8-27b")
     if not vision_model:
         raise RuntimeError("GROQ_VISION_MODEL is required for the AI worker")
-    db = SupabaseRest(os.environ.get("SUPABASE_URL") or os.environ.get("NEXT_PUBLIC_SUPABASE_URL", ""),
-                      os.environ.get("SUPABASE_SERVICE_KEY", ""))
+    supabase_key = (
+        os.environ.get("SUPABASE_SECRET_KEY")
+        or os.environ.get("SUPABASE_SERVICE_KEY")
+        or ""
+    )
+
+    supabase_url = (
+        os.environ.get("SUPABASE_URL")
+        or os.environ.get("NEXT_PUBLIC_SUPABASE_URL")
+        or ""
+    )
+
+    db = SupabaseRest(
+        supabase_url,
+        supabase_key,
+    )
+
     provider = GroqProvider(settings.groq_api_key, settings.groq_model, settings.temperature,
                             settings.max_retries, settings.backoff_seconds)
     service = OutfitService(provider)
