@@ -223,7 +223,7 @@ def process_one(db: SupabaseRest, worker_id: str, outfit_service: OutfitService,
         model = outfit_service._groq.model
     elif job["job_type"] == "outfit_photo":
         prompt_version, schema_version = "notebook-outfit-v1", "outfit-v1"
-        model = os.environ.get("OUTFIT_PIPELINE_MODEL", "yolos-sam2-flux2-qwen3vl")
+        model = os.environ.get("OUTFIT_PIPELINE_MODEL", "yolos-sam2-qwen3vl")
     else:
         prompt_version, schema_version = EXTRACTION_PROMPT_VERSION, EXTRACTION_SCHEMA_VERSION
         model = vision_model or "unconfigured"

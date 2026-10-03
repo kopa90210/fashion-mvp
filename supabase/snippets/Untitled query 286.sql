@@ -1,7 +1,13 @@
 select
-    id,
-    name,
-    public,
-    file_size_limit,
-    allowed_mime_types
-from storage.buckets
+  id,
+  job_id,
+  
+  status,
+  provider,
+  model,
+  safe_error_code,
+  created_at
+ 
+from public.ai_runs
+
+order by created_at asc;
