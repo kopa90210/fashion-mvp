@@ -20,8 +20,8 @@ from urllib.parse import quote
 import httpx
 from fastapi import HTTPException
 from groq import Groq
-
-from ai_service.config import get_settings
+from ai_service.config import Settings, get_settings
+from ai_service.config import Settings, get_settings
 from ai_service.models import OutfitRequest, WardrobeItem
 from ai_service.outfit_photo_worker import InvalidProviderOutput, RemoteProviderUnavailable, extract_outfit_photo
 from ai_service.providers.groq_provider import GroqProvider
@@ -210,9 +210,14 @@ def _extract_garment(db: SupabaseRest, job: dict[str, Any], vision_client: Groq,
             safe_usage(response))
 
 
-def process_one(db: SupabaseRest, worker_id: str, outfit_service: OutfitService,
-                vision_client: Groq, vision_model: str,
-                pipeline_url: str | None = None, pipeline_token: str | None = None) -> bool:
+def process_one(
+    db: SupabaseRest,
+    worker_id: str,
+    outfit_service: OutfitService,
+    vision_client: Groq,
+    vision_model: str,
+    settings: Settings,
+) -> bool:
     jobs = db.rpc("claim_ai_jobs", {"p_worker_id": worker_id, "p_limit": 1, "p_lease_seconds": 900})
     if not jobs:
         return False
@@ -223,7 +228,7 @@ def process_one(db: SupabaseRest, worker_id: str, outfit_service: OutfitService,
         model = outfit_service._groq.model
     elif job["job_type"] == "outfit_photo":
         prompt_version, schema_version = "notebook-outfit-v1", "outfit-v1"
-        model = os.environ.get("OUTFIT_PIPELINE_MODEL", "yolos-sam2-qwen3vl")
+        model = settings.outfit_pipeline_model
     else:
         prompt_version, schema_version = EXTRACTION_PROMPT_VERSION, EXTRACTION_SCHEMA_VERSION
         model = vision_model or "unconfigured"
@@ -238,9 +243,12 @@ def process_one(db: SupabaseRest, worker_id: str, outfit_service: OutfitService,
         elif job["job_type"] == "wardrobe_extraction":
             result, usage = _extract_garment(db, job, vision_client, vision_model)
         elif job["job_type"] == "outfit_photo":
-            garments = extract_outfit_photo(db, job,
-                pipeline_url or os.environ.get("OUTFIT_PIPELINE_URL", ""),
-                pipeline_token or os.environ.get("OUTFIT_PIPELINE_TOKEN", ""))
+            garments = extract_outfit_photo(
+    db,
+    job,
+    settings.outfit_pipeline_url,
+    settings.outfit_pipeline_token,
+)
         else:
             raise InvalidJobInput("Unknown job type")
     except Exception as exc:
@@ -280,29 +288,26 @@ def main() -> None:
     if not 1 <= args.poll_seconds <= 60:
         parser.error("--poll-seconds must be between 1 and 60")
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+    
     settings = get_settings()
+
     if not settings.groq_api_key:
-        raise RuntimeError("GROQ_API_KEY is required")
-    vision_model = os.environ.get("GROQ_VISION_MODEL", "qwen/qwen3.8-27b")
-    if not vision_model:
-        raise RuntimeError("GROQ_VISION_MODEL is required for the AI worker")
-    supabase_key = (
-        os.environ.get("SUPABASE_SECRET_KEY")
-        or os.environ.get("SUPABASE_SERVICE_KEY")
-        or ""
+      raise RuntimeError("GROQ_API_KEY is required")
+
+    if not settings.supabase_url:
+      raise RuntimeError("SUPABASE_URL is required")
+
+    if not settings.supabase_server_key:
+      raise RuntimeError(
+        "SUPABASE_SECRET_KEY or SUPABASE_SERVICE_KEY is required"
     )
 
-    supabase_url = (
-        os.environ.get("SUPABASE_URL")
-        or os.environ.get("NEXT_PUBLIC_SUPABASE_URL")
-        or ""
-    )
+    vision_model = settings.groq_vision_model
 
     db = SupabaseRest(
-        supabase_url,
-        supabase_key,
-    )
-
+    settings.supabase_url,
+    settings.supabase_server_key,
+)
     provider = GroqProvider(settings.groq_api_key, settings.groq_model, settings.temperature,
                             settings.max_retries, settings.backoff_seconds)
     service = OutfitService(provider)
@@ -310,7 +315,7 @@ def main() -> None:
     vision_client = Groq(api_key=settings.groq_api_key)
     try:
         while True:
-            processed = process_one(db, worker_id, service, vision_client, vision_model)
+            processed = process_one(db, worker_id, service, vision_client, vision_model, settings)
             if args.once:
                 break
             if not processed:
