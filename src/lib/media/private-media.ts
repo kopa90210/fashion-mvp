@@ -24,6 +24,8 @@ function storageError(operation: string, error: StorageFailure) {
   return new Error(detail ? `${operation}: ${detail}` : operation)
 }
 
+class PrivateMediaObjectUnavailableError extends Error {}
+
 async function authenticatedStorage(
   supabase: SupabaseClient,
   expectedUserId: string,
@@ -107,7 +109,26 @@ export async function signedOwnedPrivateUrl(
   }
   const storage = await authenticatedStorage(supabase, auth.user.id)
   const { data, error: signingError } = await storage.createSignedUrl(asset.object_path, expiresIn)
+  if (signingError && 'code' in signingError && signingError.code === 'NoSuchKey') {
+    throw new PrivateMediaObjectUnavailableError(storageError('Could not create private image URL', {
+      code: 'NoSuchKey', statusCode: signingError.statusCode, message: signingError.message,
+    }).message)
+  }
   if (signingError) throw storageError('Could not create private image URL', signingError)
   if (!data?.signedUrl) throw new Error('Could not create private image URL')
   return data.signedUrl
+}
+
+/** Optional previews may be absent; authentication and other failures still propagate. */
+export async function signedOwnedPrivatePreviewUrl(
+  supabase: SupabaseClient,
+  mediaAssetId: string,
+): Promise<string | null> {
+  try {
+    return await signedOwnedPrivateUrl(supabase, mediaAssetId)
+  } catch (error) {
+    if (!(error instanceof PrivateMediaObjectUnavailableError)) throw error
+    console.warn('Private media preview unavailable', { mediaAssetId, code: 'NoSuchKey' })
+    return null
+  }
 }

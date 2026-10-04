@@ -12,6 +12,7 @@ const privateMediaMocks = vi.hoisted(() => ({
   uploadValidatedPrivateImage: vi.fn(),
   deletePrivateObject: vi.fn(),
   signedOwnedPrivateUrl: vi.fn(),
+  signedOwnedPrivatePreviewUrl: vi.fn(),
 }))
 
 vi.mock('server-only', () => ({}))
@@ -36,6 +37,7 @@ function createQueryBuilder(tableName: string) {
   const builder: Record<string, unknown> = {
     select: vi.fn().mockReturnThis(),
     eq: vi.fn().mockReturnThis(),
+    order: vi.fn().mockReturnThis(),
     in: vi.fn().mockReturnThis(),
     or: vi.fn().mockReturnThis(),
     single: vi.fn().mockImplementation(() => response()),
@@ -77,7 +79,7 @@ vi.mock('@/src/lib/supabase/server', () => ({
 // Import functions under test
 // ---------------------------------------------------------------------------
 
-const { getCuratedPieces, getRankedPieces, searchPieces, saveWardrobeSelection, findOrphanedWardrobeItems, replaceWardrobeItemPhoto, updateWardrobeItemAttributes, removeWardrobeItem, uploadDraftWardrobeItem, uploadOutfitPhoto, confirmOutfitPhotoDraft, confirmDraftItem } = await import(
+const { getUserWardrobeItems, getUserDraftItems, getCuratedPieces, getRankedPieces, searchPieces, saveWardrobeSelection, findOrphanedWardrobeItems, replaceWardrobeItemPhoto, updateWardrobeItemAttributes, removeWardrobeItem, uploadDraftWardrobeItem, uploadOutfitPhoto, confirmOutfitPhotoDraft, confirmDraftItem } = await import(
   '@/src/app/actions/wardrobe'
 )
 
@@ -126,6 +128,34 @@ beforeEach(() => {
   privateMediaMocks.uploadValidatedPrivateImage.mockResolvedValue({ bucket: 'private-wardrobe-media', path: `${TEST_USER_ID}/asset.jpg`, mimeType: 'image/jpeg', byteSize: 5, sha256: 'hash', width: 1, height: 1, stableUrl: `private://private-wardrobe-media/${TEST_USER_ID}/asset.jpg` })
   privateMediaMocks.deletePrivateObject.mockResolvedValue(undefined)
   privateMediaMocks.signedOwnedPrivateUrl.mockResolvedValue('https://signed.test/item.jpg')
+  privateMediaMocks.signedOwnedPrivatePreviewUrl.mockReset().mockResolvedValue('https://signed.test/item.jpg')
+})
+
+describe('wardrobe image previews', () => {
+  it.each(['confirmed', 'draft'])('keeps %s items and healthy images when one private object is missing', async (status) => {
+    mockAuthenticatedUser()
+    tableResponses.user_wardrobe_items = {
+      data: [
+        { quantity: 2, wardrobe_items: { id: 'missing', media_asset_id: 'missing-asset', image_url: 'private://must-not-reach-browser', status } },
+        { wardrobe_items: { id: 'healthy', media_asset_id: 'healthy-asset', status } },
+        { wardrobe_items: { id: 'curated', image_url: '/img/curated.jpg', status } },
+      ], error: null,
+    }
+    privateMediaMocks.signedOwnedPrivatePreviewUrl.mockImplementation(async (_client, id) => id === 'missing-asset' ? null : 'https://signed.test/item.jpg')
+    const items = status === 'confirmed' ? await getUserWardrobeItems() : await getUserDraftItems()
+    expect(items).toEqual([
+      expect.objectContaining({ id: 'missing', image_url: null, quantity: 2 }),
+      expect.objectContaining({ id: 'healthy', image_url: 'https://signed.test/item.jpg' }),
+      expect.objectContaining({ id: 'curated', image_url: '/img/curated.jpg' }),
+    ])
+  })
+
+  it('keeps unexpected preview errors visible', async () => {
+    mockAuthenticatedUser()
+    tableResponses.user_wardrobe_items = { data: [{ wardrobe_items: { id: 'item', media_asset_id: 'asset' } }], error: null }
+    privateMediaMocks.signedOwnedPrivatePreviewUrl.mockRejectedValue(new Error('Access denied'))
+    await expect(getUserWardrobeItems()).rejects.toThrow('Access denied')
+  })
 })
 
 describe('removeWardrobeItem', () => {

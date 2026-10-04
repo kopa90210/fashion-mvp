@@ -2,7 +2,7 @@
 
 import { createClient } from '@/src/lib/supabase/server'
 import { normalizeWardrobeItem } from '@/src/lib/wardrobe/normalize'
-import { deletePrivateObject, signedOwnedPrivateUrl, uploadValidatedPrivateImage } from '@/src/lib/media/private-media'
+import { deletePrivateObject, signedOwnedPrivatePreviewUrl, signedOwnedPrivateUrl, uploadValidatedPrivateImage } from '@/src/lib/media/private-media'
 import { randomUUID } from 'node:crypto'
 
 // ---------------------------------------------------------------------------
@@ -65,7 +65,7 @@ async function mapUserWardrobeRow(row: Record<string, unknown>, supabase: Awaite
     brand: (item.brand as string | null) ?? null,
     display_name: (item.display_name as string | null) ?? null,
     image_url: item.media_asset_id
-      ? await signedOwnedPrivateUrl(supabase, String(item.media_asset_id))
+      ? await signedOwnedPrivatePreviewUrl(supabase, String(item.media_asset_id))
       : (item.image_url as string | null) ?? null,
     color: item.color ?? {},
     fit: item.fit ?? {},

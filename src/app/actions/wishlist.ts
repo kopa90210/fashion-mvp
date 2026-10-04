@@ -2,7 +2,7 @@
 
 import { createClient } from '@/src/lib/supabase/server'
 import { normalizeWardrobeItem } from '@/src/lib/wardrobe/normalize'
-import { deletePrivateObject, signedOwnedPrivateUrl, uploadValidatedPrivateImage } from '@/src/lib/media/private-media'
+import { deletePrivateObject, signedOwnedPrivatePreviewUrl, uploadValidatedPrivateImage } from '@/src/lib/media/private-media'
 import type { WardrobeAttributeUpdates } from './wardrobe'
 
 export type WishlistItem = {
@@ -35,7 +35,7 @@ async function mapWishlistItem(row: Record<string, unknown>, supabase: Awaited<R
     brand: (row.brand as string | null) ?? null,
     display_name: (row.display_name as string | null) ?? null,
     image_url: row.media_asset_id
-      ? await signedOwnedPrivateUrl(supabase, String(row.media_asset_id))
+      ? await signedOwnedPrivatePreviewUrl(supabase, String(row.media_asset_id))
       : (row.image_url as string | null) ?? null,
     color: row.color ?? {},
     fit: row.fit ?? {},

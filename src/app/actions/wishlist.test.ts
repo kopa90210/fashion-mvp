@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const privateMediaMocks = vi.hoisted(() => ({
   uploadValidatedPrivateImage: vi.fn(),
   deletePrivateObject: vi.fn(),
-  signedOwnedPrivateUrl: vi.fn(),
+  signedOwnedPrivatePreviewUrl: vi.fn(),
 }))
 
 vi.mock('server-only', () => ({}))
@@ -48,10 +48,19 @@ beforeEach(() => {
   supabase.auth.getUser.mockResolvedValue({ data: { user: { id: 'user-1' } }, error: null })
   privateMediaMocks.uploadValidatedPrivateImage.mockResolvedValue({ bucket: 'private-wardrobe-media', path: 'user-1/asset.jpg', mimeType: 'image/jpeg', byteSize: 5, sha256: 'hash', width: 1, height: 1, stableUrl: 'private://private-wardrobe-media/user-1/asset.jpg' })
   privateMediaMocks.deletePrivateObject.mockResolvedValue(undefined)
-  privateMediaMocks.signedOwnedPrivateUrl.mockResolvedValue('https://signed.test/item.jpg')
+  privateMediaMocks.signedOwnedPrivatePreviewUrl.mockReset().mockResolvedValue('https://signed.test/item.jpg')
 })
 
 describe('wishlist actions', () => {
+  it('keeps items whose private preview is unavailable without returning a stable private reference', async () => {
+    responses.wishlist_items = { data: [{ id: 'missing', media_asset_id: 'asset-1', image_url: 'private://must-not-reach-browser' }, { id: 'curated', image_url: '/img/curated.jpg' }], error: null }
+    privateMediaMocks.signedOwnedPrivatePreviewUrl.mockResolvedValue(null)
+    await expect(getWishlistItems()).resolves.toEqual([
+      expect.objectContaining({ id: 'missing', image_url: null }),
+      expect.objectContaining({ id: 'curated', image_url: '/img/curated.jpg' }),
+    ])
+  })
+
   it('gets owner-scoped items and maps them to the UI shape', async () => {
     responses.wishlist_items = { data: [{ id: 'w1', category: 'top', subcategory: 'sweater', brand: 'Acme', display_name: 'Knit', image_url: 'https://img/1', layer_role: 'base_layer', created_at: '2026-01-01' }], error: null }
     await expect(getWishlistItems('top')).resolves.toEqual([{ id: 'w1', category: 'top', subcategory: 'sweater', brand: 'Acme', display_name: 'Knit', image_url: 'https://img/1', color: {}, fit: {}, style_tags: {}, layer_role: 'base_layer', quantity: 1, added_at: '2026-01-01' }])
