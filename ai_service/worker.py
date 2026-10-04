@@ -27,6 +27,11 @@ from ai_service.outfit_photo_worker import InvalidProviderOutput, RemoteProvider
 from ai_service.providers.groq_provider import GroqProvider
 from ai_service.services.outfit_service import OutfitService
 
+from ai_service.providers.outfit import (
+    OutfitPhotoProvider,
+    build_outfit_provider,
+)
+
 logger = logging.getLogger(__name__)
 DAILY_PROMPT_VERSION = "daily-outfit-v1"
 DAILY_SCHEMA_VERSION = "outfit-response-v1"
@@ -217,6 +222,7 @@ def process_one(
     vision_client: Groq,
     vision_model: str,
     settings: Settings,
+    outfit_provider: OutfitPhotoProvider,
 ) -> bool:
     jobs = db.rpc("claim_ai_jobs", {"p_worker_id": worker_id, "p_limit": 1, "p_lease_seconds": 900})
     if not jobs:
@@ -227,8 +233,9 @@ def process_one(
         prompt_version, schema_version = DAILY_PROMPT_VERSION, DAILY_SCHEMA_VERSION
         model = outfit_service._groq.model
     elif job["job_type"] == "outfit_photo":
-        prompt_version, schema_version = "notebook-outfit-v1", "outfit-v1"
-        model = settings.outfit_pipeline_model
+        prompt_version = outfit_provider.prompt_version
+        schema_version = outfit_provider.schema_version
+        model = outfit_provider.model
     else:
         prompt_version, schema_version = EXTRACTION_PROMPT_VERSION, EXTRACTION_SCHEMA_VERSION
         model = vision_model or "unconfigured"
@@ -243,12 +250,10 @@ def process_one(
         elif job["job_type"] == "wardrobe_extraction":
             result, usage = _extract_garment(db, job, vision_client, vision_model)
         elif job["job_type"] == "outfit_photo":
-            garments = extract_outfit_photo(
-    db,
-    job,
-    settings.outfit_pipeline_url,
-    settings.outfit_pipeline_token,
-)
+            garments = outfit_provider.extract(
+        db,
+        job,
+    )
         else:
             raise InvalidJobInput("Unknown job type")
     except Exception as exc:
@@ -257,7 +262,11 @@ def process_one(
     metadata = {
         "p_job_id": job["id"], "p_worker_id": worker_id, "p_attempt": job["total_attempts"],
         "p_outcome": outcome,
-        "p_provider": "notebook-pipeline" if job["job_type"] == "outfit_photo" else "groq",
+        "p_provider": (
+    outfit_provider.name
+    if job["job_type"] == "outfit_photo"
+    else "groq"
+),
         "p_model": model,
         "p_prompt_version": prompt_version, "p_schema_version": schema_version,
         "p_validation_status": validation, "p_latency_ms": round((time.monotonic() - started) * 1000),
@@ -267,7 +276,7 @@ def process_one(
         if job["job_type"] == "outfit_photo" and outcome == "succeeded":
             db.rpc("complete_outfit_photo_job", {
                 "p_job_id": job["id"], "p_worker_id": worker_id,
-                "p_attempt": job["total_attempts"], "p_provider": "notebook-pipeline",
+                "p_attempt": job["total_attempts"], "p_provider": outfit_provider.name,
                 "p_model": model, "p_prompt_version": prompt_version,
                 "p_schema_version": schema_version, "p_latency_ms": metadata["p_latency_ms"],
                 "p_usage": usage, "p_garments": garments,
@@ -290,6 +299,7 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     
     settings = get_settings()
+    outfit_provider = build_outfit_provider(settings)
 
     if not settings.groq_api_key:
       raise RuntimeError("GROQ_API_KEY is required")
@@ -315,7 +325,7 @@ def main() -> None:
     vision_client = Groq(api_key=settings.groq_api_key)
     try:
         while True:
-            processed = process_one(db, worker_id, service, vision_client, vision_model, settings)
+            processed = process_one(db, worker_id, service, vision_client, vision_model, settings,outfit_provider)
             if args.once:
                 break
             if not processed:

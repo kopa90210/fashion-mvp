@@ -9,6 +9,30 @@ import pytest
 from ai_service.worker import InvalidJobInput, _extract_garment, classify_failure, process_one, safe_usage
 
 
+@pytest.fixture
+def settings():
+    return SimpleNamespace(outfit_provider="notebook")
+
+
+class FakeOutfitProvider:
+    name = "test-outfit-provider"
+    model = "test-outfit-model"
+    prompt_version = "test-outfit-v1"
+    schema_version = "outfit-v1"
+
+    def __init__(
+        self,
+        garments=None,
+        error=None,
+    ):
+        self.garments = garments or []
+        self.error = error
+
+    def extract(self, db, job):
+        if self.error:
+            raise self.error
+
+        return self.garments
 class FakeDb:
     def __init__(self, job=None):
         self.job = job
@@ -31,14 +55,16 @@ class FakeDb:
         raise AssertionError(f"Unexpected table {table}")
 
 
-def test_worker_does_not_call_provider_without_a_claim():
+def test_worker_does_not_call_provider_without_a_claim(settings):
     db = FakeDb()
     service = SimpleNamespace(_groq=SimpleNamespace(model="test-model"))
-    assert process_one(db, "worker-a", service, object(), "vision-model") is False
+    provider = FakeOutfitProvider(error=AssertionError("Provider called without a claim"))
+    assert process_one(db, "worker-a", service, object(), "vision-model",
+        settings=settings, outfit_provider=provider) is False
     assert [name for name, _ in db.calls] == ["claim_ai_jobs"]
 
 
-def test_daily_fallback_keeps_source_and_provenance():
+def test_daily_fallback_keeps_source_and_provenance(settings):
     job = {"id": "job-1", "user_id": "user-1", "job_type": "daily_outfit",
            "total_attempts": 2}
     db = FakeDb(job)
@@ -51,7 +77,8 @@ def test_daily_fallback_keeps_source_and_provenance():
         })
 
     service = SimpleNamespace(_groq=SimpleNamespace(model="test-model"), generate=generate)
-    assert process_one(db, "worker-a", service, object(), "vision-model") is True
+    assert process_one(db, "worker-a", service, object(), "vision-model",
+        settings=settings, outfit_provider=FakeOutfitProvider()) is True
     name, completion = db.calls[-1]
     assert name == "complete_ai_job"
     assert completion["p_result"]["source"] == "daily_fallback"
@@ -89,13 +116,14 @@ def test_extraction_never_fetches_another_users_private_path():
                          object(), "vision-model")
 
 
-def test_invalid_daily_job_records_safe_code_without_raw_error(caplog):
+def test_invalid_daily_job_records_safe_code_without_raw_error(caplog, settings):
     job = {"id": "job-1", "user_id": "user-1", "job_type": "daily_outfit",
            "total_attempts": 1}
     db = FakeDb(job)
     db.rows = lambda table, params: []
     service = SimpleNamespace(_groq=SimpleNamespace(model="test-model"))
-    assert process_one(db, "worker-a", service, object(), "vision-model") is True
+    assert process_one(db, "worker-a", service, object(), "vision-model",
+        settings=settings, outfit_provider=FakeOutfitProvider()) is True
     completion = db.calls[-1][1]
     assert completion["p_outcome"] == "permanent_error"
     assert completion["p_safe_error_code"] == "INVALID_INPUT"
@@ -103,14 +131,14 @@ def test_invalid_daily_job_records_safe_code_without_raw_error(caplog):
     assert "Fashion DNA missing" not in caplog.text
 
 
-def test_outfit_photo_uses_atomic_multi_garment_completion(monkeypatch):
+def test_outfit_photo_uses_atomic_multi_garment_completion(settings):
     job = {"id": "job-1", "user_id": "user-1", "job_type": "outfit_photo",
            "source_photo_id": "photo-1", "total_attempts": 1}
     db = FakeDb(job)
-    monkeypatch.setattr("ai_service.worker.extract_outfit_photo",
-        lambda *args: [{"category": "bottom", "original": {"object_path": "user-1/crop.png"}}])
+    provider = FakeOutfitProvider(garments=[
+        {"category": "bottom", "original": {"object_path": "user-1/crop.png"}}])
     service = SimpleNamespace(_groq=SimpleNamespace(model="daily-model"))
     assert process_one(db, "worker-a", service, object(), "vision-model",
-        "https://example.ngrok.app", "test-internal-token-long-enough") is True
+        settings=settings, outfit_provider=provider) is True
     assert [name for name, _ in db.calls] == ["claim_ai_jobs", "complete_outfit_photo_job"]
     assert db.calls[-1][1]["p_garments"][0]["category"] == "bottom"

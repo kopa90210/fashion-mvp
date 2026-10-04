@@ -48,6 +48,8 @@ class Settings(BaseSettings):
     # V2 Gemini provider
     gemini_api_key: str = ""
     gemini_outfit_model: str = "gemini-3.8-flash"
+    gemini_outfit_fallback_model: str = "gemini-3.5-flash-lite"
+    gemini_outfit_thinking_level: str = "low"
 
     # ---------------------------------------------------------
     # Limits / reliability
