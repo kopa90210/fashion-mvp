@@ -80,14 +80,18 @@ async function mapUserWardrobeRow(row: Record<string, unknown>, supabase: Awaite
 export async function getUserWardrobeItems(category?: string, subcategory?: string) {
   const { supabase, userId } = await getAuthenticatedClient()
   let query = supabase.from('user_wardrobe_items')
-    .select('item_id, quantity, added_at, wardrobe_items (id, category, subcategory, brand, display_name, image_url, media_asset_id, color, fit, style_tags, layer_role, status)')
+    .select('item_id, quantity, added_at, wardrobe_items!inner (id, source, category, subcategory, brand, display_name, image_url, media_asset_id, color, fit, style_tags, layer_role, status)')
     .eq('user_id', userId).eq('wardrobe_items.status', 'confirmed')
     .order('added_at', { ascending: false })
   if (category) query = query.eq('wardrobe_items.category', category)
   if (subcategory) query = query.eq('wardrobe_items.subcategory', subcategory)
   const { data, error } = await query
   if (error) throw new Error('Could not fetch wardrobe items')
-  const mapped = await Promise.all(((data ?? []) as Record<string, unknown>[]).map((row) => mapUserWardrobeRow(row, supabase)))
+  const ownedRows = ((data ?? []) as Record<string, unknown>[]).filter((row) => {
+    const item = Array.isArray(row.wardrobe_items) ? row.wardrobe_items[0] : row.wardrobe_items
+    return item && typeof item === 'object' && item.status === 'confirmed'
+  })
+  const mapped = await Promise.all(ownedRows.map((row) => mapUserWardrobeRow(row, supabase)))
   return mapped.filter((item): item is UserWardrobeItem => item !== null)
 }
 
@@ -298,7 +302,7 @@ export async function confirmOutfitPhotoDraft(itemId: string, useReconstructed: 
 // Internal constants
 // ---------------------------------------------------------------------------
 
-const CATEGORY_ORDER = ['top', 'bottom', 'footwear', 'outerwear', 'accessory'] as const
+const CATEGORY_ORDER = ['top', 'bottom', 'one_piece', 'footwear', 'outerwear', 'accessory'] as const
 
 /** Relative threshold — include items scoring ≥ this fraction of the top score. */
 const THRESHOLD_RATIO = 0.70
@@ -560,7 +564,7 @@ export async function findOrphanedWardrobeItems(): Promise<OrphanedWardrobeItems
   const supabase = await createClient()
   const { data, error } = await supabase.from('wardrobe_items').select('id, layer_role, user_wardrobe_items(user_id)')
   if (error || !data) throw new Error('Could not inspect wardrobe items')
-  const validRoles = new Set(['base_layer', 'bottom', 'footwear', 'outerwear', 'accessory'])
+  const validRoles = new Set(['base_layer', 'bottom', 'one_piece', 'footwear', 'outerwear', 'accessory'])
   const byUser: Record<string, number> = {}
   let total = 0
   for (const row of data as Array<{ layer_role: string | null; user_wardrobe_items: Array<{ user_id: string }> | null }>) {
@@ -587,7 +591,7 @@ export async function saveWardrobeSelection(itemIds: string[]) {
   }))
 
   const { error } = await supabase
-    .from('user_wardrobe_items')
+    .from('user_style_seed_items')
     .upsert(inserts, { onConflict: 'user_id, item_id' })
 
   if (error) {

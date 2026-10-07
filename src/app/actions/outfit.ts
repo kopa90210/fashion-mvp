@@ -145,6 +145,20 @@ async function persistOutfit(supabase: SupabaseClient, outfit: Outfit, source: '
   return data as string
 }
 
+async function persistCalibrationOutfit(
+  supabase: SupabaseClient,
+  outfit: Outfit,
+  reasons: string[],
+) {
+  const { data, error } = await supabase.rpc('create_calibration_outfit_with_items', {
+    p_item_ids: outfit.items.map((item) => item.id),
+    p_reasoning: reasons,
+    p_context_snapshot: { relationship: 'style_seed' },
+  })
+  if (error || !data) throw new Error(`Failed to save calibration outfit: ${error?.message ?? 'unknown error'}`)
+  return data as string
+}
+
 
 function pickDiverseCalibrationCandidate(
   candidates: Outfit[],
@@ -201,12 +215,13 @@ async function getShownOutfitKeys(
  * Single source of truth for fetching this user's wardrobe in the shape the
  * recommendation engine expects.
  */
-async function fetchWardrobeItems(
+async function fetchRelationshipItems(
   supabase: SupabaseClient,
   userId: string,
+  relationshipTable: 'user_wardrobe_items' | 'user_style_seed_items',
 ): Promise<WardrobeItem[]> {
   const { data: rows, error: itemsError } = await supabase
-    .from('user_wardrobe_items')
+    .from(relationshipTable)
     .select(
       `
       retired_at,
@@ -226,8 +241,8 @@ async function fetchWardrobeItems(
     .eq('user_id', userId)
 
   if (itemsError || !rows) {
-    console.error('outfit action - wardrobe fetch error:', itemsError)
-    throw new Error('Could not fetch wardrobe items')
+    console.error(`outfit action - ${relationshipTable} fetch error:`, itemsError)
+    throw new Error('Could not fetch outfit items')
   }
 
   const normalizedRows = (rows as UserWardrobeJoinRow[])
@@ -249,8 +264,24 @@ async function fetchWardrobeItems(
       style_tags: (item.style_tags as Partial<StyleVector>) ?? {},
     }
   }))
-  if (excludedCount > 0) console.warn('outfit action - excluded wardrobe items with unmapped layer_role:', excludedCount)
+  if (excludedCount > 0) {
+    console.warn(`outfit action - excluded ${relationshipTable} items with unmapped layer_role:`, excludedCount)
+  }
   return items
+}
+
+async function fetchOwnedWardrobeItems(
+  supabase: SupabaseClient,
+  userId: string,
+): Promise<WardrobeItem[]> {
+  return fetchRelationshipItems(supabase, userId, 'user_wardrobe_items')
+}
+
+async function fetchStyleSeedItems(
+  supabase: SupabaseClient,
+  userId: string,
+): Promise<WardrobeItem[]> {
+  return fetchRelationshipItems(supabase, userId, 'user_style_seed_items')
 }
 
 async function getUserDnaAndWardrobeInternal(
@@ -263,7 +294,7 @@ async function getUserDnaAndWardrobeInternal(
       .select('vector')
       .eq('user_id', userId)
       .single(),
-    fetchWardrobeItems(supabase, userId),
+    fetchOwnedWardrobeItems(supabase, userId),
     supabase.from('users').select('timezone').eq('id', userId).single(),
   ])
 
@@ -284,6 +315,37 @@ async function getUserDnaAndWardrobeInternal(
 async function getUserDnaAndWardrobe() {
   const { supabase, userId } = await getAuthedUserId()
   return getUserDnaAndWardrobeInternal(supabase, userId)
+}
+
+async function getUserDnaAndStyleSeedsInternal(
+  supabase: SupabaseClient,
+  userId: string,
+) {
+  const [dnaResult, items] = await Promise.all([
+    supabase
+      .from('fashion_dna')
+      .select('vector')
+      .eq('user_id', userId)
+      .single(),
+    fetchStyleSeedItems(supabase, userId),
+  ])
+
+  if (dnaResult.error || !dnaResult.data) {
+    console.error('outfit action - DNA fetch error:', dnaResult.error)
+    throw new Error('Fashion DNA not found')
+  }
+
+  return {
+    supabase,
+    userId,
+    dna: dnaResult.data.vector as StyleVector,
+    items,
+  }
+}
+
+async function getUserDnaAndStyleSeeds() {
+  const { supabase, userId } = await getAuthedUserId()
+  return getUserDnaAndStyleSeedsInternal(supabase, userId)
 }
 
 /**
@@ -310,12 +372,12 @@ export async function shouldShowOutfitCalibration(): Promise<boolean> {
     return false
   }
 
-  const { dna, items } = await getUserDnaAndWardrobeInternal(supabase, userId)
+  const { dna, items } = await getUserDnaAndStyleSeedsInternal(supabase, userId)
   return recommendOutfits(items, dna, { topN: 3 }).length >= 1
 }
 
 export async function getCalibrationOutfits(): Promise<CalibrationOutfit[]> {
-  const { supabase, userId, dna, items } = await getUserDnaAndWardrobe()
+  const { supabase, userId, dna, items } = await getUserDnaAndStyleSeeds()
 
   const { data: userRow, error: userError } = await supabase
     .from('users')
@@ -335,7 +397,7 @@ export async function getCalibrationOutfits(): Promise<CalibrationOutfit[]> {
   const savedOutfits: CalibrationOutfit[] = []
 
   for (const candidate of candidates.slice(0, 3)) {
-    const savedOutfitId = await persistOutfit(supabase, candidate, 'engine', buildReasons(candidate, dna), null)
+    const savedOutfitId = await persistCalibrationOutfit(supabase, candidate, buildReasons(candidate, dna))
 
     savedOutfits.push({
       ...candidate,
@@ -480,12 +542,12 @@ async function applyOutfitFeedback(
 
   if (source === 'calibration' && !completeCalibration) {
     const excludeKeys = await getShownOutfitKeys(supabase, userId)
-    const wardrobeItems = await fetchWardrobeItems(supabase, userId)
+    const wardrobeItems = await fetchStyleSeedItems(supabase, userId)
     const candidates = recommendOutfits(wardrobeItems, nextVector, { topN: 8 })
     const picked = pickDiverseCalibrationCandidate(candidates, excludeKeys, itemIds)
 
     if (picked) {
-      const savedOutfitId = await persistOutfit(supabase, picked, 'engine', buildReasons(picked, nextVector), null)
+      const savedOutfitId = await persistCalibrationOutfit(supabase, picked, buildReasons(picked, nextVector))
       if (savedOutfitId) {
         nextOutfit = {
           ...picked,

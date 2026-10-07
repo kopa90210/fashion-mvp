@@ -152,7 +152,7 @@ const DNA = { minimal: 0.8, streetwear: 0.2, formal: 0.1 }
 
 /** Convenience to set a Supabase table's mock response. */
 function mockTable(table: string, data: unknown, error: unknown = null) {
-  if (table === 'user_wardrobe_items' && Array.isArray(data)) {
+  if ((table === 'user_wardrobe_items' || table === 'user_style_seed_items') && Array.isArray(data)) {
     data = data.map((row) => {
       if (!row || typeof row !== 'object') return row
       const record = row as Record<string, unknown>
@@ -201,6 +201,23 @@ beforeEach(() => {
 // ---------------------------------------------------------------------------
 
 describe('getDailyOutfit', () => {
+  it('returns a daily outfit from one owned dress and footwear', async () => {
+    mockAuthenticatedUser()
+    mockTable('fashion_dna', { vector: DNA })
+    mockTable('users', { timezone: 'UTC' })
+    mockTable('outfits', [])
+    mockTable('user_wardrobe_items', [
+      { wardrobe_items: { id: 'dress-1', display_name: 'Midi dress', category: 'one_piece', image_url: null,
+        layer_role: 'one_piece', style_tags: { minimal: 0.9 } } },
+      { wardrobe_items: { id: 'shoe-1', display_name: 'Shoes', category: 'footwear', image_url: null,
+        layer_role: 'footwear', style_tags: { minimal: 0.8 } } },
+    ])
+
+    const result = await getDailyOutfit()
+    expect(result?.items.map((piece) => piece.id)).toEqual(['dress-1', 'shoe-1'])
+    expect(rpcCalls.some((call) => call.name === 'create_outfit_with_items')).toBe(true)
+  })
+
   it('returns null when the user has fewer than 3 valid wardrobe items', async () => {
     mockAuthenticatedUser()
 
@@ -404,6 +421,24 @@ describe('getDailyOutfit', () => {
   })
 })
 
+
+describe('style-seed isolation from daily outfits', () => {
+  it('does not use style seeds when the owned wardrobe is empty', async () => {
+    mockAuthenticatedUser()
+    mockTable('fashion_dna', { vector: DNA })
+    mockTable('user_wardrobe_items', [])
+    mockTable('user_style_seed_items', [
+      { wardrobe_items: { id: 'seed-top', display_name: 'Seed Top', layer_role: 'base_layer', style_tags: { minimal: 0.9 } } },
+      { wardrobe_items: { id: 'seed-bottom', display_name: 'Seed Bottom', layer_role: 'bottom', style_tags: { minimal: 0.8 } } },
+      { wardrobe_items: { id: 'seed-shoe', display_name: 'Seed Shoe', layer_role: 'footwear', style_tags: { minimal: 0.7 } } },
+    ])
+    mockTable('users', { timezone: 'UTC' })
+    mockTable('outfits', [])
+
+    await expect(getDailyOutfit()).resolves.toBeNull()
+  })
+})
+
 // ---------------------------------------------------------------------------
 // shouldShowOutfitCalibration
 // ---------------------------------------------------------------------------
@@ -413,7 +448,7 @@ describe('shouldShowOutfitCalibration', () => {
     mockAuthenticatedUser()
 
     mockTable('fashion_dna', { vector: DNA })
-    mockTable('user_wardrobe_items', [
+    mockTable('user_style_seed_items', [
       {
         wardrobe_items: {
           id: 'tee-1', display_name: 'Tee', image_url: null,
@@ -460,7 +495,7 @@ describe('shouldShowOutfitCalibration', () => {
   it('returns true when at least one valid outfit can be generated', async () => {
     mockAuthenticatedUser()
     mockTable('fashion_dna', { vector: DNA })
-    mockTable('user_wardrobe_items', [
+    mockTable('user_style_seed_items', [
       {
         wardrobe_items: {
           id: 'tee-1', display_name: 'Tee', image_url: null,
@@ -485,6 +520,19 @@ describe('shouldShowOutfitCalibration', () => {
     const result = await shouldShowOutfitCalibration()
     expect(result).toBe(true)
   })
+
+  it('returns true for two dresses and two footwear options', async () => {
+    mockAuthenticatedUser()
+    mockTable('fashion_dna', { vector: DNA })
+    mockTable('user_style_seed_items', [
+      { wardrobe_items: { id: 'dress-1', display_name: 'Dress 1', category: 'one_piece', layer_role: 'one_piece', style_tags: { minimal: 0.9 } } },
+      { wardrobe_items: { id: 'dress-2', display_name: 'Dress 2', category: 'one_piece', layer_role: 'one_piece', style_tags: { formal: 0.8 } } },
+      { wardrobe_items: { id: 'shoe-1', display_name: 'Shoes 1', category: 'footwear', layer_role: 'footwear', style_tags: { minimal: 0.8 } } },
+      { wardrobe_items: { id: 'shoe-2', display_name: 'Shoes 2', category: 'footwear', layer_role: 'footwear', style_tags: { formal: 0.8 } } },
+    ])
+    mockTable('users', { has_completed_calibration: false, timezone: 'UTC' })
+    expect(await shouldShowOutfitCalibration()).toBe(true)
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -492,10 +540,26 @@ describe('shouldShowOutfitCalibration', () => {
 // ---------------------------------------------------------------------------
 
 describe('getCalibrationOutfits', () => {
+  it('creates calibration outfits from two dresses and two footwear options', async () => {
+    mockAuthenticatedUser()
+    mockTable('fashion_dna', { vector: DNA })
+    mockTable('user_style_seed_items', [
+      { wardrobe_items: { id: 'dress-1', display_name: 'Dress 1', category: 'one_piece', layer_role: 'one_piece', style_tags: { minimal: 0.9 } } },
+      { wardrobe_items: { id: 'dress-2', display_name: 'Dress 2', category: 'one_piece', layer_role: 'one_piece', style_tags: { formal: 0.8 } } },
+      { wardrobe_items: { id: 'shoe-1', display_name: 'Shoes 1', category: 'footwear', layer_role: 'footwear', style_tags: { minimal: 0.8 } } },
+      { wardrobe_items: { id: 'shoe-2', display_name: 'Shoes 2', category: 'footwear', layer_role: 'footwear', style_tags: { formal: 0.8 } } },
+    ])
+    mockTable('users', { has_completed_calibration: false, timezone: 'UTC' })
+
+    const result = await getCalibrationOutfits()
+    expect(result).toHaveLength(3)
+    expect(result.every((look) => look.items.some((piece) => piece.layer_role === 'one_piece'))).toBe(true)
+  })
+
   it('returns up to three calibration outfits when the wardrobe can support them', async () => {
     mockAuthenticatedUser()
     mockTable('fashion_dna', { vector: DNA })
-    mockTable('user_wardrobe_items', [
+    mockTable('user_style_seed_items', [
       {
         wardrobe_items: {
           id: 'tee-1', display_name: 'Tee', image_url: null,
@@ -542,6 +606,31 @@ describe('getCalibrationOutfits', () => {
     expect(rpcCalls).toHaveLength(3)
   })
 })
+
+
+  it('uses style seeds for calibration even when the owned wardrobe is empty', async () => {
+    mockAuthenticatedUser()
+    mockTable('fashion_dna', { vector: DNA })
+    mockTable('user_style_seed_items', [])
+    mockTable('user_style_seed_items', [
+      { wardrobe_items: { id: 'dress-seed', display_name: 'Seed Dress', category: 'one_piece', layer_role: 'one_piece', style_tags: { minimal: 0.9 } } },
+      { wardrobe_items: { id: 'shoe-seed', display_name: 'Seed Shoes', category: 'footwear', layer_role: 'footwear', style_tags: { minimal: 0.8 } } },
+    ])
+    mockTable('users', { has_completed_calibration: false })
+
+    const result = await getCalibrationOutfits()
+
+    expect(result).toHaveLength(1)
+    expect(rpcCalls).toEqual([
+      expect.objectContaining({
+        name: 'create_calibration_outfit_with_items',
+        payload: expect.objectContaining({
+          p_item_ids: ['dress-seed', 'shoe-seed'],
+          p_context_snapshot: { relationship: 'style_seed' },
+        }),
+      }),
+    ])
+  })
 
 // ---------------------------------------------------------------------------
 // skipOutfitCalibration

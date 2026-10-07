@@ -136,9 +136,9 @@ describe('wardrobe image previews', () => {
     mockAuthenticatedUser()
     tableResponses.user_wardrobe_items = {
       data: [
-        { quantity: 2, wardrobe_items: { id: 'missing', media_asset_id: 'missing-asset', image_url: 'private://must-not-reach-browser', status } },
-        { wardrobe_items: { id: 'healthy', media_asset_id: 'healthy-asset', status } },
-        { wardrobe_items: { id: 'curated', image_url: '/img/curated.jpg', status } },
+        { quantity: 2, wardrobe_items: { id: 'missing', source: 'user_upload', media_asset_id: 'missing-asset', image_url: 'private://must-not-reach-browser', status } },
+        { wardrobe_items: { id: 'healthy', source: 'user_upload', media_asset_id: 'healthy-asset', status } },
+        { wardrobe_items: { id: 'legacy-upload', source: 'user_upload', image_url: '/img/upload.jpg', status } },
       ], error: null,
     }
     privateMediaMocks.signedOwnedPrivatePreviewUrl.mockImplementation(async (_client, id) => id === 'missing-asset' ? null : 'https://signed.test/item.jpg')
@@ -146,15 +146,35 @@ describe('wardrobe image previews', () => {
     expect(items).toEqual([
       expect.objectContaining({ id: 'missing', image_url: null, quantity: 2 }),
       expect.objectContaining({ id: 'healthy', image_url: 'https://signed.test/item.jpg' }),
-      expect.objectContaining({ id: 'curated', image_url: '/img/curated.jpg' }),
+      expect.objectContaining({ id: 'legacy-upload', image_url: '/img/upload.jpg' }),
     ])
   })
 
   it('keeps unexpected preview errors visible', async () => {
     mockAuthenticatedUser()
-    tableResponses.user_wardrobe_items = { data: [{ wardrobe_items: { id: 'item', media_asset_id: 'asset' } }], error: null }
+    tableResponses.user_wardrobe_items = { data: [{ wardrobe_items: { id: 'item', source: 'user_upload', status: 'confirmed', media_asset_id: 'asset' } }], error: null }
     privateMediaMocks.signedOwnedPrivatePreviewUrl.mockRejectedValue(new Error('Access denied'))
     await expect(getUserWardrobeItems()).rejects.toThrow('Access denied')
+  })
+
+  it('treats user_wardrobe_items as the ownership authority regardless of item provenance', async () => {
+    mockAuthenticatedUser()
+    tableResponses.user_wardrobe_items = { data: [
+      { wardrobe_items: { id: 'owned', source: 'user_upload', status: 'confirmed' } },
+      { wardrobe_items: [{ id: 'array-owned', source: 'user_upload', status: 'confirmed' }] },
+      { wardrobe_items: { id: 'catalog-owned', source: 'curated', status: 'confirmed' } },
+      { wardrobe_items: { id: 'draft', source: 'user_upload', status: 'draft' } },
+      { wardrobe_items: { id: 'rejected', source: 'user_upload', status: 'rejected' } },
+      { wardrobe_items: { id: 'unknown-provenance', status: 'confirmed' } },
+      { wardrobe_items: null },
+    ], error: null }
+    expect((await getUserWardrobeItems()).map((item) => item.id)).toEqual([
+      'owned',
+      'array-owned',
+      'catalog-owned',
+      'unknown-provenance',
+    ])
+    expect(privateMediaMocks.signedOwnedPrivatePreviewUrl).not.toHaveBeenCalled()
   })
 })
 
@@ -316,16 +336,17 @@ describe('searchPieces', () => {
 })
 
 // ---------------------------------------------------------------------------
-// saveWardrobeSelection - five-category round trip
+// saveWardrobeSelection - six-category round trip
 // ---------------------------------------------------------------------------
 
 describe('saveWardrobeSelection', () => {
-  it('upserts every selected item across all five wardrobe categories', async () => {
+  it('upserts every selected item across all six wardrobe categories', async () => {
     mockAuthenticatedUser()
 
     const selectedIdsByCategory = {
       top: ['top-1', 'top-2'],
       bottom: ['bottom-1', 'bottom-2'],
+      one_piece: ['dress-1', 'jumpsuit-1'],
       footwear: ['footwear-1', 'footwear-2'],
       outerwear: ['outerwear-1'],
       accessory: ['accessory-1'],
@@ -335,7 +356,7 @@ describe('saveWardrobeSelection', () => {
     const result = await saveWardrobeSelection(selectedIds)
     expect(result).toEqual({ success: true })
 
-    const [payload] = upsertCalls['user_wardrobe_items'] as Array<
+    const [payload] = upsertCalls['user_style_seed_items'] as Array<
       Array<{ user_id: string; item_id: string }>
     >
     const mockedFetchRows = payload.map((row) => ({ item_id: row.item_id }))
