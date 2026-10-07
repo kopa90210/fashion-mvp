@@ -27,6 +27,23 @@ export type CalibrationOutfit = Outfit & {
   reasons: string[]
 }
 
+export type CalibrationState = {
+  outfit: CalibrationOutfit | null
+  answeredCount: number
+  target: number
+  completed: boolean
+}
+
+export type CalibrationFeedbackResult = {
+  vector: StyleVector
+  changedTags: string[]
+  answeredCount: number
+  completed: boolean
+  nextOutfit?: CalibrationOutfit
+}
+
+const CALIBRATION_TARGET = 3
+
 const STYLE_LABELS: Record<string, string> = {
   minimal: 'clean, simple pieces',
   streetwear: 'relaxed streetwear',
@@ -149,16 +166,64 @@ async function persistCalibrationOutfit(
   supabase: SupabaseClient,
   outfit: Outfit,
   reasons: string[],
+  step: number,
 ) {
   const { data, error } = await supabase.rpc('create_calibration_outfit_with_items', {
     p_item_ids: outfit.items.map((item) => item.id),
     p_reasoning: reasons,
-    p_context_snapshot: { relationship: 'style_seed' },
+    p_context_snapshot: { relationship: 'style_seed', calibration_step: step },
   })
   if (error || !data) throw new Error(`Failed to save calibration outfit: ${error?.message ?? 'unknown error'}`)
   return data as string
 }
 
+function resolveStoredCalibrationOutfit(
+  stored: StoredDailyOutfitRow,
+  items: WardrobeItem[],
+  dna: StyleVector,
+): CalibrationOutfit | null {
+  return resolveStoredDailyOutfit(stored, items, dna)
+}
+
+async function getStoredCalibrationStep(
+  supabase: SupabaseClient,
+  userId: string,
+  step: number,
+  items: WardrobeItem[],
+  dna: StyleVector,
+): Promise<CalibrationOutfit | null> {
+  const { data } = await supabase
+    .from('outfits')
+    .select('id, item_ids, reasoning, outfit_items(wardrobe_item_id, position)')
+    .eq('user_id', userId)
+    .eq('source', 'calibration')
+    .eq('context_snapshot->>calibration_step', String(step))
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .single()
+
+  if (!data) return null
+  return resolveStoredCalibrationOutfit(data as StoredDailyOutfitRow, items, dna)
+}
+
+async function getStoredCalibrationOutfitById(
+  supabase: SupabaseClient,
+  userId: string,
+  outfitId: string,
+  items: WardrobeItem[],
+  dna: StyleVector,
+): Promise<CalibrationOutfit | null> {
+  const { data } = await supabase
+    .from('outfits')
+    .select('id, item_ids, reasoning, outfit_items(wardrobe_item_id, position)')
+    .eq('id', outfitId)
+    .eq('user_id', userId)
+    .eq('source', 'calibration')
+    .single()
+
+  if (!data) return null
+  return resolveStoredCalibrationOutfit(data as StoredDailyOutfitRow, items, dna)
+}
 
 function pickDiverseCalibrationCandidate(
   candidates: Outfit[],
@@ -215,6 +280,56 @@ async function getShownOutfitKeys(
  * Single source of truth for fetching this user's wardrobe in the shape the
  * recommendation engine expects.
  */
+async function getCalibrationAnsweredCount(
+  supabase: SupabaseClient,
+  userId: string,
+): Promise<number> {
+  const { data, error } = await supabase
+    .from('preference_events')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('event_type', 'outfit_feedback')
+    .eq('payload->>source', 'calibration')
+
+  if (error) {
+    throw new Error(`Could not read calibration progress: ${error.message}`)
+  }
+
+  return Array.isArray(data) ? data.length : 0
+}
+
+async function ensureCalibrationOutfitForStep(
+  supabase: SupabaseClient,
+  userId: string,
+  dna: StyleVector,
+  items: WardrobeItem[],
+  step: number,
+  currentItemIds: string[] = [],
+): Promise<CalibrationOutfit | null> {
+  const existing = await getStoredCalibrationStep(supabase, userId, step, items, dna)
+  if (existing) return existing
+
+  const excludeKeys = await getShownOutfitKeys(supabase, userId)
+  const candidates = recommendOutfits(items, dna, { topN: 8 })
+  const picked = pickDiverseCalibrationCandidate(candidates, excludeKeys, currentItemIds)
+  if (!picked) return null
+
+  const reasons = buildReasons(picked, dna)
+  const savedOutfitId = await persistCalibrationOutfit(supabase, picked, reasons, step)
+
+  // The RPC is concurrency-safe and may return an outfit created by another
+  // request for the same step. Re-read by id so the client receives the
+  // persisted outfit, not a losing request's candidate.
+  return (
+    await getStoredCalibrationOutfitById(supabase, userId, savedOutfitId, items, dna)
+  ) ?? {
+    ...picked,
+    id: savedOutfitId,
+    vector: dna,
+    reasons,
+  }
+}
+
 async function fetchRelationshipItems(
   supabase: SupabaseClient,
   userId: string,
@@ -343,11 +458,6 @@ async function getUserDnaAndStyleSeedsInternal(
   }
 }
 
-async function getUserDnaAndStyleSeeds() {
-  const { supabase, userId } = await getAuthedUserId()
-  return getUserDnaAndStyleSeedsInternal(supabase, userId)
-}
-
 /**
  * Fetch the calling user's wardrobe items + fashion DNA, run the
  * recommendation engine, and return the top N outfits.
@@ -372,12 +482,17 @@ export async function shouldShowOutfitCalibration(): Promise<boolean> {
     return false
   }
 
+  const answeredCount = await getCalibrationAnsweredCount(supabase, userId)
+  if (answeredCount >= CALIBRATION_TARGET) {
+    return false
+  }
+
   const { dna, items } = await getUserDnaAndStyleSeedsInternal(supabase, userId)
   return recommendOutfits(items, dna, { topN: 3 }).length >= 1
 }
 
-export async function getCalibrationOutfits(): Promise<CalibrationOutfit[]> {
-  const { supabase, userId, dna, items } = await getUserDnaAndStyleSeeds()
+export async function getCalibrationState(): Promise<CalibrationState> {
+  const { supabase, userId } = await getAuthedUserId()
 
   const { data: userRow, error: userError } = await supabase
     .from('users')
@@ -385,29 +500,47 @@ export async function getCalibrationOutfits(): Promise<CalibrationOutfit[]> {
     .eq('id', userId)
     .single()
 
-  if (userError || userRow?.has_completed_calibration) {
-    return []
+  if (userError) {
+    throw new Error('Could not read calibration status')
   }
 
-  const candidates = recommendOutfits(items, dna, { topN: 6 })
-  if (candidates.length === 0) {
-    return []
+  const answeredCount = await getCalibrationAnsweredCount(supabase, userId)
+  const completed = Boolean(userRow?.has_completed_calibration) || answeredCount >= CALIBRATION_TARGET
+
+  if (completed) {
+    return {
+      outfit: null,
+      answeredCount: Math.min(answeredCount, CALIBRATION_TARGET),
+      target: CALIBRATION_TARGET,
+      completed: true,
+    }
   }
 
-  const savedOutfits: CalibrationOutfit[] = []
+  const { dna, items } = await getUserDnaAndStyleSeedsInternal(supabase, userId)
+  const step = answeredCount + 1
+  const outfit = await ensureCalibrationOutfitForStep(
+    supabase,
+    userId,
+    dna,
+    items,
+    step,
+  )
 
-  for (const candidate of candidates.slice(0, 3)) {
-    const savedOutfitId = await persistCalibrationOutfit(supabase, candidate, buildReasons(candidate, dna))
-
-    savedOutfits.push({
-      ...candidate,
-      id: savedOutfitId,
-      vector: dna,
-      reasons: buildReasons(candidate, dna),
-    })
+  return {
+    outfit,
+    answeredCount,
+    target: CALIBRATION_TARGET,
+    completed: false,
   }
+}
 
-  return savedOutfits
+/**
+ * Backward-compatible wrapper for callers that still expect an array.
+ * C6 persists/returns at most the single current calibration step.
+ */
+export async function getCalibrationOutfits(): Promise<CalibrationOutfit[]> {
+  const state = await getCalibrationState()
+  return state.outfit ? [state.outfit] : []
 }
 
 export async function getDailyOutfit(): Promise<DailyOutfit | null> {
@@ -472,17 +605,85 @@ export async function submitOutfitFeedback(
   liked: boolean,
   idempotencyKey: string,
 ): Promise<{ vector: StyleVector; changedTags: string[] }> {
-  const result = await applyOutfitFeedback(outfitId, liked, 'daily', false, idempotencyKey)
-  return { vector: result.vector, changedTags: result.changedTags }
+  return applyDailyOutfitFeedback(outfitId, liked, idempotencyKey)
 }
 
 export async function submitCalibrationFeedback(
   outfitId: string,
   liked: boolean,
-  isFinalOutfit: boolean,
   idempotencyKey: string,
-): Promise<{ vector: StyleVector; changedTags: string[]; nextOutfit?: CalibrationOutfit }> {
-  return applyOutfitFeedback(outfitId, liked, 'calibration', isFinalOutfit, idempotencyKey)
+): Promise<CalibrationFeedbackResult> {
+  const { supabase, userId } = await getAuthedUserId()
+  if (!idempotencyKey || idempotencyKey.length > 200) throw new Error('Invalid idempotency key')
+
+  const { data, error } = await supabase.rpc('submit_calibration_feedback', {
+    p_outfit_id: outfitId,
+    p_liked: liked,
+    p_idempotency_key: idempotencyKey,
+  })
+  const result = Array.isArray(data) ? data[0] : data
+
+  if (
+    error ||
+    !result ||
+    !Array.isArray(result.changed_tags) ||
+    !result.vector ||
+    typeof result.answered_count !== 'number' ||
+    typeof result.completed !== 'boolean'
+  ) {
+    throw new Error(`Failed to save calibration feedback: ${error?.message ?? 'Invalid result'}`)
+  }
+
+  const nextVector = result.vector as StyleVector
+  const changedTags = result.changed_tags as string[]
+  const answeredCount = result.answered_count as number
+  const completed = result.completed as boolean
+
+  if (answeredCount < 1 || answeredCount > CALIBRATION_TARGET) {
+    throw new Error('Failed to save calibration feedback: Invalid progress')
+  }
+
+  if (completed) {
+    return { vector: nextVector, changedTags, answeredCount, completed: true }
+  }
+
+  const { data: outfitRow, error: outfitError } = await supabase
+    .from('outfits')
+    .select('item_ids, outfit_items(wardrobe_item_id)')
+    .eq('id', outfitId)
+    .eq('user_id', userId)
+    .eq('source', 'calibration')
+    .single()
+
+  const relationalItemIds = Array.isArray(outfitRow?.outfit_items)
+    ? outfitRow.outfit_items.map((item: { wardrobe_item_id: string }) => item.wardrobe_item_id)
+    : null
+  const itemIds = relationalItemIds?.length
+    ? relationalItemIds
+    : outfitRow?.item_ids as string[] | null
+
+  if (outfitError || !outfitRow || !Array.isArray(itemIds)) {
+    throw new Error('Outfit not found')
+  }
+
+  const wardrobeItems = await fetchStyleSeedItems(supabase, userId)
+  const nextStep = answeredCount + 1
+  const nextOutfit = await ensureCalibrationOutfitForStep(
+    supabase,
+    userId,
+    nextVector,
+    wardrobeItems,
+    nextStep,
+    itemIds,
+  )
+
+  return {
+    vector: nextVector,
+    changedTags,
+    answeredCount,
+    completed: false,
+    ...(nextOutfit ? { nextOutfit } : {}),
+  }
 }
 
 export async function skipOutfitCalibration(): Promise<{ success: boolean }> {
@@ -500,75 +701,28 @@ export async function skipOutfitCalibration(): Promise<{ success: boolean }> {
   return { success: true }
 }
 
-async function applyOutfitFeedback(
+async function applyDailyOutfitFeedback(
   outfitId: string,
   liked: boolean,
-  source: 'daily' | 'calibration',
-  completeCalibration: boolean,
   idempotencyKey: string,
-): Promise<{ vector: StyleVector; changedTags: string[]; nextOutfit?: CalibrationOutfit }> {
-  const { supabase, userId } = await getAuthedUserId()
+): Promise<{ vector: StyleVector; changedTags: string[] }> {
+  const { supabase } = await getAuthedUserId()
   if (!idempotencyKey || idempotencyKey.length > 200) throw new Error('Invalid idempotency key')
+
   const { data, error } = await supabase.rpc('submit_outfit_feedback', {
     p_outfit_id: outfitId,
     p_liked: liked,
-    p_feedback_source: source,
+    p_feedback_source: 'daily',
     p_idempotency_key: idempotencyKey,
   })
   const result = Array.isArray(data) ? data[0] : data
+
   if (error || !result || !Array.isArray(result.changed_tags) || !result.vector) {
     throw new Error(`Failed to save feedback: ${error?.message ?? 'Invalid result'}`)
   }
-  const nextVector = result.vector as StyleVector
-  const changedTags = result.changed_tags as string[]
 
-  if (source === 'daily') return { vector: nextVector, changedTags }
-
-  const { data: outfitRow, error: outfitError } = await supabase
-    .from('outfits')
-    .select('item_ids, outfit_items(wardrobe_item_id)')
-    .eq('id', outfitId)
-    .single()
-
-  const relationalItemIds = Array.isArray(outfitRow?.outfit_items)
-    ? outfitRow.outfit_items.map((item: { wardrobe_item_id: string }) => item.wardrobe_item_id)
-    : null
-  const itemIds = relationalItemIds?.length ? relationalItemIds : outfitRow?.item_ids as string[] | null
-  if (outfitError || !outfitRow || !Array.isArray(itemIds)) {
-    throw new Error('Outfit not found')
+  return {
+    vector: result.vector as StyleVector,
+    changedTags: result.changed_tags as string[],
   }
-
-  let nextOutfit: CalibrationOutfit | undefined
-
-  if (source === 'calibration' && !completeCalibration) {
-    const excludeKeys = await getShownOutfitKeys(supabase, userId)
-    const wardrobeItems = await fetchStyleSeedItems(supabase, userId)
-    const candidates = recommendOutfits(wardrobeItems, nextVector, { topN: 8 })
-    const picked = pickDiverseCalibrationCandidate(candidates, excludeKeys, itemIds)
-
-    if (picked) {
-      const savedOutfitId = await persistCalibrationOutfit(supabase, picked, buildReasons(picked, nextVector))
-      if (savedOutfitId) {
-        nextOutfit = {
-          ...picked,
-          id: savedOutfitId,
-          vector: nextVector,
-          reasons: buildReasons(picked, nextVector),
-        }
-      }
-    }
-  }
-
-  if (completeCalibration) {
-    const { error: userUpdateError } = await supabase
-      .from('users')
-      .update({ has_completed_calibration: true })
-      .eq('id', userId)
-
-    if (userUpdateError) {
-      throw new Error(`Failed to complete calibration: ${userUpdateError.message}`)
-    }
-  }
-
-  return { vector: nextVector, changedTags, nextOutfit }
 }

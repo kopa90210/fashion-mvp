@@ -1,18 +1,11 @@
 'use client'
 
-import { useMemo, useRef, useState, useTransition } from 'react'
+import { useMemo, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { AnimatePresence, motion } from 'framer-motion'
 import { Heart, ThumbsDown } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card'
 import {
   submitCalibrationFeedback,
   skipOutfitCalibration,
@@ -20,37 +13,33 @@ import {
 } from '@/src/app/actions/outfit'
 import { getChangedTags, getOptimisticVector } from '@/src/lib/outfit/feedback-helpers'
 import { vectorToSignals } from '@/src/lib/fashion-dna/labels'
-import type { DnaSignal } from '@/src/lib/fashion-dna/types'
-import WhyThisExplainer from '@/src/components/outfit/WhyThisExplainer'
 import FashionDnaPanel from '@/src/components/fashion-dna/FashionDnaPanel'
-import FlatLay from '@/src/components/outfit/FlatLay'
+import OutfitCanvas from '@/src/components/outfit/OutfitCanvas'
 
 export default function OutfitCalibrationScreen({
-  outfits,
+  outfit: initialOutfit,
+  answeredCount: initialAnsweredCount,
   feedbackCount,
 }: {
-  outfits: CalibrationOutfit[]
-  initialSignals: DnaSignal[]
+  outfit: CalibrationOutfit
+  answeredCount: number
   feedbackCount: number
 }) {
   const router = useRouter()
-  const [outfitIndex, setOutfitIndex] = useState(0)
   const [visible, setVisible] = useState(true)
   const [lastFeedback, setLastFeedback] = useState<boolean | null>(null)
-  const [currentOutfit, setCurrentOutfit] = useState(outfits[0])
-  const [vector, setVector] = useState(outfits[0].vector)
+  const [currentOutfit, setCurrentOutfit] = useState(initialOutfit)
+  const [answeredCount, setAnsweredCount] = useState(initialAnsweredCount)
+  const [vector, setVector] = useState(initialOutfit.vector)
   const [isFinishing, setIsFinishing] = useState(false)
   const [isSkipping, setIsSkipping] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [swipeCount, setSwipeCount] = useState(feedbackCount)
   const [, startTransition] = useTransition()
-  const feedbackQueue = useRef<Promise<unknown>>(Promise.resolve())
 
   const outfit = currentOutfit
-  const totalOutfits = outfits.length
-  const progressLabel = `${Math.min(outfitIndex + 1, totalOutfits)} of ${totalOutfits}`
+  const progressLabel = `${Math.min(answeredCount + 1, 3)} of 3`
 
-  // Derive signals from the (potentially optimistically updated) vector
   const signals = useMemo(() => vectorToSignals(vector), [vector])
 
   function handleSkip() {
@@ -72,10 +61,9 @@ export default function OutfitCalibrationScreen({
 
   function handleFeedback(liked: boolean) {
     if (!visible || isFinishing) return
-    const priorVector = vector
 
     const activeOutfit = outfit
-    const isFinalOutfit = outfitIndex >= totalOutfits - 1
+    const priorVector = vector
     const changedTags = getChangedTags(activeOutfit)
     const idempotencyKey = `outfit-feedback:${activeOutfit.id}`
 
@@ -83,68 +71,54 @@ export default function OutfitCalibrationScreen({
     setErrorMessage(null)
     setVisible(false)
     setVector((current) => getOptimisticVector(current, changedTags, liked))
-    setSwipeCount((c) => c + 1)
+    setSwipeCount((count) => count + 1)
 
-    const feedbackPromise = feedbackQueue.current.then(() =>
-      submitCalibrationFeedback(
-        activeOutfit.id,
-        liked,
-        isFinalOutfit,
-        idempotencyKey,
-      ),
-    )
+    startTransition(async () => {
+      try {
+        const result = await submitCalibrationFeedback(
+          activeOutfit.id,
+          liked,
+          idempotencyKey,
+        )
 
-    feedbackQueue.current = feedbackPromise.catch(() => undefined)
-
-    window.setTimeout(() => {
-      if (!isFinalOutfit) {
-        startTransition(async () => {
-          try {
-            const result = await feedbackPromise
-            const nextIndex = outfitIndex + 1
-            const nextOutfit = result.nextOutfit ?? outfits[nextIndex]
-
-            if (nextOutfit) {
-              setCurrentOutfit(nextOutfit)
-              setOutfitIndex(nextIndex)
-            } else {
-              setIsFinishing(true)
-              setVisible(false)
-            }
-
-            setVector(result.vector)
-          } catch (error) {
-            setVector(priorVector)
-            setSwipeCount((c) => c - 1)
-            setErrorMessage(error instanceof Error ? error.message : 'Calibration could not be saved. Try again.')
-          } finally {
-            setLastFeedback(null)
-            setVisible(true)
-          }
+        await new Promise<void>((resolve) => {
+          window.setTimeout(resolve, 300)
         })
-        return
-      }
 
-      setIsFinishing(true)
-      startTransition(async () => {
-        try {
-          const result = await feedbackPromise
-          setVector(result.vector)
+        setVector(result.vector)
+        setAnsweredCount(result.answeredCount)
+
+        if (result.completed) {
+          setIsFinishing(true)
           router.replace('/outfits')
           router.refresh()
-        } catch (error) {
-          setIsFinishing(false)
-          setVisible(true)
-          setVector(priorVector)
-          setSwipeCount((c) => c - 1)
-          setErrorMessage(
-            error instanceof Error
-              ? error.message
-              : 'Calibration could not be saved. Try that last response again.',
-          )
+          return
         }
-      })
-    }, 300)
+
+        if (!result.nextOutfit) {
+          setErrorMessage(
+            'We could not build the next calibration look from your current style choices.',
+          )
+          setLastFeedback(null)
+          setVisible(true)
+          return
+        }
+
+        setCurrentOutfit(result.nextOutfit)
+        setLastFeedback(null)
+        setVisible(true)
+      } catch (error) {
+        setVector(priorVector)
+        setSwipeCount((count) => count - 1)
+        setLastFeedback(null)
+        setVisible(true)
+        setErrorMessage(
+          error instanceof Error
+            ? error.message
+            : 'Calibration could not be saved. Try again.',
+        )
+      }
+    })
   }
 
   return (
@@ -184,41 +158,33 @@ export default function OutfitCalibrationScreen({
                 exit={{ opacity: 0, x: lastFeedback ? 52 : -52, scale: 0.98 }}
                 transition={{ duration: 0.3, ease: 'easeOut' }}
               >
-                <Card className="rounded-lg border-[#d8cec2] bg-white/70 shadow-sm">
-                  <CardHeader className="gap-2">
-                    <CardTitle className="text-xl">Would you wear this?</CardTitle>
-                    <CardDescription>
-                      React to the generated outfits before your first daily recommendation.
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-5">
-                    <FlatLay items={outfit.items} />
-
-                    <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[#e4dbd0] pt-4">
-                      <WhyThisExplainer reasons={outfit.reasons} />
-
-                      <div className="flex items-center gap-2">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="icon-lg"
-                          aria-label="Dislike this calibration outfit"
-                          onClick={() => handleFeedback(false)}
-                        >
-                          <ThumbsDown className="size-4" />
-                        </Button>
-                        <Button
-                          type="button"
-                          size="icon-lg"
-                          aria-label="Like this calibration outfit"
-                          onClick={() => handleFeedback(true)}
-                        >
-                          <Heart className="size-4" />
-                        </Button>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
+                <OutfitCanvas
+                  items={outfit.items}
+                  identity="Would you wear this?"
+                  description="React to this look before your first daily recommendation."
+                  reasons={outfit.reasons}
+                  variant="framed"
+                >
+                  <div className="mt-5 flex justify-end gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon-lg"
+                      aria-label="Dislike this calibration outfit"
+                      onClick={() => handleFeedback(false)}
+                    >
+                      <ThumbsDown className="size-4" />
+                    </Button>
+                    <Button
+                      type="button"
+                      size="icon-lg"
+                      aria-label="Like this calibration outfit"
+                      onClick={() => handleFeedback(true)}
+                    >
+                      <Heart className="size-4" />
+                    </Button>
+                  </div>
+                </OutfitCanvas>
               </motion.div>
             ) : (
               <motion.div

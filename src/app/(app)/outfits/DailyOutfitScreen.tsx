@@ -10,9 +10,8 @@ import { recordOutfitNotToday, recordOutfitWorn } from '@/src/app/actions/outfit
 import { getChangedTags, getOptimisticVector } from '@/src/lib/outfit/feedback-helpers'
 import { vectorToSignals } from '@/src/lib/fashion-dna/labels'
 import type { DnaSignal } from '@/src/lib/fashion-dna/types'
-import WhyThisExplainer from '@/src/components/outfit/WhyThisExplainer'
 import FashionDnaPanel from '@/src/components/fashion-dna/FashionDnaPanel'
-import FlatLay from '@/src/components/outfit/FlatLay'
+import OutfitCanvas from '@/src/components/outfit/OutfitCanvas'
 import SwapOutfitFlow from './SwapOutfitFlow'
 
 export default function DailyOutfitScreen({
@@ -42,7 +41,7 @@ export default function DailyOutfitScreen({
   const changedTags = useMemo(() => getChangedTags(currentOutfit), [currentOutfit])
   const owned = new Set([...ownedItemIds, ...swapOwnedIds])
   const personal = currentOutfit.items.length > 0 && currentOutfit.items.every((item) => owned.has(item.id))
-  const identity = currentOutfit.items.filter((item) => ['base_layer', 'bottom', 'footwear'].includes(item.layer_role)).map((item) => item.display_name.trim()).filter(Boolean).slice(0, 3).join(' · ')
+  const identity = currentOutfit.items.filter((item) => ['base_layer', 'bottom', 'one_piece', 'footwear'].includes(item.layer_role)).map((item) => item.display_name.trim()).filter(Boolean).slice(0, 3).join(' · ')
   const currentInteraction = completedInteraction?.outfitId === currentOutfit.id ? completedInteraction.event : null
   const interactionIsPending = pendingInteraction?.outfitId === currentOutfit.id
 
@@ -129,9 +128,14 @@ export default function DailyOutfitScreen({
         <AnimatePresence mode="wait">
           {viewState === 'outfit' ? (
             <motion.section key={currentOutfit.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }} transition={{ duration: 0.25, ease: 'easeOut' }}>
-              <div className="mx-auto max-w-xl"><FlatLay items={currentOutfit.items} editorial /></div>
-              <div className="mx-auto mt-7 max-w-xl">
-                <h2 className="text-xl font-medium sm:text-2xl">{identity || 'A look for you'}</h2>
+              <div className="mx-auto max-w-xl">
+                <OutfitCanvas
+                  items={currentOutfit.items}
+                  identity={identity || 'A look for you'}
+                  reasons={currentOutfit.reasons}
+                  variant="editorial"
+                  reasonsDefaultOpen
+                >
                 {personal && (
                   <section aria-label="Today's outfit decision" className="mt-7">
                     <Button type="button" onClick={() => handleInteraction('worn')} disabled={interactionIsPending || currentInteraction !== null} className="h-13 w-full rounded-full bg-[#1d1b18] text-[#fffdfa]">
@@ -147,7 +151,7 @@ export default function DailyOutfitScreen({
                     {interactionError?.outfitId === currentOutfit.id && <p role="alert" className="mt-3 text-center text-sm text-red-700">{interactionError.message}</p>}
                   </section>
                 )}
-                <div className="mt-7"><WhyThisExplainer reasons={currentOutfit.reasons} defaultOpen /></div>
+                </OutfitCanvas>
                 <section aria-label="Style preference feedback" className="mt-7 border-t border-[#d8cec2] pt-5">
                   <p className="mb-4 text-sm text-[#6d6257]">Do you like this style?</p>
                   <div className="flex gap-3">

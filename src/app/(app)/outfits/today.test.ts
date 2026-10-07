@@ -82,6 +82,42 @@ describe('Today presentation', () => {
     expect(html).toContain('Swap something')
     for (const text of ['weather', 'calendar', '1 per day']) expect(html).not.toContain(text)
   })
+  it('includes one-piece clothing in the human-facing outfit identity', () => {
+    const dressOutfit: DailyOutfit = {
+      id: 'dress-outfit',
+      score: 0.9,
+      vector: { minimal: 0.7 },
+      reasons: ['because you liked clean pieces'],
+      items: [
+        {
+          id: 'dress',
+          display_name: 'Midi dress',
+          image_url: '/dress.png',
+          layer_role: 'one_piece',
+          style_tags: { minimal: 0.8 },
+        },
+        {
+          id: 'heels',
+          display_name: 'Heels',
+          image_url: '/heels.png',
+          layer_role: 'footwear',
+          style_tags: { formal: 0.6 },
+        },
+      ],
+    }
+
+    const html = renderToStaticMarkup(
+      React.createElement(DailyOutfitScreen, {
+        outfit: dressOutfit,
+        initialSignals: [],
+        feedbackCount: 0,
+        ownedItemIds: dressOutfit.items.map((item) => item.id),
+      }),
+    )
+
+    expect(html).toContain('Midi dress · Heels')
+  })
+
   it('never claims curated or mixed looks are confirmed owned clothing', () => {
     const html = render(['shirt'])
     expect(html).toContain('Style inspiration')
