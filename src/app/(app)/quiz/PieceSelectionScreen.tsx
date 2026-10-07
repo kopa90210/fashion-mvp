@@ -14,6 +14,7 @@ import {
   saveWardrobeSelection,
 } from '@/src/app/actions/wardrobe'
 import { isCalibrationSelectionEligible, SELECTION_STEPS } from './selection-steps'
+import { STYLE_SELECTION_COPY } from './selection-copy'
 
 export default function PieceSelectionScreen() {
   const router = useRouter()
@@ -188,7 +189,7 @@ export default function PieceSelectionScreen() {
 
   const handleSubmit = async () => {
     if (!isGloballyEligible) {
-      setSubmitError('Choose either 2 tops + 2 bottoms, or at least 2 dresses/one-piece looks, plus 2 footwear options.')
+      setSubmitError(STYLE_SELECTION_COPY.eligibilityError)
       return
     }
     setSubmitError(null)
@@ -202,10 +203,10 @@ export default function PieceSelectionScreen() {
     try {
       await saveWardrobeSelection(allSelectedIds)
       setTimeout(() => {
-        router.push('/outfits')
+        router.push('/outfits/calibration')
       }, 2200)
     } catch (err) {
-      console.error('Failed to submit wardrobe selection:', err)
+      console.error('Failed to submit style selection:', err)
       setIsSubmitting(false)
       setSubmitError('We could not save your selections. Please try again.')
     }
@@ -226,7 +227,7 @@ export default function PieceSelectionScreen() {
       return true
     })
   }, [rawDisplayItems, currentSelectedIds])
-  // Submission screen ("Building your wardrobe...")
+  // Submission screen: curated picks become style signals, not ownership.
   if (isSubmitting) {
     return (
       <div className="flex min-h-screen w-full flex-col items-center justify-center bg-[#070708] px-6 text-white overflow-hidden">
@@ -237,10 +238,10 @@ export default function PieceSelectionScreen() {
         >
           <Sparkles className="h-10 w-10 mx-auto text-amber-300 animate-pulse" />
           <h1 className="text-3xl font-bold tracking-tight">
-            Building your wardrobe...
+            {STYLE_SELECTION_COPY.submitTitle}
           </h1>
           <p className="text-sm text-white/50">
-            Fusing your chosen pieces with your Style DNA to generate your first look.
+            {STYLE_SELECTION_COPY.submitBody}
           </p>
         </motion.div>
       </div>
@@ -302,10 +303,13 @@ export default function PieceSelectionScreen() {
               </h1>
               <p className="text-xs text-white/50 mt-1">
                 {isFinalStep && !isGloballyEligible
-                  ? 'Choose either tops + bottoms, or at least 2 dresses/one-piece looks, plus footwear.'
+                  ? STYLE_SELECTION_COPY.finalEligibilityHint
                   : currentStep.required
                   ? `Select at least ${currentStep.minSelections} items to advance.`
-                  : 'Optional - select any pieces you own or skip.'}
+                  : STYLE_SELECTION_COPY.optionalHint}
+              </p>
+              <p className="mt-2 max-w-xl text-xs leading-5 text-white/40">
+                {STYLE_SELECTION_COPY.referenceNote}
               </p>
             </div>
 
@@ -557,7 +561,7 @@ export default function PieceSelectionScreen() {
               }`}
             >
               {currentStepIndex === SELECTION_STEPS.length - 1 ? (
-                'Build my wardrobe'
+                STYLE_SELECTION_COPY.finalCta
               ) : (
                 <>
                   Next

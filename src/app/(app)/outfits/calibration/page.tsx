@@ -17,16 +17,16 @@ export default async function OutfitCalibrationPage() {
       <main className="min-h-screen bg-[#f7f4ef] px-4 py-10 text-[#1d1b18] sm:px-6">
         <div className="mx-auto flex min-h-[70vh] max-w-xl flex-col items-center justify-center text-center">
           <p className="text-sm font-medium uppercase tracking-[0.18em] text-[#7a6f62]">
-            Outfit calibration
+            Style check
           </p>
           <h1 className="mt-3 text-3xl font-semibold tracking-tight">
-            Choose a few more style pieces.
+            Choose a few more pieces you'd wear.
           </h1>
           <p className="mt-3 text-sm leading-6 text-[#6d6257]">
-            We need enough selected tops and bottoms, or one-piece looks, plus footwear to build your calibration outfits.
+            We need enough style references to build a valid look. These picks guide your taste profile; they are not added to your wardrobe.
           </p>
           <Link href="/quiz?done=true" className={buttonVariants({ className: 'mt-6' })}>
-            Choose style pieces
+            Choose more style pieces
           </Link>
         </div>
       </main>

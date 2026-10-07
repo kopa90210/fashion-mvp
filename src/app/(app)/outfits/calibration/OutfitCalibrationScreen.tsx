@@ -38,7 +38,7 @@ export default function OutfitCalibrationScreen({
   const [, startTransition] = useTransition()
 
   const outfit = currentOutfit
-  const progressLabel = `${Math.min(answeredCount + 1, 3)} of 3`
+  const progressLabel = `Look ${Math.min(answeredCount + 1, 3)} of 3`
 
   const signals = useMemo(() => vectorToSignals(vector), [vector])
 
@@ -97,7 +97,7 @@ export default function OutfitCalibrationScreen({
 
         if (!result.nextOutfit) {
           setErrorMessage(
-            'We could not build the next calibration look from your current style choices.',
+            'We could not build the next style-check look from your current choices.',
           )
           setLastFeedback(null)
           setVisible(true)
@@ -128,10 +128,10 @@ export default function OutfitCalibrationScreen({
           <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
             <div>
               <p className="text-sm font-medium uppercase tracking-[0.18em] text-[#7a6f62]">
-                Outfit calibration
+                Style check
               </p>
               <h1 className="mt-1 text-3xl font-semibold tracking-tight sm:text-4xl">
-                Tune your first looks
+                What feels like you?
               </h1>
             </div>
             <div className="flex items-center gap-3">
@@ -161,27 +161,29 @@ export default function OutfitCalibrationScreen({
                 <OutfitCanvas
                   items={outfit.items}
                   identity="Would you wear this?"
-                  description="React to this look before your first daily recommendation."
+                  description="Three quick looks. Your answer teaches StyleGraph what to recommend next."
                   reasons={outfit.reasons}
                   variant="framed"
                 >
-                  <div className="mt-5 flex justify-end gap-2">
+                  <div className="mt-5 grid grid-cols-2 gap-3">
                     <Button
                       type="button"
                       variant="outline"
-                      size="icon-lg"
-                      aria-label="Dislike this calibration outfit"
+                      aria-label="Not my style"
                       onClick={() => handleFeedback(false)}
+                      className="h-12 rounded-full border-[#d8cec2] bg-[#fffdfa]"
                     >
-                      <ThumbsDown className="size-4" />
+                      <ThumbsDown aria-hidden="true" className="size-4" />
+                      Not my style
                     </Button>
                     <Button
                       type="button"
-                      size="icon-lg"
-                      aria-label="Like this calibration outfit"
+                      aria-label="Love this"
                       onClick={() => handleFeedback(true)}
+                      className="h-12 rounded-full bg-[#1d1b18] text-[#fffdfa]"
                     >
-                      <Heart className="size-4" />
+                      <Heart aria-hidden="true" className="size-4" />
+                      Love this
                     </Button>
                   </div>
                 </OutfitCanvas>
@@ -196,13 +198,13 @@ export default function OutfitCalibrationScreen({
               >
                 <div className="max-w-md">
                   <p className="text-sm font-medium uppercase tracking-[0.18em] text-[#7a6f62]">
-                    Calibrating
+                    Style check complete
                   </p>
                   <h2 className="mt-3 text-2xl font-semibold tracking-tight">
-                    Preparing your first daily outfit.
+                    Your taste profile is ready.
                   </h2>
                   <p className="mt-3 text-sm leading-6 text-[#6d6257]">
-                    Your three reactions are being folded into Fashion DNA now.
+                    Your reactions are saved. Preparing Today from what StyleGraph has learned.
                   </p>
                   {errorMessage && (
                     <p className="mt-5 text-sm font-medium text-red-700">{errorMessage}</p>
