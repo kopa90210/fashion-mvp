@@ -1,4 +1,4 @@
-import type { WardrobeItem } from './engine'
+import { isValidOutfitStructure, type WardrobeItem } from './engine'
 import type { StyleVector } from '@/src/lib/quiz/scoring'
 
 export type GeneratedDailyOutfit = {
@@ -30,7 +30,7 @@ export async function generateDailyOutfit(
     if (!value || typeof value !== 'object') throw new Error('Invalid response')
     const result = value as Record<string, unknown>
     const ids = result.item_ids
-    if (!Array.isArray(ids) || ids.length < 3 || !ids.every((id) => typeof id === 'string')
+    if (!Array.isArray(ids) || ids.length < 2 || !ids.every((id) => typeof id === 'string')
       || new Set(ids).size !== ids.length
       || !Array.isArray(result.reasoning) || !result.reasoning.every((reason) => typeof reason === 'string')
       || (result.styling_tip != null && typeof result.styling_tip !== 'string')
@@ -42,10 +42,7 @@ export async function generateDailyOutfit(
     const pool = new Map(items.map((item) => [item.id, item]))
     const selected = ids.map((id) => pool.get(id))
     if (selected.some((item) => !item)) throw new Error('Unknown wardrobe item')
-    const roles = selected.map((item) => item!.layer_role)
-    if (!['base_layer', 'bottom', 'footwear'].every((role) => roles.filter((r) => r === role).length === 1)
-      || new Set(roles).size !== roles.length
-      || roles.some((role) => !['base_layer', 'bottom', 'footwear', 'outerwear', 'accessory'].includes(role))) {
+    if (!isValidOutfitStructure(selected as WardrobeItem[])) {
       throw new Error('Invalid outfit roles')
     }
     return { ...result, styling_tip: result.styling_tip ?? null } as GeneratedDailyOutfit

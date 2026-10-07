@@ -1,53 +1,18 @@
 'use client'
 
-import { useState } from 'react'
-import { AnimatePresence, motion } from 'framer-motion'
 import { ChevronDown } from 'lucide-react'
 
 export interface WhyThisExplainerProps {
   reasons?: string[]
+  defaultOpen?: boolean
 }
 
-export default function WhyThisExplainer({ reasons = [] }: WhyThisExplainerProps) {
-  const [isOpen, setIsOpen] = useState(false)
-
-  const text =
-    reasons.length > 0
-      ? reasons.join(', ')
-      : 'because these pieces line up with the preferences you saved earlier'
-
+export default function WhyThisExplainer({ reasons = [], defaultOpen = false }: WhyThisExplainerProps) {
+  const explanations = reasons.map((reason) => reason.trim()).filter(Boolean)
   return (
-    <div className="space-y-2">
-      <button
-        type="button"
-        onClick={() => setIsOpen((open) => !open)}
-        className="inline-flex items-center gap-1.5 text-sm font-medium text-[#574d43] transition hover:text-[#1d1b18]"
-        aria-expanded={isOpen}
-      >
-        Why this
-        <ChevronDown
-          className={`size-4 transition-transform duration-200 ${
-            isOpen ? 'rotate-180' : ''
-          }`}
-          aria-hidden="true"
-        />
-      </button>
-
-      <AnimatePresence initial={false}>
-        {isOpen && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.2 }}
-            className="overflow-hidden"
-          >
-            <div className="rounded-lg border border-[#e2d8cc] bg-[#faf7f2] p-4 text-sm leading-6 text-[#5d5349]">
-              {text}.
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
+    <details open={defaultOpen || undefined} className="group text-[#1d1b18]">
+      <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 text-base font-medium [&::-webkit-details-marker]:hidden">Why this works<ChevronDown aria-hidden="true" className="size-4 text-[#6d6257] transition-transform group-open:rotate-180" /></summary>
+      {explanations.length > 0 ? <ul className="mt-3 space-y-3 text-sm leading-6 text-[#6d6257]">{explanations.map((reason, index) => <li key={`${index}:${reason}`} className="flex gap-3"><span aria-hidden="true" className="mt-2.5 size-1 shrink-0 rounded-full bg-[#6d6257]" /><span>{reason}</span></li>)}</ul> : <p className="mt-3 text-sm leading-6 text-[#6d6257]">No explanation is available for this look yet.</p>}
+    </details>
   )
 }

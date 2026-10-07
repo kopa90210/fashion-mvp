@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import io
+import logging
 import random
 import time
 import uuid
@@ -12,6 +13,9 @@ from google import genai
 from PIL import Image
 
 from ai_service.config import Settings
+from ai_service.outfit_photo_observability import (
+    OutfitPhotoObservation, current_observation, elapsed_ms, log_event, observe_outfit_photo,
+)
 from ai_service.outfit_photo_worker import (
     InvalidProviderOutput,
     RemoteProviderUnavailable,
@@ -36,6 +40,9 @@ from ai_service.providers.outfit.gemini_schema import (
 )
 
 
+logger = logging.getLogger(__name__)
+
+
 PROMPT = """
 Analyze the outfit worn by the main person.
 
@@ -57,13 +64,14 @@ category:
 One of exactly:
 - top
 - bottom
+- one_piece
 - footwear
 - outerwear
 - accessory
 
 subcategory:
 A concise fashion type such as:
-button-up shirt, t-shirt, jeans, trousers,
+button-up shirt, t-shirt, jeans, trousers, dress, jumpsuit,
 sneakers, jacket, sunglasses, watch.
 
 display_name:
@@ -143,11 +151,13 @@ class GeminiOutfitProvider:
 
         max_attempts = 4
         last_error: Exception | None = None
+        request_started = time.monotonic()
 
         for attempt in range(
             1,
             max_attempts + 1,
         ):
+            log_event(logger, "provider_request_started", model=self.model, attempt=attempt)
             try:
                 interaction = (
                     self._client
@@ -200,6 +210,8 @@ class GeminiOutfitProvider:
                         "Gemini returned too many garments"
                     )
 
+                log_event(logger, "provider_request_completed", duration_ms=elapsed_ms(request_started),
+                          garment_count=len(result.boxes), model=self.model)
                 return result
 
             except InvalidProviderOutput:
@@ -236,6 +248,14 @@ class GeminiOutfitProvider:
                     15,
                 )
 
+                failure_category = (
+                    "503" if any(value in message for value in ("503", "service_unavailable", "high demand"))
+                    else "429" if any(value in message for value in ("429", "rate limit"))
+                    else "timeout"
+                )
+                log_event(logger, "provider_request_retry", level=logging.WARNING,
+                          attempt=attempt, failure_category=failure_category,
+                          retry_delay_ms=round(delay * 1000), model=self.model)
                 time.sleep(delay)
 
         raise RemoteProviderUnavailable(
@@ -349,11 +369,21 @@ class GeminiOutfitProvider:
             f"{uuid.uuid4()}.png"
         )
 
-        db.upload_private_png(
-            user_id,
-            path,
-            data,
-        )
+        observation = current_observation.get()
+        if observation:
+            observation.stage = "storage_upload"
+        upload_started = time.monotonic()
+        try:
+            db.upload_private_png(
+                user_id,
+                path,
+                data,
+            )
+        finally:
+            if observation:
+                observation.storage_upload_seconds += time.monotonic() - upload_started
+        if observation:
+            observation.stage = "garment_processing"
 
         width, height = crop.size
 
@@ -371,9 +401,23 @@ class GeminiOutfitProvider:
         self,
         db: Any,
         job: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        observation = current_observation.get() or OutfitPhotoObservation(job.get("id"))
+        with observe_outfit_photo(observation):
+            return self._extract(db, job)
+
+    def _extract(
+        self,
+        db: Any,
+        job: dict[str, Any],
         ) -> list[dict[str, Any]]:
 
         user_id = job["user_id"]
+        observation = current_observation.get()
+        if observation:
+            observation.stage = "source_fetch"
+        source_started = time.monotonic()
+        log_event(logger, "source_fetch_started")
 
         source_photo_id = (
             job.get("source_photo_id")
@@ -450,10 +494,19 @@ class GeminiOutfitProvider:
             )
         )
 
-        response = self._call_gemini(
-            image_bytes,
-            mime_type,
-        )
+        log_event(logger, "source_fetch_completed", duration_ms=elapsed_ms(source_started),
+                  byte_size=len(image_bytes), mime_type=mime_type)
+        if observation:
+            observation.stage = "provider_request"
+        provider_started = time.monotonic()
+        try:
+            response = self._call_gemini(
+                image_bytes,
+                mime_type,
+            )
+        finally:
+            if observation:
+                observation.provider_latency_ms = elapsed_ms(provider_started)
 
         uploaded_paths: list[str] = []
 
@@ -461,6 +514,10 @@ class GeminiOutfitProvider:
             dict[str, Any]
         ] = []
 
+        if observation:
+            observation.stage = "garment_processing"
+        processing_started = time.monotonic()
+        upload_seconds_before = observation.storage_upload_seconds if observation else 0.0
         try:
             with Image.open(
                 io.BytesIO(image_bytes)
@@ -531,4 +588,10 @@ class GeminiOutfitProvider:
 
             raise
 
+        upload_seconds = (observation.storage_upload_seconds - upload_seconds_before) if observation else 0.0
+        log_event(logger, "garment_processing_completed", garment_count=len(results),
+                  duration_ms=max(0, round((time.monotonic() - processing_started - upload_seconds) * 1000)))
+        log_event(logger, "storage_upload_completed", garment_count=len(results),
+                  total_bytes=sum(item["original"]["byte_size"] for item in results),
+                  duration_ms=max(0, round(upload_seconds * 1000)))
         return results

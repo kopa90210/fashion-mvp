@@ -13,7 +13,7 @@ import {
   searchPieces,
   saveWardrobeSelection,
 } from '@/src/app/actions/wardrobe'
-import { SELECTION_STEPS } from './selection-steps'
+import { isCalibrationSelectionEligible, SELECTION_STEPS } from './selection-steps'
 
 export default function PieceSelectionScreen() {
   const router = useRouter()
@@ -45,9 +45,16 @@ export default function PieceSelectionScreen() {
   )
   const selectedCount = currentSelectedIds.size
 
-  const isStepValid = currentStep.required
-    ? selectedCount >= currentStep.minSelections
-    : true
+  const selectionCounts = Object.fromEntries(
+    Object.entries(selections).map(([category, selected]) => [category, selected.size]),
+  )
+  const isFinalStep = currentStepIndex === SELECTION_STEPS.length - 1
+  const isGloballyEligible = isCalibrationSelectionEligible(selectionCounts)
+  const isStepValid = isFinalStep
+    ? isGloballyEligible
+    : currentStep.required
+      ? selectedCount >= currentStep.minSelections
+      : true
 
   // Total selected across all steps
   const totalSelectedCount = Object.values(selections).reduce(
@@ -180,6 +187,10 @@ export default function PieceSelectionScreen() {
   }
 
   const handleSubmit = async () => {
+    if (!isGloballyEligible) {
+      setSubmitError('Choose either 2 tops + 2 bottoms, or at least 2 dresses/one-piece looks, plus 2 footwear options.')
+      return
+    }
     setSubmitError(null)
     setIsSubmitting(true)
 
@@ -255,7 +266,7 @@ export default function PieceSelectionScreen() {
                 </button>
               )}
               <span className="text-xs font-semibold uppercase tracking-[0.2em] text-amber-200/80">
-                Step {currentStepIndex + 1} of 5 - {currentStep.label}
+                Step {currentStepIndex + 1} of {SELECTION_STEPS.length} - {currentStep.label}
               </span>
             </div>
 
@@ -290,7 +301,9 @@ export default function PieceSelectionScreen() {
                 Choose your {currentStep.label.toLowerCase()}
               </h1>
               <p className="text-xs text-white/50 mt-1">
-                {currentStep.required
+                {isFinalStep && !isGloballyEligible
+                  ? 'Choose either tops + bottoms, or at least 2 dresses/one-piece looks, plus footwear.'
+                  : currentStep.required
                   ? `Select at least ${currentStep.minSelections} items to advance.`
                   : 'Optional - select any pieces you own or skip.'}
               </p>

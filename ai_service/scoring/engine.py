@@ -15,8 +15,23 @@ from typing import Any
 # ---------------------------------------------------------------------------
 
 REQUIRED_ROLES: tuple[str, ...] = ("base_layer", "bottom", "footwear")
+ONE_PIECE_REQUIRED_ROLES: tuple[str, ...] = ("one_piece", "footwear")
 OPTIONAL_ROLES: tuple[str, ...] = ("outerwear", "accessory")
-VALID_ROLES: frozenset[str] = frozenset(REQUIRED_ROLES + OPTIONAL_ROLES)
+VALID_ROLES: frozenset[str] = frozenset(REQUIRED_ROLES + ONE_PIECE_REQUIRED_ROLES + OPTIONAL_ROLES)
+
+
+def is_valid_outfit_structure(items: list[dict[str, Any]]) -> bool:
+    counts = {role: 0 for role in VALID_ROLES}
+    for item in items:
+        role = item.get("layer_role")
+        if role not in counts:
+            return False
+        counts[role] += 1
+    if counts["footwear"] != 1 or counts["outerwear"] > 1 or counts["accessory"] > 1:
+        return False
+    separates = counts["base_layer"] == 1 and counts["bottom"] == 1 and counts["one_piece"] == 0
+    one_piece = counts["base_layer"] == 0 and counts["bottom"] == 0 and counts["one_piece"] == 1
+    return separates or one_piece
 
 
 # ---------------------------------------------------------------------------
@@ -131,8 +146,8 @@ def validate_ai_response(
     if not isinstance(confidence, (int, float)) or not 0 <= confidence <= 1:
         return None
 
-    roles = {pool_by_id[item_id].get("layer_role") for item_id in item_ids}
-    if not set(REQUIRED_ROLES).issubset(roles):
+    selected = [pool_by_id[item_id] for item_id in item_ids]
+    if not is_valid_outfit_structure(selected):
         return None
 
     styling_tip = response.get("styling_tip")
@@ -168,14 +183,18 @@ def deterministic_fallback(
         if role in by_role:
             by_role[role].append(item)
 
-    if any(not by_role[role] for role in REQUIRED_ROLES):
+    can_build_separates = all(by_role[role] for role in REQUIRED_ROLES)
+    can_build_one_piece = all(by_role[role] for role in ONE_PIECE_REQUIRED_ROLES)
+    if not can_build_separates and not can_build_one_piece:
         return None
 
     dna_mag = math.sqrt(sum(float(d or 0) ** 2 for d in dna.values()))
-    picks = [
-        max(by_role[role], key=lambda item: score_item(item, dna, dna_mag))
-        for role in REQUIRED_ROLES
-    ]
+    archetypes = []
+    for roles in (REQUIRED_ROLES, ONE_PIECE_REQUIRED_ROLES):
+        if all(by_role[role] for role in roles):
+            core = [max(by_role[role], key=lambda item: score_item(item, dna, dna_mag)) for role in roles]
+            archetypes.append(core)
+    picks = max(archetypes, key=lambda core: score_outfit(core, dna))
     for role in OPTIONAL_ROLES:
         if by_role[role]:
             candidate = max(by_role[role], key=lambda item: score_item(item, dna, dna_mag))

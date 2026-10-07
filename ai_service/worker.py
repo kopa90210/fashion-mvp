@@ -23,6 +23,9 @@ from groq import Groq
 from ai_service.config import Settings, get_settings
 from ai_service.config import Settings, get_settings
 from ai_service.models import OutfitRequest, WardrobeItem
+from ai_service.outfit_photo_observability import (
+    OutfitPhotoObservation, elapsed_ms, log_event, observe_outfit_photo,
+)
 from ai_service.outfit_photo_worker import InvalidProviderOutput, RemoteProviderUnavailable, extract_outfit_photo
 from ai_service.providers.groq_provider import GroqProvider
 from ai_service.services.outfit_service import OutfitService
@@ -159,7 +162,7 @@ def _daily_outfit(db: SupabaseRest, job: dict[str, Any], outfit_service: OutfitS
     for row in membership:
         item = row.get("wardrobe_items")
         if isinstance(item, dict) and item.get("status") == "confirmed" and item.get("layer_role") in (
-            "base_layer", "bottom", "footwear", "outerwear", "accessory"
+            "base_layer", "bottom", "one_piece", "footwear", "outerwear", "accessory"
         ):
             items.append(WardrobeItem(
                 id=item["id"], display_name=item.get("display_name") or "Garment",
@@ -192,7 +195,7 @@ def _extract_garment(db: SupabaseRest, job: dict[str, Any], vision_client: Groq,
             model=vision_model, response_format={"type": "json_object"}, temperature=0.1,
             messages=[{"role": "system", "content": (
                 "Describe only the main visible garment. Return JSON with category "
-                "(top,bottom,footwear,outerwear,accessory), display_name, color_primary, "
+                "(top,bottom,one_piece,footwear,outerwear,accessory), display_name, color_primary, "
                 "and confidence from 0 to 1. Do not invent brand, material, or hidden details."
             )}, {"role": "user", "content": [{"type": "text", "text": "Classify this garment."},
                 {"type": "image_url", "image_url": {"url": data_url}}]}],
@@ -205,7 +208,7 @@ def _extract_garment(db: SupabaseRest, job: dict[str, Any], vision_client: Groq,
     except (AttributeError, IndexError, TypeError, json.JSONDecodeError) as exc:
         raise InvalidJobInput("Vision result was not valid JSON") from exc
     if not isinstance(result, dict) or result.get("category") not in (
-        "top", "bottom", "footwear", "outerwear", "accessory"
+        "top", "bottom", "one_piece", "footwear", "outerwear", "accessory"
     ) or not isinstance(result.get("display_name"), str) or not 0 < len(result["display_name"].strip()) <= 120 \
       or not isinstance(result.get("color_primary"), str) or not 0 < len(result["color_primary"].strip()) <= 80 \
       or not isinstance(result.get("confidence"), (float, int)) or isinstance(result.get("confidence"), bool) \
@@ -243,6 +246,11 @@ def process_one(
     garments: list[dict[str, Any]] | None = None
     usage: dict[str, int] = {}
     outcome, error_code, validation = "succeeded", None, "valid"
+    observation = None
+    if job["job_type"] == "outfit_photo":
+        observation = OutfitPhotoObservation(job["id"])
+        log_event(logger, "job_claimed", observation, job_type=job["job_type"],
+                  attempt=job["total_attempts"], provider=outfit_provider.name, model=model)
     try:
         if job["job_type"] == "daily_outfit":
             result = _daily_outfit(db, job, outfit_service)
@@ -250,15 +258,24 @@ def process_one(
         elif job["job_type"] == "wardrobe_extraction":
             result, usage = _extract_garment(db, job, vision_client, vision_model)
         elif job["job_type"] == "outfit_photo":
-            garments = outfit_provider.extract(
-        db,
-        job,
-    )
+            provider_started = time.monotonic()
+            with observe_outfit_photo(observation):
+                garments = outfit_provider.extract(
+                    db,
+                    job,
+                )
+            if observation.provider_latency_ms is None:
+                observation.provider_latency_ms = elapsed_ms(provider_started)
         else:
             raise InvalidJobInput("Unknown job type")
     except Exception as exc:
         outcome, error_code, validation = classify_failure(exc)
-        logger.warning("job_id=%s outcome=%s code=%s", job["id"], outcome, error_code)
+        if observation:
+            log_event(logger, "job_failed", observation, level=logging.WARNING,
+                      safe_error_code=error_code, stage=observation.stage,
+                      total_latency_ms=elapsed_ms(started))
+        else:
+            logger.warning("job_id=%s outcome=%s code=%s", job["id"], outcome, error_code)
     metadata = {
         "p_job_id": job["id"], "p_worker_id": worker_id, "p_attempt": job["total_attempts"],
         "p_outcome": outcome,
@@ -273,6 +290,11 @@ def process_one(
         "p_usage": usage, "p_safe_error_code": error_code, "p_result": result,
     }
     try:
+        if observation:
+            observation.stage = "completion_rpc"
+            completion_started = time.monotonic()
+            log_event(logger, "completion_rpc_started", observation,
+                      rpc="complete_outfit_photo_job" if outcome == "succeeded" else "complete_ai_job")
         if job["job_type"] == "outfit_photo" and outcome == "succeeded":
             db.rpc("complete_outfit_photo_job", {
                 "p_job_id": job["id"], "p_worker_id": worker_id,
@@ -283,9 +305,29 @@ def process_one(
             })
         else:
             db.rpc("complete_ai_job", metadata)
+        if observation:
+            completion_ms = elapsed_ms(completion_started)
+            log_event(logger, "completion_rpc_completed", observation, duration_ms=completion_ms)
+            if outcome == "succeeded":
+                log_event(logger, "job_completed", observation, status=outcome,
+                          total_latency_ms=elapsed_ms(started),
+                          provider_latency_ms=observation.provider_latency_ms,
+                          persistence_latency_ms=round(observation.storage_upload_seconds * 1000) + completion_ms,
+                          garment_count=len(garments or []))
     except httpx.HTTPError:
         # The lease will expire and the database will retry or dead-letter it.
-        logger.error("job_id=%s completion_failed", job["id"])
+        if observation:
+            log_event(logger, "job_failed", observation, level=logging.ERROR,
+                      safe_error_code="PERSISTENCE_FAILED", stage=observation.stage,
+                      total_latency_ms=elapsed_ms(started))
+        else:
+            logger.error("job_id=%s completion_failed", job["id"])
+    except Exception:
+        if observation:
+            log_event(logger, "job_failed", observation, level=logging.ERROR,
+                      safe_error_code="PERSISTENCE_FAILED", stage=observation.stage,
+                      total_latency_ms=elapsed_ms(started))
+        raise
     return True
 
 

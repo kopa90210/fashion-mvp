@@ -5,10 +5,9 @@
  * Takes a user's wardrobe items + their fashion DNA vector and returns
  * the top N ranked outfit combinations.
  *
- * Outfit validity rules (layer_role):
- *   Required : exactly one 'base_layer'  (tops, shirts, blouses, etc.)
- *   Required : exactly one 'bottom'      (pants, skirts, shorts, etc.)
- *   Required : exactly one 'footwear'
+ * Outfit validity rules support either a separates core
+ * (base_layer + bottom + footwear) or one-piece core
+ * (one_piece + footwear), without mixing those cores.
  *   Optional : zero or one 'outerwear'   (jacket, coat, etc.)
  *   Optional : zero or one 'accessory'
  *
@@ -27,6 +26,7 @@ import type { StyleVector } from '@/src/lib/quiz/scoring';
 export type LayerRole =
   | 'base_layer'
   | 'bottom'
+  | 'one_piece'
   | 'footwear'
   | 'outerwear'
   | 'accessory';
@@ -181,6 +181,26 @@ export function outfitKey(items: { id: string }[]): string {
     .join('|');
 }
 
+/** Validate the two canonical outfit structures without scoring or persistence. */
+export function isValidOutfitStructure(items: Pick<WardrobeItem, 'layer_role'>[]): boolean {
+  const counts: Record<LayerRole, number> = {
+    base_layer: 0,
+    bottom: 0,
+    one_piece: 0,
+    footwear: 0,
+    outerwear: 0,
+    accessory: 0,
+  }
+  for (const item of items) {
+    if (!(item.layer_role in counts)) return false
+    counts[item.layer_role] += 1
+  }
+  if (counts.footwear !== 1 || counts.outerwear > 1 || counts.accessory > 1) return false
+  const separates = counts.base_layer === 1 && counts.bottom === 1 && counts.one_piece === 0
+  const onePiece = counts.base_layer === 0 && counts.bottom === 0 && counts.one_piece === 1
+  return separates || onePiece
+}
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -188,6 +208,8 @@ export function outfitKey(items: { id: string }[]): string {
 export interface RecommendOutfitsOptions {
   /** Max number of outfits to return. Default: 5. */
   topN?: number;
+  /** Require this supplied wardrobe piece in every result. */
+  anchorItemId?: string;
 }
 
 interface ScoredWardrobeItem {
@@ -226,6 +248,7 @@ export function recommendOutfits(
   const byRole: Record<LayerRole, ScoredWardrobeItem[]> = {
     base_layer: [],
     bottom: [],
+    one_piece: [],
     footwear: [],
     outerwear: [],
     accessory: [],
@@ -240,18 +263,22 @@ export function recommendOutfits(
     }
   }
 
-  // Validity check: required slots must be present.
-  if (
-    byRole.base_layer.length === 0 ||
-    byRole.bottom.length === 0 ||
-    byRole.footwear.length === 0
-  ) {
+  const anchor = opts.anchorItemId !== undefined ? items.find((item) => item.id === opts.anchorItemId) : undefined;
+  if (opts.anchorItemId !== undefined) {
+    if (!anchor || !(anchor.layer_role in byRole)) return [];
+    byRole[anchor.layer_role] = byRole[anchor.layer_role].filter(({ item }) => item.id === anchor.id);
+  }
+
+  const canBuildSeparates = byRole.base_layer.length > 0 && byRole.bottom.length > 0
+  const canBuildOnePiece = byRole.one_piece.length > 0
+  if (byRole.footwear.length === 0 || (!canBuildSeparates && !canBuildOnePiece)) {
     return [];
   }
 
   // Sort each slot's candidates descending by score once: O(M log M).
   byRole.base_layer.sort((a, b) => b.score - a.score);
   byRole.bottom.sort((a, b) => b.score - a.score);
+  byRole.one_piece.sort((a, b) => b.score - a.score);
   byRole.footwear.sort((a, b) => b.score - a.score);
   byRole.outerwear.sort((a, b) => b.score - a.score);
   byRole.accessory.sort((a, b) => b.score - a.score);
@@ -259,92 +286,65 @@ export function recommendOutfits(
   // Candidate bounding: within each slot, at most topN candidates are needed.
   const bases = byRole.base_layer.slice(0, topN);
   const bottoms = byRole.bottom.slice(0, topN);
+  const onePieces = byRole.one_piece.slice(0, topN);
   const footwearItems = byRole.footwear.slice(0, topN);
   const outerwear = byRole.outerwear.slice(0, topN);
   const accessories = byRole.accessory.slice(0, topN);
 
-  const outerwearSlots: (ScoredWardrobeItem | null)[] = [null, ...outerwear];
-  const accessorySlots: (ScoredWardrobeItem | null)[] = [null, ...accessories];
+  const outerwearSlots: (ScoredWardrobeItem | null)[] = anchor?.layer_role === 'outerwear' ? outerwear : [null, ...outerwear];
+  const accessorySlots: (ScoredWardrobeItem | null)[] = anchor?.layer_role === 'accessory' ? accessories : [null, ...accessories];
 
-  interface CandidateOutfit {
-    score: number;
-    base: WardrobeItem;
-    bottom: WardrobeItem;
-    shoe: WardrobeItem;
-    outer: WardrobeItem | null;
-    acc: WardrobeItem | null;
+  type RankedCandidate = Outfit & { key: string }
+  const candidates: RankedCandidate[] = []
+  const isBetter = (candidate: RankedCandidate, current: RankedCandidate) =>
+    candidate.score > current.score || (candidate.score === current.score && candidate.key < current.key)
+  const worstFirst = (a: RankedCandidate, b: RankedCandidate) =>
+    a.score - b.score || b.key.localeCompare(a.key)
+  const addCandidate = (core: ScoredWardrobeItem[], shoe: ScoredWardrobeItem, outer: ScoredWardrobeItem | null, acc: ScoredWardrobeItem | null) => {
+    let sum = shoe.score
+    let count = 1
+    for (const entry of core) { sum += entry.score; count += 1 }
+    if (outer) { sum += outer.score; count += 1 }
+    if (acc) { sum += acc.score; count += 1 }
+    const score = Math.round((sum / count) * 10_000) / 10_000
+    if (candidates.length === topN) {
+      if (score < candidates[0].score) return
+    }
+    const candidateItems = core.map(({ item }) => item)
+    candidateItems.push(shoe.item)
+    if (outer) candidateItems.push(outer.item)
+    if (acc) candidateItems.push(acc.item)
+    const candidate = { items: candidateItems, score, key: outfitKey(candidateItems) }
+    if (candidates.length < topN) {
+      candidates.push(candidate)
+      if (candidates.length === topN) candidates.sort(worstFirst)
+      return
+    }
+    if (isBetter(candidate, candidates[0])) {
+      candidates[0] = candidate
+      candidates.sort(worstFirst)
+    }
   }
 
-  // Bounded buffer to collect topN candidates without allocating unused combinations.
-  const topCandidates: CandidateOutfit[] = [];
-  let minScoreInTop = -1;
-
-  for (let bi = 0; bi < bases.length; bi++) {
-    const base = bases[bi];
-    for (let boi = 0; boi < bottoms.length; boi++) {
-      const bottom = bottoms[boi];
-      for (let fi = 0; fi < footwearItems.length; fi++) {
-        const shoe = footwearItems[fi];
-        for (let oi = 0; oi < outerwearSlots.length; oi++) {
-          const outer = outerwearSlots[oi];
-          for (let ai = 0; ai < accessorySlots.length; ai++) {
-            const acc = accessorySlots[ai];
-
-            let sum = base.score + bottom.score + shoe.score;
-            let count = 3;
-            if (outer) {
-              sum += outer.score;
-              count += 1;
-            }
-            if (acc) {
-              sum += acc.score;
-              count += 1;
-            }
-
-            const score = Math.round((sum / count) * 10_000) / 10_000;
-
-            if (topCandidates.length < topN) {
-              topCandidates.push({
-                score,
-                base: base.item,
-                bottom: bottom.item,
-                shoe: shoe.item,
-                outer: outer ? outer.item : null,
-                acc: acc ? acc.item : null,
-              });
-              if (topCandidates.length === topN) {
-                topCandidates.sort((x, y) => x.score - y.score);
-                minScoreInTop = topCandidates[0].score;
-              }
-            } else if (score > minScoreInTop) {
-              topCandidates[0] = {
-                score,
-                base: base.item,
-                bottom: bottom.item,
-                shoe: shoe.item,
-                outer: outer ? outer.item : null,
-                acc: acc ? acc.item : null,
-              };
-              topCandidates.sort((x, y) => x.score - y.score);
-              minScoreInTop = topCandidates[0].score;
-            }
+  const separatesAllowed = canBuildSeparates && anchor?.layer_role !== 'one_piece'
+  const onePieceAllowed = canBuildOnePiece && anchor?.layer_role !== 'base_layer' && anchor?.layer_role !== 'bottom'
+  for (const shoe of footwearItems) {
+    for (const outer of outerwearSlots) {
+      for (const acc of accessorySlots) {
+        if (separatesAllowed) {
+          for (const base of bases) {
+            for (const bottom of bottoms) addCandidate([base, bottom], shoe, outer, acc)
           }
+        }
+        if (onePieceAllowed) {
+          for (const onePiece of onePieces) addCandidate([onePiece], shoe, outer, acc)
         }
       }
     }
   }
 
-  // Final sort descending by score
-  topCandidates.sort((a, b) => b.score - a.score);
-
-  return topCandidates.map((c) => {
-    const slotItems: WardrobeItem[] = [c.base, c.bottom, c.shoe];
-    if (c.outer) slotItems.push(c.outer);
-    if (c.acc) slotItems.push(c.acc);
-    return {
-      items: slotItems,
-      score: c.score,
-    };
-  });
+  return candidates
+    .sort((a, b) => b.score - a.score || a.key.localeCompare(b.key))
+    .map(({ items: candidateItems, score }) => ({ items: candidateItems, score }))
 }
 

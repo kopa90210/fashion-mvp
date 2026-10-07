@@ -78,6 +78,6 @@ class OutfitService:
             status_code=422,
             detail=(
                 "Could not generate a valid outfit. Ensure the wardrobe covers all required "
-                "roles: base_layer, bottom, footwear."
+                "Use exactly one valid core: base_layer + bottom + footwear, or one_piece + footwear."
             ),
         )

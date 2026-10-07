@@ -238,7 +238,7 @@ describe('Gate 3 Invariant & Contract Validation', () => {
 
   describe('Category Validation', () => {
     it('accepts canonical categories from existing taxonomy', () => {
-      const valid = ['top', 'bottom', 'footwear', 'outerwear', 'accessory'];
+      const valid = ['top', 'bottom', 'one_piece', 'footwear', 'outerwear', 'accessory'];
       for (const cat of valid) {
         const actual = validateCategory(cat);
         expect(actual.success).toBe(true);
@@ -256,7 +256,7 @@ describe('Gate 3 Invariant & Contract Validation', () => {
 
   describe('Canonical Layer Role Validation', () => {
     it('accepts canonical layer roles', () => {
-      const validRoles = ['base_layer', 'bottom', 'footwear', 'outerwear', 'accessory'];
+      const validRoles = ['base_layer', 'bottom', 'one_piece', 'footwear', 'outerwear', 'accessory'];
       for (const role of validRoles) {
         const actual = validateLayerRole(role);
         expect(actual.success).toBe(true);

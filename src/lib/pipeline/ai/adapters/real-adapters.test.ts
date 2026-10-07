@@ -288,7 +288,7 @@ describe('Real Groq Adapters — Live Provider Tests (opt-in)', () => {
       expect(result[0]).toHaveProperty('category');
       expect(result[0]).toHaveProperty('box');
       expect(result[0]).toHaveProperty('confidence');
-      expect(['top', 'bottom', 'footwear', 'outerwear', 'accessory']).toContain(result[0].category);
+      expect(['top', 'bottom', 'one_piece', 'footwear', 'outerwear', 'accessory']).toContain(result[0].category);
     }
   });
 

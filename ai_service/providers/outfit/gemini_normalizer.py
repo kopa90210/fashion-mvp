@@ -6,6 +6,7 @@ from typing import Any
 CATEGORIES = {
     "top",
     "bottom",
+    "one_piece",
     "footwear",
     "outerwear",
     "accessory",
@@ -24,6 +25,15 @@ CATEGORY_ALIASES = {
     "jeans": "bottom",
     "shorts": "bottom",
     "skirt": "bottom",
+
+    "dress": "one_piece",
+    "mini dress": "one_piece",
+    "midi dress": "one_piece",
+    "maxi dress": "one_piece",
+    "shirt dress": "one_piece",
+    "jumpsuit": "one_piece",
+    "romper": "one_piece",
+    "gown": "one_piece",
 
     "shoe": "footwear",
     "shoes": "footwear",

@@ -22,23 +22,23 @@ import {
 } from './contracts';
 
 describe('Gate 3 Domain Contracts', () => {
-  it('preserves canonical wardrobe taxonomy and contains all 5 required categories', () => {
+  it('preserves canonical wardrobe taxonomy and contains all 6 required categories', () => {
     const input = WARDROBE_CATEGORIES;
-    const expected = ['top', 'bottom', 'footwear', 'outerwear', 'accessory'];
+    const expected = ['top', 'bottom', 'one_piece', 'footwear', 'outerwear', 'accessory'];
     const actual = [...input];
 
     // Assert exact taxonomy match without introducing a secondary taxonomy
     expect(actual).toEqual(expected);
-    expect(actual.length).toBe(5);
+    expect(actual.length).toBe(6);
   });
 
-  it('preserves canonical wardrobe layer roles and contains all 5 required roles', () => {
+  it('preserves canonical wardrobe layer roles and contains all 6 required roles', () => {
     const input = WARDROBE_LAYER_ROLES;
-    const expected = ['base_layer', 'bottom', 'footwear', 'outerwear', 'accessory'];
+    const expected = ['base_layer', 'bottom', 'one_piece', 'footwear', 'outerwear', 'accessory'];
     const actual = [...input];
 
     expect(actual).toEqual(expected);
-    expect(actual.length).toBe(5);
+    expect(actual.length).toBe(6);
   });
 
   it('allows instantiating a valid CropBox contract satisfying all invariants', () => {

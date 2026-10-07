@@ -33,14 +33,14 @@ LABEL_CATEGORY = {
     "sweater": "top", "cardigan": "top", "jacket": "outerwear",
     "vest": "outerwear", "coat": "outerwear", "cape": "outerwear",
     "pants": "bottom", "shorts": "bottom", "skirt": "bottom",
-    "dress": "top", "jumpsuit": "top", "shoe": "footwear",
+    "dress": "one_piece", "jumpsuit": "one_piece", "romper": "one_piece", "shoe": "footwear",
     "sock": "accessory", "tights, stockings": "accessory",
     "leg warmer": "accessory", "hat": "accessory",
     "headband, head covering, Cap": "accessory", "bag, wallet": "accessory",
     "scarf": "accessory", "belt": "accessory", "watch": "accessory",
     "glasses": "accessory", "tie": "accessory", "glove": "accessory",
 }
-CATEGORIES = {"top", "bottom", "footwear", "outerwear", "accessory"}
+CATEGORIES = {"top", "bottom", "one_piece", "footwear", "outerwear", "accessory"}
 MAX_RESPONSE_BYTES = 100 * 1024 * 1024
 MAX_PNG_BYTES = 4 * 1024 * 1024
 

@@ -15,6 +15,7 @@ import {
 export const WARDROBE_LAYER_ROLES = [
   'base_layer',
   'bottom',
+  'one_piece',
   'footwear',
   'outerwear',
   'accessory',
