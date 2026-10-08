@@ -1,4 +1,4 @@
-﻿'use client'
+'use client'
 
 import Image from 'next/image'
 import Link from 'next/link'
@@ -139,7 +139,7 @@ export default function ReviewOutfitScreen({ initial }: { initial: OutfitPhotoRe
       </section>
     </div>}
     {ready && !complete && !current && total > 0 && <section className="mx-auto mt-16 max-w-lg py-8"><h2 className="text-2xl font-medium">Main pieces are ready</h2>{pieces.accessories.length > 0 ? <><p className="mt-3 leading-relaxed text-[#6D6257]">{pieces.accessories.length} {pieces.accessories.length === 1 ? 'accessory is' : 'accessories are'} still available to review. You can come back to them later.</p><Button className="mt-8 h-12 w-full rounded-full" onClick={() => setAccessories(true)}>Review accessories</Button></> : <p className="mt-3 text-[#6D6257]">You’ve reviewed every main piece.</p>}<Button variant="outline" className="mt-3 h-12 w-full rounded-full" onClick={() => setFinished(true)}>Finish</Button></section>}
-    {ready && complete && <section className="mt-12"><h2 className="text-2xl">{finished && remaining ? 'Your choices are saved' : 'All pieces reviewed'}</h2><p className="mt-3 text-[#6D6257]">{remaining ? 'The remaining pieces are here whenever you want to review them.' : 'The pieces you added are ready in your wardrobe.'}</p><Link href="/wardrobe" className="mt-7 inline-flex min-h-12 items-center rounded-full bg-[#1D1B18] px-7 text-[#FFFDFA]">Go to wardrobe</Link></section>}
+    {ready && complete && <section className="mt-12"><h2 className="text-2xl">{finished && remaining ? 'Your choices are saved' : 'All pieces reviewed'}</h2><p className="mt-3 text-[#6D6257]">{remaining ? 'The remaining pieces are here whenever you want to review them. Today only uses pieces you confirmed.' : 'Your choices are saved. Today will use only confirmed pieces that can form a complete look.'}</p><div className="mt-7 flex flex-wrap gap-3"><Link href="/outfits" className="inline-flex min-h-12 items-center rounded-full bg-[#1D1B18] px-7 text-[#FFFDFA]">Try Today</Link><Link href="/wardrobe" className="inline-flex min-h-12 items-center rounded-full border border-[#D8CEC2] bg-[#FFFDFA] px-7 text-[#1D1B18]">View wardrobe</Link></div></section>}
     {ready && !total && <section className="mt-12"><h2 className="text-2xl">No clear pieces found</h2><p className="mt-3 text-[#6D6257]">Try a well-lit photo where each piece is easy to see.</p><Link href="/wardrobe/add" className="mt-6 inline-block underline underline-offset-4">Upload another photo</Link></section>}
   </div></main>
 }

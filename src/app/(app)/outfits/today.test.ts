@@ -221,11 +221,24 @@ describe('Today server orchestration remains unchanged', () => {
     expect(page.props.ownedItemIds).toEqual(ownedIds)
     expect(mocks.daily).toHaveBeenCalledTimes(1)
   })
-  it('offers a real clothing upload in the empty state', async () => {
+  it('hands a calibrated user with no owned clothes into real-outfit upload', async () => {
     mocks.daily.mockResolvedValue(null)
+    mocks.owned.mockResolvedValue([])
     const html = renderToStaticMarkup(await OutfitsPage())
+    expect(html).toContain('Your style is ready. Now add your clothes.')
+    expect(html).toContain('Upload one real outfit photo')
     expect(html).toContain('href="/wardrobe/add"')
-    expect(html).toContain('Add clothes')
+    expect(html).toContain('Upload an outfit')
     expect(html).not.toContain('/quiz?done=true')
+  })
+
+  it('explains the minimum complete-look requirement when some owned pieces already exist', async () => {
+    mocks.daily.mockResolvedValue(null)
+    mocks.owned.mockResolvedValue([{ id: 'owned-dress' }])
+    const html = renderToStaticMarkup(await OutfitsPage())
+    expect(html).toContain('You&#x27;re close to your first Today look.')
+    expect(html).toContain('top + bottom + shoes')
+    expect(html).toContain('one-piece + shoes')
+    expect(html).toContain('Add another outfit')
   })
 })

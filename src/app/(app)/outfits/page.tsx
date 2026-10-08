@@ -18,6 +18,8 @@ export default async function OutfitsPage() {
   ])
 
   if (!outfit) {
+    const hasOwnedPieces = ownedItems.length > 0
+
     return (
       <main className="min-h-screen bg-[#f7f4ef] px-4 py-10 text-[#1d1b18] sm:px-6">
         <div className="mx-auto flex min-h-[70vh] max-w-xl flex-col items-center justify-center text-center">
@@ -25,13 +27,17 @@ export default async function OutfitsPage() {
             Today
           </p>
           <h1 className="mt-3 text-3xl font-semibold tracking-tight">
-            Add a few more wardrobe pieces.
+            {hasOwnedPieces
+              ? "You're close to your first Today look."
+              : 'Your style is ready. Now add your clothes.'}
           </h1>
           <p className="mt-3 text-sm leading-6 text-[#6d6257]">
-            A top, bottom, and pair of shoes give us a starting point for outfit ideas.
+            {hasOwnedPieces
+              ? 'Add enough real pieces for either a top + bottom + shoes, or a one-piece + shoes.'
+              : "Upload one real outfit photo. We'll separate the pieces, and you choose what enters your wardrobe."}
           </p>
           <Link href="/wardrobe/add" className={buttonVariants({ className: 'mt-6 h-12 rounded-full' })}>
-            Add clothes
+            {hasOwnedPieces ? 'Add another outfit' : 'Upload an outfit'}
           </Link>
         </div>
       </main>

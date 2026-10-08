@@ -67,9 +67,14 @@ describe('focused outfit review', () => {
     expect(html).toContain('Finish')
     expect(html).not.toContain('Add to wardrobe')
   })
-  it('offers a recoverable empty state and a reviewed state', () => {
+  it('offers a recoverable empty state and hands completed review into Today', () => {
     expect(render({ ...initial, detectedCount: 0, garments: [] })).toContain('No clear pieces found')
-    expect(render({ ...initial, garments: [] })).toContain('All pieces reviewed')
+    const complete = render({ ...initial, garments: [] })
+    expect(complete).toContain('All pieces reviewed')
+    expect(complete).toContain('href="/outfits"')
+    expect(complete).toContain('Try Today')
+    expect(complete).toContain('View wardrobe')
+    expect(complete).toContain('Today will use only confirmed pieces')
   })
   it('preserves the optional alternate image choice without technical copy', () => {
     const html = render({ ...initial, garments: [{ ...garment('shirt', 'top'), reconstructedImageUrl: '/alternate.png' }] })
