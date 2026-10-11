@@ -36,7 +36,7 @@ export default function OutfitCanvas({
   const framed = variant === 'framed'
 
   const identityBlock = identity || description ? (
-    <div className={framed ? 'mb-5' : 'mt-7'}>
+    <div className="mt-6">
       {identity ? (
         <h2 className={framed ? 'text-xl font-medium' : 'text-xl font-medium sm:text-2xl'}>
           {identity}
@@ -55,15 +55,13 @@ export default function OutfitCanvas({
       aria-label="Outfit canvas"
       data-variant={variant}
       className={[
-        framed ? 'rounded-lg border border-[#d8cec2] bg-white/70 p-5 shadow-sm' : '',
+        framed ? 'rounded-[2rem] bg-[#fffdfa]/55 p-3 sm:p-5' : '',
         className,
       ].filter(Boolean).join(' ')}
     >
-      {framed ? identityBlock : null}
+      <FlatLay items={items} />
 
-      <FlatLay items={items} editorial={!framed} />
-
-      {!framed ? identityBlock : null}
+      {identityBlock}
 
       {children}
 
