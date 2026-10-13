@@ -75,6 +75,7 @@ class ObservedClient(FakeGeminiClient):
 def observed_pipeline(monkeypatch, caplog):
     clock = Clock()
     monkeypatch.setattr(gemini.time, "monotonic", clock.monotonic)
+    monkeypatch.setattr(gemini.time, "perf_counter", clock.monotonic)
     monkeypatch.setattr(gemini.time, "sleep", clock.advance)
     monkeypatch.setattr(gemini.random, "uniform", lambda *_: 0)
     caplog.set_level(logging.INFO)
@@ -134,6 +135,7 @@ def test_success_events_correlate_all_stages_and_measure_aggregate_timings(obser
         "provider_request_started", "provider_request_completed",
         "garment_processing_completed", "storage_upload_completed",
         "completion_rpc_started", "completion_rpc_completed", "job_completed",
+        "OUTFIT_PIPELINE_TIMING",
     ]
     assert {r.job_id for r in records} == {db.job["id"]}
     by_event = {r.event: r for r in records}
@@ -162,6 +164,17 @@ def test_success_events_correlate_all_stages_and_measure_aggregate_timings(obser
     assert set(db.calls[-1][1]) == {"p_job_id", "p_worker_id", "p_attempt", "p_provider", "p_model",
         "p_prompt_version", "p_schema_version", "p_latency_ms", "p_usage", "p_garments"}
     assert len(db.calls[-1][1]["p_garments"]) == 2
+    summary = by_event["OUTFIT_PIPELINE_TIMING"]
+    assert (summary.queue_wait_ms, summary.source_download_ms, summary.provider_ms,
+            summary.provider_attempts, summary.response_validation_ms,
+            summary.garment_processing_ms, summary.storage_upload_ms,
+            summary.completion_rpc_ms, summary.worker_total_ms,
+            summary.garment_count, summary.outcome, summary.error_classification) == (
+                0, 12, 120, 1, 0, 14, 14, 20, 180, 2, "succeeded", None)
+    assert all(getattr(summary, field) >= 0 for field in (
+        "queue_wait_ms", "source_download_ms", "provider_ms",
+        "response_validation_ms", "garment_processing_ms", "storage_upload_ms",
+        "completion_rpc_ms", "worker_total_ms"))
     assert current_observation.get() is None
     assert_private_data_absent(caplog, db, output)
 
@@ -187,6 +200,8 @@ def test_retry_logs_safe_categories_without_changing_attempts_or_delay(
     completed = next(r for r in records if r.event == "job_completed")
     assert completed.provider_latency_ms == 2240
     assert completed.total_latency_ms == 2300
+    summary = next(r for r in records if r.event == "OUTFIT_PIPELINE_TIMING")
+    assert (summary.provider_attempts, summary.provider_ms) == (2, 2240)
     assert {r.job_id for r in records} == {db.job["id"]}
     assert_private_data_absent(caplog, db, output)
 
@@ -218,6 +233,10 @@ def test_failures_report_stage_and_preserve_existing_outcomes_and_cleanup(
     assert len(failed) == 1
     assert (failed[0].job_id, failed[0].safe_error_code, failed[0].stage) == (db.job["id"], code, stage)
     assert failed[0].total_latency_ms >= 0
+    summaries = [r for r in records if r.event == "OUTFIT_PIPELINE_TIMING"]
+    assert len(summaries) == 1
+    assert summaries[0].outcome == "failed"
+    assert summaries[0].error_classification == code
     assert not any(r.event == "job_completed" for r in records)
     if failure == "completion_rpc":
         assert db.calls[-1][0] == "complete_outfit_photo_job"

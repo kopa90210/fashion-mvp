@@ -1,0 +1,51 @@
+{
+  "attributes": {
+    "category": "bottom",
+    "color": {
+      "primary": "sage green",
+      "secondary": null
+    },
+    "display_name": "Sage Green Pleated Skirt",
+    "fit": {
+      "primary": "regular"
+    },
+    "formality_score": 0.3,
+    "layer_role": "bottom",
+    "material": {
+      "primary": "silk-like fabric"
+    },
+    "model_confidence": 0.9,
+    "pattern": "solid",
+    "season_weights": {
+      "fall": 0.2,
+      "spring": 0.5,
+      "summer": 0.2,
+      "winter": 0.1
+    },
+    "style_tags": {
+      "bohemian": 0.0,
+      "casual": 0.2,
+      "edgy": 0.0,
+      "formal": 0.0,
+      "minimal": 0.8,
+      "smart_casual": 0.1,
+      "sporty": 0.0,
+      "streetwear": 0.0
+    },
+    "subcategory": "skirt"
+  },
+  "cutout": {
+    "height": 928,
+    "mime_type": "image/png",
+    "processed_relative_path": "feminine/bottoms/1791293422.png",
+    "sha256": "37c13b463fb63ca3811e1d17eb86a9eae1db503f7aaac981178df422bf23263d",
+    "width": 1664
+  },
+  "expected_category": "bottom",
+  "manifest_version": "curated-cache-v1",
+  "photo_sha256": "f90351760347e78327309e352e9afc18f00dc89c63ffbb49ecb57d11d660b5c3",
+  "presentation_profile": "feminine",
+  "processed_at": "2026-10-07T05:46:28.731868+00:00",
+  "schema_version": "curated-v1",
+  "source_relative_path": "feminine/bottoms/1791293422.png"
+}

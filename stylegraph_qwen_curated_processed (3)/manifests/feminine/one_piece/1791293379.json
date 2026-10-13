@@ -1,0 +1,51 @@
+{
+  "attributes": {
+    "category": "one_piece",
+    "color": {
+      "primary": "black",
+      "secondary": null
+    },
+    "display_name": "Black Jumpsuit",
+    "fit": {
+      "primary": "relaxed"
+    },
+    "formality_score": 0.6,
+    "layer_role": "one_piece",
+    "material": {
+      "primary": "cotton"
+    },
+    "model_confidence": 0.9,
+    "pattern": "solid",
+    "season_weights": {
+      "fall": 0.4,
+      "spring": 0.8,
+      "summer": 0.6,
+      "winter": 0.2
+    },
+    "style_tags": {
+      "bohemian": 0.05,
+      "casual": 0.9,
+      "edgy": 0.05,
+      "formal": 0.2,
+      "minimal": 0.8,
+      "smart_casual": 0.7,
+      "sporty": 0.05,
+      "streetwear": 0.1
+    },
+    "subcategory": "jumpsuit"
+  },
+  "cutout": {
+    "height": 928,
+    "mime_type": "image/png",
+    "processed_relative_path": "feminine/one_piece/1791293379.png",
+    "sha256": "db87433141c04b5bf6ecb3b3de7e79631c780320803ebd327b3febeee3a2e57b",
+    "width": 1664
+  },
+  "expected_category": "one_piece",
+  "manifest_version": "curated-cache-v1",
+  "photo_sha256": "ca40dc29fc1ca20e4e6b84f50cabb92d6031ebbdf2cbc4bfad86a862ab323ad1",
+  "presentation_profile": "feminine",
+  "processed_at": "2026-10-07T05:47:56.080928+00:00",
+  "schema_version": "curated-v1",
+  "source_relative_path": "feminine/one_piece/1791293379.png"
+}

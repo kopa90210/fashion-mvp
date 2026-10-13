@@ -1,0 +1,51 @@
+{
+  "attributes": {
+    "category": "footwear",
+    "color": {
+      "primary": "black",
+      "secondary": null
+    },
+    "display_name": "Black Leather Sandals",
+    "fit": {
+      "primary": "regular"
+    },
+    "formality_score": 0.6,
+    "layer_role": "footwear",
+    "material": {
+      "primary": "leather"
+    },
+    "model_confidence": 0.9,
+    "pattern": "solid",
+    "season_weights": {
+      "fall": 0.3,
+      "spring": 0.5,
+      "summer": 0.8,
+      "winter": 0.1
+    },
+    "style_tags": {
+      "bohemian": 0.0,
+      "casual": 0.9,
+      "edgy": 0.0,
+      "formal": 0.2,
+      "minimal": 0.8,
+      "smart_casual": 0.7,
+      "sporty": 0.0,
+      "streetwear": 0.1
+    },
+    "subcategory": "sandals"
+  },
+  "cutout": {
+    "height": 928,
+    "mime_type": "image/png",
+    "processed_relative_path": "feminine/footwear/1791293642.png",
+    "sha256": "aa3152c29e9e235751d47147536b0129891a92034dab27e18f4423da26e2ee49",
+    "width": 1664
+  },
+  "expected_category": "footwear",
+  "manifest_version": "curated-cache-v1",
+  "photo_sha256": "9c721e8957f935eddd8fe41b1273fe2a3cd9bc4caa37c6c3ca646945dc8b3540",
+  "presentation_profile": "feminine",
+  "processed_at": "2026-10-07T05:47:11.803953+00:00",
+  "schema_version": "curated-v1",
+  "source_relative_path": "feminine/footwear/1791293642.png"
+}

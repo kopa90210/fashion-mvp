@@ -1,0 +1,111 @@
+{
+  "summary": {
+    "total": 9,
+    "processed": 9,
+    "skipped": 0,
+    "failed": 0,
+    "category_counts": {
+      "accessory": 3,
+      "bottom": 1,
+      "footwear": 2,
+      "one_piece": 2,
+      "top": 1
+    },
+    "presentation_counts": {
+      "feminine": 9
+    }
+  },
+  "duration_ms": 199963.73,
+  "results": [
+    {
+      "source_relative_path": "feminine/accessories/1791293834.png",
+      "presentation_profile": "feminine",
+      "expected_category": "accessory",
+      "category": "accessory",
+      "subcategory": "handbag",
+      "display_name": "Black Leather Shoulder Bag",
+      "model_confidence": 0.9,
+      "status": "processed"
+    },
+    {
+      "source_relative_path": "feminine/accessories/1791293912.png",
+      "presentation_profile": "feminine",
+      "expected_category": "accessory",
+      "category": "accessory",
+      "subcategory": "belt",
+      "display_name": "Black Leather Belt",
+      "model_confidence": 0.9,
+      "status": "processed"
+    },
+    {
+      "source_relative_path": "feminine/accessories/1791293965.png",
+      "presentation_profile": "feminine",
+      "expected_category": "accessory",
+      "category": "accessory",
+      "subcategory": "eyewear",
+      "display_name": "Black Square Frame Glasses",
+      "model_confidence": 0.9,
+      "status": "processed"
+    },
+    {
+      "source_relative_path": "feminine/bottoms/1791293422.png",
+      "presentation_profile": "feminine",
+      "expected_category": "bottom",
+      "category": "bottom",
+      "subcategory": "skirt",
+      "display_name": "Sage Green Pleated Skirt",
+      "model_confidence": 0.9,
+      "status": "processed"
+    },
+    {
+      "source_relative_path": "feminine/footwear/1791293593.png",
+      "presentation_profile": "feminine",
+      "expected_category": "footwear",
+      "category": "footwear",
+      "subcategory": "high_heeled_pumps",
+      "display_name": "Black High Heeled Pumps",
+      "model_confidence": 0.9,
+      "status": "processed"
+    },
+    {
+      "source_relative_path": "feminine/footwear/1791293642.png",
+      "presentation_profile": "feminine",
+      "expected_category": "footwear",
+      "category": "footwear",
+      "subcategory": "sandals",
+      "display_name": "Black Leather Sandals",
+      "model_confidence": 0.9,
+      "status": "processed"
+    },
+    {
+      "source_relative_path": "feminine/one_piece/1791293301.png",
+      "presentation_profile": "feminine",
+      "expected_category": "one_piece",
+      "category": "one_piece",
+      "subcategory": "dresses",
+      "display_name": "Rust-colored Linen Dress",
+      "model_confidence": 0.9,
+      "status": "processed"
+    },
+    {
+      "source_relative_path": "feminine/one_piece/1791293379.png",
+      "presentation_profile": "feminine",
+      "expected_category": "one_piece",
+      "category": "one_piece",
+      "subcategory": "jumpsuit",
+      "display_name": "Black Jumpsuit",
+      "model_confidence": 0.9,
+      "status": "processed"
+    },
+    {
+      "source_relative_path": "feminine/tops/1791293511.png",
+      "presentation_profile": "feminine",
+      "expected_category": "top",
+      "category": "top",
+      "subcategory": "blouse",
+      "display_name": "Cream Puff Sleeve Blouse",
+      "model_confidence": 0.9,
+      "status": "processed"
+    }
+  ]
+}

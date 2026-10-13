@@ -202,6 +202,9 @@ def decode_gemini_mask(
 ) -> DecodedMask:
     width, height = image_size
 
+    if len({tuple(point) for point in raw_points if len(point) == 2}) < 3:
+        raise ValueError("Gemini segmentation mask is degenerate")
+
     box = _normalized_box_to_pixels(
         box_2d,
         width,
@@ -265,11 +268,23 @@ def render_segmented_garment(
 
     width, height = source.size
 
-    decoded = decode_gemini_mask(
-        raw_points,
-        box_2d,
-        source.size,
-    )
+    try:
+        decoded = decode_gemini_mask(
+            raw_points,
+            box_2d,
+            source.size,
+        )
+    except ValueError:
+        left, top, right, bottom = _normalized_box_to_pixels(
+            box_2d,
+            width,
+            height,
+        )
+        decoded = DecodedMask(
+            points=[(left, top), (right, top), (right, bottom), (left, bottom)],
+            mode="bounding_box_fallback",
+            score=0.0,
+        )
 
     mask = Image.new(
         "L",

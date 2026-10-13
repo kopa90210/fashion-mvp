@@ -21,7 +21,7 @@ export default async function OutfitsPage() {
     const hasOwnedPieces = ownedItems.length > 0
 
     return (
-      <main className="min-h-screen bg-[#f7f4ef] px-4 py-10 text-[#1d1b18] sm:px-6">
+      <main className="px-4 py-10 text-[#1d1b18] sm:px-6">
         <div className="mx-auto flex min-h-[70vh] max-w-xl flex-col items-center justify-center text-center">
           <p className="text-sm font-medium uppercase tracking-[0.18em] text-[#7a6f62]">
             Today

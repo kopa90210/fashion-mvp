@@ -9,7 +9,7 @@ import PhotoUploadForm from './PhotoUploadForm'
 export default function UploadScreen({ outfitUploadEnabled }: { outfitUploadEnabled: boolean }) {
   const router = useRouter()
   const [mode, setMode] = useState<'outfit' | 'piece'>(outfitUploadEnabled ? 'outfit' : 'piece')
-  return <main className="min-h-screen bg-[#f7f4ef] px-4 py-7 text-[#1d1b18] sm:px-6"><div className="mx-auto max-w-xl">
+  return <main className="px-4 py-7 text-[#1d1b18] sm:px-6"><div className="mx-auto max-w-xl">
     <button type="button" onClick={() => router.back()} aria-label="Go back" className="mb-10 flex size-10 items-center justify-center rounded-full border border-[#d8cec2] bg-white/60"><ArrowLeft className="size-4" /></button>
     <p className="text-sm uppercase tracking-[0.18em] text-[#7a6f62]">Add to closet</p>
     <h1 className="mt-2 text-3xl font-semibold">{mode === 'outfit' ? 'Upload an outfit photo' : 'Photograph a piece'}</h1>
@@ -23,8 +23,8 @@ export default function UploadScreen({ outfitUploadEnabled }: { outfitUploadEnab
         const result = await uploadOutfitPhoto(file)
         router.push(`/wardrobe/add/review/${result.sourcePhotoId}`)
       } else {
-        await uploadDraftWardrobeItem(file)
-        router.push('/wardrobe')
+        const result = await uploadDraftWardrobeItem(file)
+        router.push(`/wardrobe?review=${result.itemId}`)
       }
     }} submitLabel={mode === 'outfit' ? 'Separate garments' : 'Add to drafts'} /></div>
   </div></main>

@@ -12,6 +12,17 @@ export const SUBCATEGORY_MAP: Partial<Record<WardrobeCategory, readonly string[]
   accessory: ['bag', 'hat', 'jewelry'],
 }
 
+export function isWardrobeCategory(value: unknown): value is WardrobeCategory {
+  return typeof value === 'string' && WARDROBE_CATEGORIES.includes(value as WardrobeCategory)
+}
+
+export function isValidWardrobeClassification(category: unknown, subcategory: unknown) {
+  if (!isWardrobeCategory(category)) return false
+  if (subcategory == null || subcategory === '') return true
+  if (typeof subcategory !== 'string') return false
+  return SUBCATEGORY_MAP[category]?.includes(subcategory) ?? false
+}
+
 const CATEGORY_TO_ROLE: Record<WardrobeCategory, WardrobeLayerRole> = {
   top: 'base_layer', bottom: 'bottom', one_piece: 'one_piece', footwear: 'footwear', outerwear: 'outerwear', accessory: 'accessory',
 }

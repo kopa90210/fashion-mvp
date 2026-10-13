@@ -1,6 +1,5 @@
 'use client'
 
-import Image from 'next/image'
 import Link from 'next/link'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ArrowLeft, LoaderCircle, X } from 'lucide-react'
@@ -8,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { confirmOutfitPhotoDraft, discardDraftItem, getOutfitPhotoReview, updateWardrobeItemAttributes, type OutfitPhotoReview } from '@/src/app/actions/wardrobe'
 import { WARDROBE_CATEGORIES } from '@/src/lib/wardrobe/normalize'
 import { processingMessage, reviewPieces, type ReviewGarment } from './review-flow'
+import GarmentImage from '@/src/components/wardrobe/GarmentImage'
 
 const field = 'mt-2 w-full rounded-xl border border-[#D8CEC2] bg-[#FFFDFA] px-3 py-3 text-base text-[#1D1B18]'
 const categoryName = (category: string | null) => category ? category.charAt(0).toUpperCase() + category.slice(1) : 'Choose a category'
@@ -68,7 +68,7 @@ function FocusedPiece({ item, onHandled, onEdited }: {
 
   return <article>
     <div className="relative aspect-[4/5] max-h-[52vh] overflow-hidden rounded-3xl bg-[#EBE3D8] sm:max-h-[560px]">
-      <Image src={alternate && item.reconstructedImageUrl ? item.reconstructedImageUrl : item.originalImageUrl} alt={item.displayName || 'Clothing piece'} fill unoptimized sizes="(min-width: 768px) 520px, 100vw" className="object-contain p-8 sm:p-12" />
+      <GarmentImage src={alternate && item.reconstructedImageUrl ? item.reconstructedImageUrl : item.originalImageUrl} alt={item.displayName || 'Clothing piece'} label={item.displayName || 'Clothing piece'} role={item.category} sizes="(min-width: 768px) 520px, 100vw" className="object-contain p-8 sm:p-12" />
     </div>
     {item.reconstructedImageUrl && <button type="button" disabled={busy} aria-pressed={alternate} onClick={() => setAlternate(!alternate)} className="mt-3 min-h-10 text-sm text-[#6D6257] underline underline-offset-4">{alternate ? 'Show original photo' : 'See alternate view'}</button>}
     <h2 className="mt-6 text-2xl font-medium">{item.displayName || 'Your piece'}</h2>
@@ -123,7 +123,7 @@ export default function ReviewOutfitScreen({ initial }: { initial: OutfitPhotoRe
   const complete = finished || (!remaining && total > 0 && (accessories || handled.length === 0))
   const ready = review.status === 'done'
 
-  return <main className="min-h-screen bg-[#F7F4EF] px-5 py-6 text-[#1D1B18] sm:px-8 sm:py-10"><div className="mx-auto max-w-5xl">
+  return <main className="min-h-dvh bg-[#F7F4EF] px-5 py-6 text-[#1D1B18] sm:px-8 sm:py-10"><div className="mx-auto max-w-5xl">
     <Link href="/wardrobe" aria-label="Back to wardrobe" className="mb-7 inline-flex size-11 items-center justify-center rounded-full border border-[#D8CEC2]"><ArrowLeft className="size-5" /></Link>
     <p className="text-xs uppercase tracking-[0.2em] text-[#6D6257]">Your outfit</p>
     <h1 className="mt-3 text-3xl font-medium sm:text-4xl">{waiting ? processingMessage(review.jobStatus) : review.status === 'failed' ? 'Let’s try another photo' : complete ? 'Review complete' : `${total} ${total === 1 ? 'piece' : 'pieces'} found`}</h1>
@@ -132,7 +132,7 @@ export default function ReviewOutfitScreen({ initial }: { initial: OutfitPhotoRe
     {waiting && <div role="status" className="mt-10 flex items-center gap-3 text-[#6D6257]"><LoaderCircle aria-hidden="true" className="size-5 animate-spin" /><span>Your photo is being prepared for review.</span></div>}
     {review.status === 'failed' && <div role="alert" className="mt-10"><p className="text-[#6D6257]">We couldn’t find your pieces this time. Try a clear, well-lit photo.</p><Link href="/wardrobe/add" className="mt-6 inline-block underline underline-offset-4">Upload another photo</Link></div>}
     {ready && !complete && current && <div className="mt-8 grid gap-10 md:grid-cols-[0.8fr_1fr] md:gap-16">
-      <aside className="hidden md:block"><p className="mb-3 text-sm text-[#6D6257]">Your outfit reference</p><div className="relative aspect-[3/4] overflow-hidden rounded-3xl bg-[#EBE3D8]"><Image src={review.sourceImageUrl} alt="Your uploaded outfit" fill unoptimized sizes="420px" className="object-contain p-5" /></div></aside>
+      <aside className="hidden md:block"><p className="mb-3 text-sm text-[#6D6257]">Your outfit reference</p><div className="relative aspect-[3/4] overflow-hidden rounded-3xl bg-[#EBE3D8]"><GarmentImage src={review.sourceImageUrl} alt="Your uploaded outfit" role="one_piece" sizes="420px" className="object-contain p-5" /></div></aside>
       <section aria-label={accessories && !pieces.main.length ? 'Accessory review' : 'Main-piece review'}>
         <div className="mb-5"><p aria-live="polite" className="mb-3 text-sm text-[#6D6257]">{Math.max(1, total - remaining + 1)} of {total}</p><div role="progressbar" aria-label="Pieces reviewed" aria-valuemin={0} aria-valuemax={total} aria-valuenow={total - remaining} className="h-1 overflow-hidden rounded-full bg-[#D8CEC2]"><div className="h-full bg-[#6D6257] transition-all" style={{ width: `${total ? (total - remaining) / total * 100 : 0}%` }} /></div></div>
         <FocusedPiece key={current.id} item={current} onHandled={(id) => { setHandled((ids) => [...ids, id]); void refresh() }} onEdited={(item) => { ++request.current; setReview((value) => ({ ...value, garments: value.garments.map((garment) => garment.id === item.id ? item : garment) })) }} />

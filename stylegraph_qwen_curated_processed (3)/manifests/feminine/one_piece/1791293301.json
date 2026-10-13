@@ -1,0 +1,51 @@
+{
+  "attributes": {
+    "category": "one_piece",
+    "color": {
+      "primary": "rust",
+      "secondary": null
+    },
+    "display_name": "Rust-colored Linen Dress",
+    "fit": {
+      "primary": "regular"
+    },
+    "formality_score": 0.6,
+    "layer_role": "one_piece",
+    "material": {
+      "primary": "linen"
+    },
+    "model_confidence": 0.9,
+    "pattern": "solid",
+    "season_weights": {
+      "fall": 0.5,
+      "spring": 0.8,
+      "summer": 0.7,
+      "winter": 0.3
+    },
+    "style_tags": {
+      "bohemian": 0.05,
+      "casual": 0.9,
+      "edgy": 0.05,
+      "formal": 0.2,
+      "minimal": 0.8,
+      "smart_casual": 0.7,
+      "sporty": 0.05,
+      "streetwear": 0.1
+    },
+    "subcategory": "dresses"
+  },
+  "cutout": {
+    "height": 928,
+    "mime_type": "image/png",
+    "processed_relative_path": "feminine/one_piece/1791293301.png",
+    "sha256": "87d744186404b25d130cec95f8c1b071dd2155c1374a4fa6b621aab977984ab7",
+    "width": 1664
+  },
+  "expected_category": "one_piece",
+  "manifest_version": "curated-cache-v1",
+  "photo_sha256": "3366c7b42f7dbbb2b9dc2c205f3c7ed53e9bb6f4c3d0a1497742f2f3800a8d07",
+  "presentation_profile": "feminine",
+  "processed_at": "2026-10-07T05:47:33.365114+00:00",
+  "schema_version": "curated-v1",
+  "source_relative_path": "feminine/one_piece/1791293301.png"
+}

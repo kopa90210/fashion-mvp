@@ -1,7 +1,7 @@
 'use server'
 
 import { createClient } from '@/src/lib/supabase/server'
-import { normalizeWardrobeItem } from '@/src/lib/wardrobe/normalize'
+import { isValidWardrobeClassification, normalizeWardrobeItem } from '@/src/lib/wardrobe/normalize'
 import { deletePrivateObject, signedOwnedPrivatePreviewUrl, signedOwnedPrivateUrl, uploadValidatedPrivateImage } from '@/src/lib/media/private-media'
 import { randomUUID } from 'node:crypto'
 
@@ -31,6 +31,8 @@ export type UserWardrobeItem = {
   color: unknown
   fit: unknown
   style_tags: unknown
+  material?: string | null
+  season_weights?: unknown
   layer_role: string | null
   quantity: number
   added_at: string
@@ -45,6 +47,8 @@ export type WardrobeAttributeUpdates = {
   color?: unknown
   fit?: unknown
   style_tags?: unknown
+  material?: string | null
+  season_weights?: unknown
 }
 
 async function getAuthenticatedClient() {
@@ -70,6 +74,8 @@ async function mapUserWardrobeRow(row: Record<string, unknown>, supabase: Awaite
     color: item.color ?? {},
     fit: item.fit ?? {},
     style_tags: item.style_tags ?? {},
+    material: (item.material as string | null) ?? null,
+    season_weights: item.season_weights ?? {},
     layer_role: (item.layer_role as string | null) ?? null,
     quantity: Number(row.quantity ?? 1),
     added_at: String(row.added_at ?? ''),
@@ -80,7 +86,7 @@ async function mapUserWardrobeRow(row: Record<string, unknown>, supabase: Awaite
 export async function getUserWardrobeItems(category?: string, subcategory?: string) {
   const { supabase, userId } = await getAuthenticatedClient()
   let query = supabase.from('user_wardrobe_items')
-    .select('item_id, quantity, added_at, wardrobe_items!inner (id, source, category, subcategory, brand, display_name, image_url, media_asset_id, color, fit, style_tags, layer_role, status)')
+    .select('item_id, quantity, added_at, wardrobe_items!inner (id, source, category, subcategory, brand, display_name, image_url, media_asset_id, color, fit, style_tags, material, season_weights, layer_role, status)')
     .eq('user_id', userId).eq('wardrobe_items.status', 'confirmed')
     .order('added_at', { ascending: false })
   if (category) query = query.eq('wardrobe_items.category', category)
@@ -98,7 +104,7 @@ export async function getUserWardrobeItems(category?: string, subcategory?: stri
 export async function getUserDraftItems() {
   const { supabase, userId } = await getAuthenticatedClient()
   const { data, error } = await supabase.from('user_wardrobe_items')
-    .select('item_id, quantity, added_at, wardrobe_items (id, category, subcategory, brand, display_name, image_url, media_asset_id, source_photo_id, color, fit, style_tags, layer_role, status)')
+    .select('item_id, quantity, added_at, wardrobe_items (id, category, subcategory, brand, display_name, image_url, media_asset_id, source_photo_id, color, fit, style_tags, material, season_weights, layer_role, status)')
     .eq('user_id', userId).eq('wardrobe_items.status', 'draft').order('added_at', { ascending: false })
   if (error) throw new Error('Could not fetch draft wardrobe items')
   const singlePieceRows = ((data ?? []) as Record<string, unknown>[]).filter((row) => {
@@ -134,7 +140,13 @@ async function updateWardrobeStatus(itemId: string, status: 'confirmed' | 'rejec
 export async function updateWardrobeItemAttributes(itemId: string, updates: WardrobeAttributeUpdates) {
   const { supabase } = await getAuthenticatedClient()
   const allowed = Object.fromEntries(Object.entries(updates).filter(([key]) =>
-    ['category', 'subcategory', 'brand', 'display_name', 'color', 'fit', 'style_tags'].includes(key)))
+    ['category', 'subcategory', 'brand', 'display_name', 'color', 'fit', 'style_tags', 'material', 'season_weights'].includes(key)))
+  if ('category' in allowed && !isValidWardrobeClassification(allowed.category, allowed.subcategory ?? null)) {
+    throw new Error('Invalid wardrobe category and subcategory combination')
+  }
+  if ('subcategory' in allowed && !('category' in allowed)) {
+    throw new Error('Category is required when updating subcategory')
+  }
   const classification = ('category' in allowed || 'subcategory' in allowed)
     ? normalizeWardrobeItem({ category: (allowed.category as string | null) ?? null, subcategory: (allowed.subcategory as string | null) ?? null })
     : null
@@ -245,6 +257,7 @@ export type OutfitPhotoReview = {
   garments: Array<{
     id: string; category: string | null; subcategory: string | null
     displayName: string; brand: string | null; color: string
+    material?: string | null; fit?: unknown; styleTags?: unknown; seasonWeights?: unknown
     originalImageUrl: string; reconstructedImageUrl: string | null
   }>
 }
@@ -258,13 +271,14 @@ export async function getOutfitPhotoReview(sourcePhotoId: string): Promise<Outfi
     .eq('source_photo_id', sourcePhotoId).eq('user_id', userId)
     .order('created_at', { ascending: false }).limit(1).maybeSingle()
   const { data: rows, error: itemError } = await supabase.from('wardrobe_items')
-    .select('id, category, subcategory, display_name, brand, color, status, original_media_asset_id, reconstructed_media_asset_id')
+    .select('id, category, subcategory, display_name, brand, color, material, fit, style_tags, season_weights, status, original_media_asset_id, reconstructed_media_asset_id')
     .eq('source_photo_id', sourcePhotoId).eq('status', 'draft').order('created_at')
   if (itemError) throw new Error('Could not load extracted garments')
   const garments = await Promise.all((rows ?? []).map(async (item) => ({
     id: String(item.id), category: item.category, subcategory: item.subcategory,
     displayName: item.display_name || 'Garment', brand: item.brand,
     color: typeof item.color?.primary === 'string' ? item.color.primary : 'Unknown',
+    material: item.material ?? null, fit: item.fit ?? {}, styleTags: item.style_tags ?? {}, seasonWeights: item.season_weights ?? {},
     originalImageUrl: await signedOwnedPrivateUrl(supabase, String(item.original_media_asset_id)),
     reconstructedImageUrl: item.reconstructed_media_asset_id
       ? await signedOwnedPrivateUrl(supabase, String(item.reconstructed_media_asset_id)) : null,

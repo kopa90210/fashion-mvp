@@ -67,8 +67,10 @@ describe('wardrobe browsing', () => {
     expect(html).toContain('Search your wardrobe')
     expect(html).toContain('href="/wardrobe/shirt"')
     expect(html).toContain('grid-cols-2')
-    expect(html).toContain('md:grid-cols-3')
-    expect(html).toContain('lg:grid-cols-4')
+    expect(html).toContain('sm:grid-cols-3')
+    expect(html).toContain('md:grid-cols-4')
+    expect(html).toContain('2xl:grid-cols-6')
+    expect(html).toContain('data-garment-card="wardrobe"')
     expect(html).toContain('object-contain')
     for (const label of ['All', 'Tops', 'Bottoms', 'Shoes', 'Layers', 'Accessories', 'Newest', 'Oldest', 'A–Z', 'Wishlist', 'Select']) expect(html).toContain(label)
     expect(html).not.toContain('Filtering is coming soon')
@@ -104,5 +106,9 @@ describe('owned wardrobe detail navigation', () => {
   it('rejects malformed IDs before reading wardrobe data', async () => {
     await expect(WardrobeItemPage({ params: Promise.resolve({ itemId: 'bad-id' }) })).rejects.toThrow('NOT_FOUND')
     expect(mocks.getItemIntelligence).not.toHaveBeenCalled()
+  })
+  it('shows honest add affordances for missing supported metadata', () => {
+    const html = renderToStaticMarkup(React.createElement(WardrobeItemScreen, { item: item(id, { brand: null, color: {}, fit: {}, material: null, season_weights: {}, style_tags: {}, subcategory: null }), looks: [], matches: [], descriptors: [] }))
+    for (const label of ['Add brand', 'Add color', 'Add fit', 'Add material', 'Add seasons', 'Add style tags']) expect(html).toContain(label)
   })
 })

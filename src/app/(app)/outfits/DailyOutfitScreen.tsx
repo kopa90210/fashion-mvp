@@ -118,7 +118,7 @@ export default function DailyOutfitScreen({
   }
 
   return (
-    <main className="min-h-screen bg-[#f7f4ef] px-5 py-7 text-[#1d1b18] sm:px-8 lg:py-10">
+    <main className="px-5 py-7 text-[#1d1b18] sm:px-8 lg:py-10">
       <div className="mx-auto max-w-3xl">
         <header className="mb-7">
           <h1 className="text-3xl font-medium tracking-tight sm:text-4xl">Today</h1>

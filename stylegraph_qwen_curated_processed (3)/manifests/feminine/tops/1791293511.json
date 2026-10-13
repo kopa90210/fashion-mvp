@@ -1,0 +1,51 @@
+{
+  "attributes": {
+    "category": "top",
+    "color": {
+      "primary": "beige",
+      "secondary": null
+    },
+    "display_name": "Cream Puff Sleeve Blouse",
+    "fit": {
+      "primary": "relaxed"
+    },
+    "formality_score": 0.6,
+    "layer_role": "base_layer",
+    "material": {
+      "primary": "cotton"
+    },
+    "model_confidence": 0.9,
+    "pattern": "solid",
+    "season_weights": {
+      "fall": 0.4,
+      "spring": 0.8,
+      "summer": 0.6,
+      "winter": 0.2
+    },
+    "style_tags": {
+      "bohemian": 0.05,
+      "casual": 0.9,
+      "edgy": 0.05,
+      "formal": 0.2,
+      "minimal": 0.8,
+      "smart_casual": 0.7,
+      "sporty": 0.05,
+      "streetwear": 0.1
+    },
+    "subcategory": "blouse"
+  },
+  "cutout": {
+    "height": 928,
+    "mime_type": "image/png",
+    "processed_relative_path": "feminine/tops/1791293511.png",
+    "sha256": "f2d2ad0a5cb3bc81451dcebb0256c41240393a9fd0884c808b35d288bedae498",
+    "width": 1664
+  },
+  "expected_category": "top",
+  "manifest_version": "curated-cache-v1",
+  "photo_sha256": "ca62a835eb3bfbd362ecbc4f14c1196ac2e95ae8137fce7b7796322d5e2d2c28",
+  "presentation_profile": "feminine",
+  "processed_at": "2026-10-07T05:48:18.030593+00:00",
+  "schema_version": "curated-v1",
+  "source_relative_path": "feminine/tops/1791293511.png"
+}

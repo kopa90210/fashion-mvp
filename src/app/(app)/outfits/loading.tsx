@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader } from '@/components/ui/card'
 
 export default function LoadingOutfits() {
   return (
-    <main className="min-h-screen bg-[#f7f4ef] px-4 py-6 text-[#1d1b18] sm:px-6 lg:py-10">
+    <main className="px-4 py-6 text-[#1d1b18] sm:px-6 lg:py-10">
       <div className="mx-auto grid max-w-6xl gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
         <section className="min-w-0 space-y-6">
           <div className="mb-5 flex flex-wrap items-end justify-between gap-3">

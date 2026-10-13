@@ -151,12 +151,15 @@ class GeminiOutfitProvider:
 
         max_attempts = 4
         last_error: Exception | None = None
-        request_started = time.monotonic()
+        request_started = time.perf_counter()
 
         for attempt in range(
             1,
             max_attempts + 1,
         ):
+            observation = current_observation.get()
+            if observation:
+                observation.provider_attempts = attempt
             log_event(logger, "provider_request_started", model=self.model, attempt=attempt)
             try:
                 interaction = (
@@ -189,6 +192,7 @@ class GeminiOutfitProvider:
                     )
                 )
 
+                validation_started = time.perf_counter()
                 try:
                     result = (
                         GeminiOutfitResponse
@@ -201,6 +205,9 @@ class GeminiOutfitProvider:
                         "Gemini response failed "
                         "schema validation"
                     ) from exc
+                finally:
+                    if observation:
+                        observation.response_validation_ms += elapsed_ms(validation_started)
 
                 if (
                     len(result.boxes)
@@ -372,7 +379,7 @@ class GeminiOutfitProvider:
         observation = current_observation.get()
         if observation:
             observation.stage = "storage_upload"
-        upload_started = time.monotonic()
+        upload_started = time.perf_counter()
         try:
             db.upload_private_png(
                 user_id,
@@ -381,7 +388,7 @@ class GeminiOutfitProvider:
             )
         finally:
             if observation:
-                observation.storage_upload_seconds += time.monotonic() - upload_started
+                observation.storage_upload_seconds += time.perf_counter() - upload_started
         if observation:
             observation.stage = "garment_processing"
 
@@ -416,7 +423,7 @@ class GeminiOutfitProvider:
         observation = current_observation.get()
         if observation:
             observation.stage = "source_fetch"
-        source_started = time.monotonic()
+        source_started = time.perf_counter()
         log_event(logger, "source_fetch_started")
 
         source_photo_id = (
@@ -494,11 +501,14 @@ class GeminiOutfitProvider:
             )
         )
 
+        if observation:
+            observation.source_download_ms = elapsed_ms(source_started)
+
         log_event(logger, "source_fetch_completed", duration_ms=elapsed_ms(source_started),
                   byte_size=len(image_bytes), mime_type=mime_type)
         if observation:
             observation.stage = "provider_request"
-        provider_started = time.monotonic()
+        provider_started = time.perf_counter()
         try:
             response = self._call_gemini(
                 image_bytes,
@@ -516,7 +526,7 @@ class GeminiOutfitProvider:
 
         if observation:
             observation.stage = "garment_processing"
-        processing_started = time.monotonic()
+        processing_started = time.perf_counter()
         upload_seconds_before = observation.storage_upload_seconds if observation else 0.0
         try:
             with Image.open(
@@ -589,8 +599,13 @@ class GeminiOutfitProvider:
             raise
 
         upload_seconds = (observation.storage_upload_seconds - upload_seconds_before) if observation else 0.0
+        processing_ms = max(0, round((time.perf_counter() - processing_started - upload_seconds) * 1000))
+        if observation:
+            observation.garment_processing_ms = processing_ms
+            observation.storage_upload_ms = max(0, round(upload_seconds * 1000))
+            observation.garment_count = len(results)
         log_event(logger, "garment_processing_completed", garment_count=len(results),
-                  duration_ms=max(0, round((time.monotonic() - processing_started - upload_seconds) * 1000)))
+                  duration_ms=processing_ms)
         log_event(logger, "storage_upload_completed", garment_count=len(results),
                   total_bytes=sum(item["original"]["byte_size"] for item in results),
                   duration_ms=max(0, round(upload_seconds * 1000)))

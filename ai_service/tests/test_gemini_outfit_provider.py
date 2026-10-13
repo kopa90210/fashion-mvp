@@ -148,6 +148,20 @@ def test_low_confidence_accessory_is_filtered_without_losing_outfit(settings, ga
     assert db.deletes == []
 
 
+def test_unreliable_mask_falls_back_to_validated_bounding_box(settings, garments):
+    garments[:] = [garments[0]]
+    garments[0]["mask"] = [[0, 0], [0, 0], [0, 0]]
+    client = FakeGeminiClient(json.dumps({"boxes": garments}))
+    db = FakeDb()
+
+    results = GeminiOutfitProvider(settings, client=client).extract(db, JOB)
+
+    assert len(results) == 1
+    assert len(db.uploads) == 1
+    with Image.open(io.BytesIO(db.uploads[0][2])) as crop:
+        assert crop.getchannel("A").getextrema() == (255, 255)
+
+
 @pytest.mark.parametrize("output_text", ["not JSON", '{"boxes": [{}]}', '{"boxes": "invalid"}'])
 def test_malformed_structured_output_is_rejected(settings, output_text):
     client = FakeGeminiClient(output_text)

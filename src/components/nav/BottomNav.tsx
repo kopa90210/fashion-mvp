@@ -16,8 +16,8 @@ export default function BottomNav() {
   if (pathname.startsWith('/quiz')) return null
 
   return (
-    <nav aria-label="Primary navigation" className="fixed inset-x-0 bottom-5 z-[100] flex items-center justify-center gap-2 px-3 pb-[env(safe-area-inset-bottom)]">
-      <div className="flex items-center gap-1 rounded-full border border-[#d8cec2] bg-[#fffdfa]/95 p-1 shadow-lg shadow-[#3e3328]/10 backdrop-blur">
+    <nav aria-label="Primary navigation" className="stylegraph-bottom-nav pointer-events-none fixed inset-x-0 z-[100] flex items-center justify-center gap-2 px-3 lg:static lg:mt-6 lg:pb-8">
+      <div className="pointer-events-auto flex items-center gap-1 rounded-full border border-[#d8cec2] bg-[#fffdfa]/95 p-1 shadow-lg shadow-[#3e3328]/10 backdrop-blur">
         {links.map(({ href, label, Icon }) => {
           const active = pathname === href || pathname.startsWith(`${href}/`)
           return (
@@ -30,7 +30,7 @@ export default function BottomNav() {
         })}
       </div>
       <Link href="/wardrobe/add" aria-label="Add wardrobe item" title="Add wardrobe item"
-        className="flex size-12 shrink-0 items-center justify-center rounded-full bg-[#1d1b18] text-[#fffdfa] shadow-lg shadow-[#3e3328]/20 transition-transform hover:scale-105">
+        className="pointer-events-auto flex size-12 shrink-0 items-center justify-center rounded-full bg-[#1d1b18] text-[#fffdfa] shadow-lg shadow-[#3e3328]/20 transition-transform hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1d1b18] focus-visible:ring-offset-2">
         <Plus className="size-6" />
       </Link>
     </nav>

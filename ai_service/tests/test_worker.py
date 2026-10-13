@@ -6,7 +6,22 @@ import httpx
 
 import pytest
 
-from ai_service.worker import InvalidJobInput, _extract_garment, classify_failure, process_one, safe_usage
+from ai_service.config import Settings
+from ai_service.worker import (
+    InvalidJobInput,
+    ShutdownController,
+    WorkerConfigurationError,
+    WorkerHealth,
+    _extract_garment,
+    build_worker_id,
+    classify_failure,
+    configure_worker_logging,
+    log_worker_event,
+    process_one,
+    run_worker_loop,
+    safe_usage,
+    validate_worker_settings,
+)
 
 
 @pytest.fixture
@@ -142,3 +157,92 @@ def test_outfit_photo_uses_atomic_multi_garment_completion(settings):
         settings=settings, outfit_provider=provider) is True
     assert [name for name, _ in db.calls] == ["claim_ai_jobs", "complete_outfit_photo_job"]
     assert db.calls[-1][1]["p_garments"][0]["category"] == "bottom"
+
+
+def test_worker_config_validation_names_missing_variables_without_values():
+    settings = Settings(
+        supabase_url="",
+        supabase_secret_key="",
+        supabase_service_key="",
+        groq_api_key="",
+        outfit_provider="gemini",
+        gemini_api_key="",
+    )
+    with pytest.raises(WorkerConfigurationError) as error:
+        validate_worker_settings(settings)
+    message = str(error.value)
+    assert "SUPABASE_URL" in message
+    assert "GROQ_API_KEY" in message
+    assert "GEMINI_API_KEY" in message
+    assert "sb_secret" not in message
+
+
+def test_worker_identifier_is_unique_and_operationally_useful():
+    first = build_worker_id()
+    second = build_worker_id()
+    assert first != second
+    assert str(__import__("os").getpid()) in first
+    assert len(first) <= 100
+
+
+def test_shutdown_finishes_current_iteration_without_claiming_another_job():
+    shutdown = ShutdownController()
+    calls = 0
+
+    def process_next():
+        nonlocal calls
+        calls += 1
+        shutdown.request()
+        return True
+
+    run_worker_loop(
+        process_next,
+        shutdown,
+        WorkerHealth(worker_id="worker-a", started_at="start"),
+        poll_seconds=1,
+        heartbeat_seconds=60,
+    )
+    assert calls == 1
+
+
+def test_job_level_failure_does_not_stop_worker_loop():
+    shutdown = ShutdownController()
+    results = iter((True, False))
+    calls = 0
+
+    def process_next():
+        nonlocal calls
+        calls += 1
+        result = next(results)
+        if calls == 2:
+            shutdown.request()
+        return result
+
+    run_worker_loop(
+        process_next,
+        shutdown,
+        WorkerHealth(worker_id="worker-a", started_at="start"),
+        poll_seconds=1,
+        heartbeat_seconds=60,
+    )
+    assert calls == 2
+
+
+def test_worker_operational_log_contains_no_configuration_secrets(caplog):
+    caplog.set_level("INFO")
+    log_worker_event(
+        "WORKER_HEARTBEAT",
+        worker_id="host-123-token",
+        started_at="start",
+        last_claim_at=None,
+        last_success_at=None,
+    )
+    assert "WORKER_HEARTBEAT" in caplog.text
+    assert "GEMINI_API_KEY" not in caplog.text
+    assert "SUPABASE_SECRET_KEY" not in caplog.text
+
+
+def test_worker_suppresses_transport_logs_with_private_paths():
+    configure_worker_logging()
+    assert __import__("logging").getLogger("httpx").level == __import__("logging").WARNING
+    assert __import__("logging").getLogger("httpcore").level == __import__("logging").WARNING

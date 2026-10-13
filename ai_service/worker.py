@@ -8,23 +8,28 @@ from __future__ import annotations
 
 import argparse
 import base64
+from dataclasses import dataclass
+from datetime import datetime, timezone
 import json
 import logging
 import math
 import os
+import signal
+import socket
+import threading
 import time
 import uuid
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import quote
 
 import httpx
 from fastapi import HTTPException
 from groq import Groq
 from ai_service.config import Settings, get_settings
-from ai_service.config import Settings, get_settings
 from ai_service.models import OutfitRequest, WardrobeItem
 from ai_service.outfit_photo_observability import (
-    OutfitPhotoObservation, elapsed_ms, log_event, observe_outfit_photo,
+    OutfitPhotoObservation, elapsed_ms, log_event, log_timing_summary,
+    observe_outfit_photo, queue_wait_ms,
 )
 from ai_service.outfit_photo_worker import InvalidProviderOutput, RemoteProviderUnavailable, extract_outfit_photo
 from ai_service.providers.groq_provider import GroqProvider
@@ -48,6 +53,71 @@ class InvalidJobInput(Exception):
 
 class ProviderUnavailable(Exception):
     """A transient provider failure."""
+
+
+class WorkerConfigurationError(RuntimeError):
+    """A sanitized startup failure containing variable names, never values."""
+
+
+def validate_worker_settings(settings: Settings) -> None:
+    missing: list[str] = []
+    if not settings.supabase_url:
+        missing.append("SUPABASE_URL")
+    if not settings.supabase_server_key:
+        missing.append("SUPABASE_SECRET_KEY or SUPABASE_SERVICE_KEY")
+    if not settings.groq_api_key:
+        missing.append("GROQ_API_KEY")
+    if settings.outfit_provider == "gemini" and not settings.gemini_api_key:
+        missing.append("GEMINI_API_KEY")
+    if settings.outfit_provider == "notebook":
+        if not settings.outfit_pipeline_url:
+            missing.append("OUTFIT_PIPELINE_URL")
+        if not settings.outfit_pipeline_token:
+            missing.append("OUTFIT_PIPELINE_TOKEN")
+    if missing:
+        raise WorkerConfigurationError("Missing required worker configuration: " + ", ".join(missing))
+
+
+def build_worker_id() -> str:
+    """Return an instance-unique, log-safe identity within the DB text limit."""
+    hostname = "".join(char if char.isalnum() or char in "-." else "-" for char in socket.gethostname())
+    return f"{hostname[:48]}-{os.getpid()}-{uuid.uuid4().hex[:10]}"
+
+
+def utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def log_worker_event(event: str, **fields: str | int | float | None) -> None:
+    """Emit only explicitly supplied operational metadata."""
+    logger.info("%s %s", event, json.dumps(fields, sort_keys=True), extra={"event": event, **fields})
+
+
+def configure_worker_logging() -> None:
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+    # httpx request lines include private REST filters and storage object paths.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+
+
+@dataclass
+class WorkerHealth:
+    worker_id: str
+    started_at: str
+    last_claim_at: str | None = None
+    last_success_at: str | None = None
+
+
+class ShutdownController:
+    def __init__(self) -> None:
+        self.requested = False
+        self.event = threading.Event()
+
+    def request(self, signum: int | None = None, _frame: object = None) -> None:
+        if not self.requested:
+            logger.info("WORKER_SHUTDOWN_REQUESTED signal=%s", signum)
+        self.requested = True
+        self.event.set()
 
 
 def safe_usage(response: Any) -> dict[str, int]:
@@ -226,12 +296,16 @@ def process_one(
     vision_model: str,
     settings: Settings,
     outfit_provider: OutfitPhotoProvider,
+    on_claim: Callable[[], None] | None = None,
+    on_success: Callable[[], None] | None = None,
 ) -> bool:
     jobs = db.rpc("claim_ai_jobs", {"p_worker_id": worker_id, "p_limit": 1, "p_lease_seconds": 900})
     if not jobs:
         return False
+    if on_claim:
+        on_claim()
     job = jobs[0]
-    started = time.monotonic()
+    started = time.perf_counter()
     if job["job_type"] == "daily_outfit":
         prompt_version, schema_version = DAILY_PROMPT_VERSION, DAILY_SCHEMA_VERSION
         model = outfit_service._groq.model
@@ -247,8 +321,12 @@ def process_one(
     usage: dict[str, int] = {}
     outcome, error_code, validation = "succeeded", None, "valid"
     observation = None
+    completion_succeeded = False
     if job["job_type"] == "outfit_photo":
-        observation = OutfitPhotoObservation(job["id"])
+        observation = OutfitPhotoObservation(
+            job["id"], queue_wait_ms=queue_wait_ms(job.get("created_at")),
+            provider=outfit_provider.name, model=model,
+        )
         log_event(logger, "job_claimed", observation, job_type=job["job_type"],
                   attempt=job["total_attempts"], provider=outfit_provider.name, model=model)
     try:
@@ -258,13 +336,13 @@ def process_one(
         elif job["job_type"] == "wardrobe_extraction":
             result, usage = _extract_garment(db, job, vision_client, vision_model)
         elif job["job_type"] == "outfit_photo":
-            provider_started = time.monotonic()
+            provider_started = time.perf_counter()
             with observe_outfit_photo(observation):
                 garments = outfit_provider.extract(
                     db,
                     job,
                 )
-            if observation.provider_latency_ms is None:
+            if observation.provider_latency_ms == 0:
                 observation.provider_latency_ms = elapsed_ms(provider_started)
         else:
             raise InvalidJobInput("Unknown job type")
@@ -286,13 +364,13 @@ def process_one(
 ),
         "p_model": model,
         "p_prompt_version": prompt_version, "p_schema_version": schema_version,
-        "p_validation_status": validation, "p_latency_ms": round((time.monotonic() - started) * 1000),
+        "p_validation_status": validation, "p_latency_ms": round((time.perf_counter() - started) * 1000),
         "p_usage": usage, "p_safe_error_code": error_code, "p_result": result,
     }
     try:
         if observation:
             observation.stage = "completion_rpc"
-            completion_started = time.monotonic()
+            completion_started = time.perf_counter()
             log_event(logger, "completion_rpc_started", observation,
                       rpc="complete_outfit_photo_job" if outcome == "succeeded" else "complete_ai_job")
         if job["job_type"] == "outfit_photo" and outcome == "succeeded":
@@ -307,6 +385,8 @@ def process_one(
             db.rpc("complete_ai_job", metadata)
         if observation:
             completion_ms = elapsed_ms(completion_started)
+            observation.completion_rpc_ms = completion_ms
+            completion_succeeded = True
             log_event(logger, "completion_rpc_completed", observation, duration_ms=completion_ms)
             if outcome == "succeeded":
                 log_event(logger, "job_completed", observation, status=outcome,
@@ -314,9 +394,12 @@ def process_one(
                           provider_latency_ms=observation.provider_latency_ms,
                           persistence_latency_ms=round(observation.storage_upload_seconds * 1000) + completion_ms,
                           garment_count=len(garments or []))
+        if outcome == "succeeded" and on_success:
+            on_success()
     except httpx.HTTPError:
         # The lease will expire and the database will retry or dead-letter it.
         if observation:
+            error_code = "PERSISTENCE_FAILED"
             log_event(logger, "job_failed", observation, level=logging.ERROR,
                       safe_error_code="PERSISTENCE_FAILED", stage=observation.stage,
                       total_latency_ms=elapsed_ms(started))
@@ -324,56 +407,111 @@ def process_one(
             logger.error("job_id=%s completion_failed", job["id"])
     except Exception:
         if observation:
+            error_code = "PERSISTENCE_FAILED"
             log_event(logger, "job_failed", observation, level=logging.ERROR,
                       safe_error_code="PERSISTENCE_FAILED", stage=observation.stage,
                       total_latency_ms=elapsed_ms(started))
         raise
+    finally:
+        if observation:
+            observation.worker_total_ms = elapsed_ms(started)
+            observation.garment_count = len(garments or [])
+            observation.outcome = "succeeded" if outcome == "succeeded" and completion_succeeded else "failed"
+            observation.error_classification = error_code
+            log_timing_summary(logger, observation)
     return True
+
+
+def run_worker_loop(
+    process_next: Callable[[], bool],
+    shutdown: ShutdownController,
+    health: WorkerHealth,
+    *,
+    poll_seconds: float,
+    heartbeat_seconds: float,
+    once: bool = False,
+) -> None:
+    next_heartbeat = time.monotonic() + heartbeat_seconds
+    while not shutdown.requested:
+        processed = process_next()
+        if once or shutdown.requested:
+            break
+        now = time.monotonic()
+        if now >= next_heartbeat:
+            log_worker_event(
+                "WORKER_HEARTBEAT",
+                worker_id=health.worker_id,
+                started_at=health.started_at,
+                last_claim_at=health.last_claim_at,
+                last_success_at=health.last_success_at,
+            )
+            next_heartbeat = now + heartbeat_seconds
+        if not processed:
+            shutdown.event.wait(poll_seconds)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run bounded StyleGraph AI jobs")
     parser.add_argument("--once", action="store_true")
-    parser.add_argument("--poll-seconds", type=float, default=5.0)
+    parser.add_argument("--poll-seconds", type=float, default=2.0)
+    parser.add_argument("--heartbeat-seconds", type=float, default=60.0)
     args = parser.parse_args()
     if not 1 <= args.poll_seconds <= 60:
         parser.error("--poll-seconds must be between 1 and 60")
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-    
+    if not 30 <= args.heartbeat_seconds <= 300:
+        parser.error("--heartbeat-seconds must be between 30 and 300")
+    configure_worker_logging()
+
     settings = get_settings()
+    try:
+        validate_worker_settings(settings)
+    except WorkerConfigurationError as exc:
+        logger.error("WORKER_STARTUP_FAILED %s", exc)
+        raise SystemExit(2) from None
     outfit_provider = build_outfit_provider(settings)
-
-    if not settings.groq_api_key:
-      raise RuntimeError("GROQ_API_KEY is required")
-
-    if not settings.supabase_url:
-      raise RuntimeError("SUPABASE_URL is required")
-
-    if not settings.supabase_server_key:
-      raise RuntimeError(
-        "SUPABASE_SECRET_KEY or SUPABASE_SERVICE_KEY is required"
-    )
 
     vision_model = settings.groq_vision_model
 
-    db = SupabaseRest(
-    settings.supabase_url,
-    settings.supabase_server_key,
-)
+    db = SupabaseRest(settings.supabase_url, settings.supabase_server_key)
     provider = GroqProvider(settings.groq_api_key, settings.groq_model, settings.temperature,
                             settings.max_retries, settings.backoff_seconds)
     service = OutfitService(provider)
-    worker_id = str(uuid.uuid4())
+    worker_id = build_worker_id()
+    health = WorkerHealth(worker_id=worker_id, started_at=utc_now())
+    shutdown = ShutdownController()
+    signal.signal(signal.SIGTERM, shutdown.request)
+    signal.signal(signal.SIGINT, shutdown.request)
     vision_client = Groq(api_key=settings.groq_api_key)
+    log_worker_event(
+        "WORKER_STARTED",
+        worker_id=worker_id,
+        provider=outfit_provider.name,
+        poll_seconds=args.poll_seconds,
+        heartbeat_seconds=args.heartbeat_seconds,
+    )
+
+    def mark_claim() -> None:
+        health.last_claim_at = utc_now()
+
+    def mark_success() -> None:
+        health.last_success_at = utc_now()
+
+    def process_next() -> bool:
+        return process_one(
+            db, worker_id, service, vision_client, vision_model, settings, outfit_provider,
+            on_claim=mark_claim, on_success=mark_success,
+        )
+
     try:
-        while True:
-            processed = process_one(db, worker_id, service, vision_client, vision_model, settings,outfit_provider)
-            if args.once:
-                break
-            if not processed:
-                time.sleep(args.poll_seconds)
+        run_worker_loop(
+            process_next, shutdown, health,
+            poll_seconds=args.poll_seconds,
+            heartbeat_seconds=args.heartbeat_seconds,
+            once=args.once,
+        )
     finally:
         db.close()
+        log_worker_event("WORKER_STOPPED", worker_id=worker_id)
 
 
 if __name__ == "__main__":

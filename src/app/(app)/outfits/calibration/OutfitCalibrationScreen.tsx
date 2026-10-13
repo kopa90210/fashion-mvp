@@ -1,10 +1,9 @@
 'use client'
 
-import { useMemo, useState, useTransition } from 'react'
+import { useMemo, useRef, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { AnimatePresence, motion } from 'framer-motion'
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { Heart, ThumbsDown } from 'lucide-react'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
   submitCalibrationFeedback,
@@ -33,9 +32,12 @@ export default function OutfitCalibrationScreen({
   const [vector, setVector] = useState(initialOutfit.vector)
   const [isFinishing, setIsFinishing] = useState(false)
   const [isSkipping, setIsSkipping] = useState(false)
+  const [isSubmitting, setIsSubmitting] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [swipeCount, setSwipeCount] = useState(feedbackCount)
+  const submissionLock = useRef(false)
   const [, startTransition] = useTransition()
+  const prefersReducedMotion = useReducedMotion()
 
   const outfit = currentOutfit
   const progressLabel = `Look ${Math.min(answeredCount + 1, 3)} of 3`
@@ -43,33 +45,32 @@ export default function OutfitCalibrationScreen({
   const signals = useMemo(() => vectorToSignals(vector), [vector])
 
   function handleSkip() {
-    if (isSkipping || isFinishing) return
+    if (isSkipping || isSubmitting || isFinishing) return
     setIsSkipping(true)
     startTransition(async () => {
       try {
         await skipOutfitCalibration()
         router.replace('/outfits')
         router.refresh()
-      } catch (error) {
+      } catch {
         setIsSkipping(false)
-        setErrorMessage(
-          error instanceof Error ? error.message : 'Could not skip calibration.',
-        )
+        setErrorMessage('We could not skip the style check. Please try again.')
       }
     })
   }
 
   function handleFeedback(liked: boolean) {
-    if (!visible || isFinishing) return
+    if (!visible || isSubmitting || isFinishing || submissionLock.current) return
 
     const activeOutfit = outfit
     const priorVector = vector
     const changedTags = getChangedTags(activeOutfit)
     const idempotencyKey = `outfit-feedback:${activeOutfit.id}`
 
+    submissionLock.current = true
+    setIsSubmitting(true)
     setLastFeedback(liked)
     setErrorMessage(null)
-    setVisible(false)
     setVector((current) => getOptimisticVector(current, changedTags, liked))
     setSwipeCount((count) => count + 1)
 
@@ -81,15 +82,12 @@ export default function OutfitCalibrationScreen({
           idempotencyKey,
         )
 
-        await new Promise<void>((resolve) => {
-          window.setTimeout(resolve, 300)
-        })
-
         setVector(result.vector)
         setAnsweredCount(result.answeredCount)
 
         if (result.completed) {
           setIsFinishing(true)
+          setVisible(false)
           router.replace('/outfits')
           router.refresh()
           return
@@ -97,81 +95,101 @@ export default function OutfitCalibrationScreen({
 
         if (!result.nextOutfit) {
           setErrorMessage(
-            'We could not build the next style-check look from your current choices.',
+            'Your choice was saved, but we could not load the next look. Please try again.',
           )
           setLastFeedback(null)
-          setVisible(true)
+          setIsSubmitting(false)
+          submissionLock.current = false
           return
         }
 
+        setVisible(false)
+        await new Promise<void>((resolve) => {
+          window.setTimeout(resolve, prefersReducedMotion ? 0 : 180)
+        })
         setCurrentOutfit(result.nextOutfit)
         setLastFeedback(null)
         setVisible(true)
-      } catch (error) {
+        setIsSubmitting(false)
+        submissionLock.current = false
+      } catch {
         setVector(priorVector)
         setSwipeCount((count) => count - 1)
         setLastFeedback(null)
         setVisible(true)
-        setErrorMessage(
-          error instanceof Error
-            ? error.message
-            : 'Calibration could not be saved. Try again.',
-        )
+        setIsSubmitting(false)
+        submissionLock.current = false
+        setErrorMessage('We could not save that choice. Please try again.')
       }
     })
   }
 
   return (
-    <main className="min-h-screen bg-[#f7f4ef] px-4 py-6 text-[#1d1b18] sm:px-6 lg:py-10">
-      <div className="mx-auto grid max-w-6xl gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
+    <main className="px-4 py-6 text-[#1d1b18] sm:px-6 lg:py-10">
+      <div className="mx-auto grid max-w-5xl gap-8 lg:grid-cols-[minmax(0,7fr)_minmax(17rem,3fr)] lg:gap-10">
         <section className="min-w-0">
-          <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
+          <header className="mb-6 flex flex-wrap items-start justify-between gap-4 sm:mb-8">
             <div>
-              <p className="text-sm font-medium uppercase tracking-[0.18em] text-[#7a6f62]">
+              <p className="text-xs font-medium uppercase tracking-[0.18em] text-[#7a6f62]">
                 Style check
               </p>
-              <h1 className="mt-1 text-3xl font-semibold tracking-tight sm:text-4xl">
+              <h1 className="mt-2 text-3xl font-medium tracking-tight sm:text-4xl">
                 What feels like you?
               </h1>
+              <p className="mt-3 max-w-xl text-sm leading-6 text-[#6d6257] sm:text-base">
+                Three quick looks help us understand your taste.
+              </p>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-4">
               <button
                 type="button"
                 onClick={handleSkip}
-                disabled={isSkipping || isFinishing}
-                className="text-xs text-[#7a6f62] underline-offset-4 hover:text-[#1d1b18] hover:underline transition-colors disabled:opacity-50"
+                disabled={isSkipping || isSubmitting || isFinishing}
+                className="rounded-sm text-xs text-[#7a6f62] underline-offset-4 transition-colors hover:text-[#1d1b18] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1d1b18] focus-visible:ring-offset-4 disabled:opacity-50"
               >
                 Skip for now
               </button>
-              <Badge variant="outline" className="border-[#b9aa99] bg-white/45 text-[#4f463d]">
+              <span
+                role="progressbar"
+                aria-label="Style check progress"
+                aria-valuemin={1}
+                aria-valuemax={3}
+                aria-valuenow={Math.min(answeredCount + 1, 3)}
+                className="rounded-full border border-[#b9aa99] bg-[#fffdfa]/60 px-3 py-1.5 text-xs font-medium text-[#4f463d]"
+              >
                 {progressLabel}
-              </Badge>
+              </span>
             </div>
-          </div>
+          </header>
 
           <AnimatePresence mode="wait">
             {visible && !isFinishing ? (
               <motion.div
                 key={outfit.id}
-                initial={{ opacity: 0, y: 18 }}
+                initial={prefersReducedMotion ? false : { opacity: 0, y: 14 }}
                 animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, x: lastFeedback ? 52 : -52, scale: 0.98 }}
-                transition={{ duration: 0.3, ease: 'easeOut' }}
+                exit={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, x: lastFeedback ? 36 : -36, scale: 0.99 }}
+                transition={{ duration: prefersReducedMotion ? 0 : 0.24, ease: 'easeOut' }}
+                aria-busy={isSubmitting}
               >
                 <OutfitCanvas
                   items={outfit.items}
-                  identity="Would you wear this?"
-                  description="Three quick looks. Your answer teaches StyleGraph what to recommend next."
                   reasons={outfit.reasons}
-                  variant="framed"
+                  variant="editorial"
                 >
-                  <div className="mt-5 grid grid-cols-2 gap-3">
+                  <section
+                    aria-label="Style preference feedback"
+                    className="sticky bottom-[calc(5.75rem+env(safe-area-inset-bottom))] z-40 -mx-1 mt-5 rounded-2xl border border-[#d8cec2] bg-[#f7f4ef]/95 p-2 shadow-[0_8px_24px_rgba(62,51,40,0.10)] backdrop-blur-sm lg:static lg:mx-0 lg:border-0 lg:bg-transparent lg:p-0 lg:shadow-none"
+                  >
+                    <div className="grid grid-cols-2 gap-2.5 sm:gap-3">
                     <Button
                       type="button"
                       variant="outline"
                       aria-label="Not my style"
+                      aria-pressed={isSubmitting && lastFeedback === false}
                       onClick={() => handleFeedback(false)}
-                      className="h-12 rounded-full border-[#d8cec2] bg-[#fffdfa]"
+                      disabled={isSubmitting || isFinishing}
+                      className="h-14 rounded-full border-[#b9aa99] bg-[#fffdfa] px-3 text-sm focus-visible:ring-2 focus-visible:ring-[#1d1b18] focus-visible:ring-offset-2 disabled:opacity-60 sm:text-base"
                     >
                       <ThumbsDown aria-hidden="true" className="size-4" />
                       Not my style
@@ -179,22 +197,33 @@ export default function OutfitCalibrationScreen({
                     <Button
                       type="button"
                       aria-label="Love this"
+                      aria-pressed={isSubmitting && lastFeedback === true}
                       onClick={() => handleFeedback(true)}
-                      className="h-12 rounded-full bg-[#1d1b18] text-[#fffdfa]"
+                      disabled={isSubmitting || isFinishing}
+                      className="h-14 rounded-full bg-[#1d1b18] px-3 text-sm text-[#fffdfa] focus-visible:ring-2 focus-visible:ring-[#1d1b18] focus-visible:ring-offset-2 disabled:opacity-60 sm:text-base"
                     >
                       <Heart aria-hidden="true" className="size-4" />
                       Love this
                     </Button>
-                  </div>
+                    </div>
+                    <p aria-live="polite" className="min-h-5 pt-2 text-center text-xs text-[#6d6257]">
+                      {isSubmitting ? 'Saving your choice…' : ''}
+                    </p>
+                  </section>
+                  {errorMessage ? (
+                    <p role="alert" className="mt-3 rounded-2xl border border-[#c9a8a3] bg-[#fffdfa] px-4 py-3 text-sm text-[#8a352e]">
+                      {errorMessage}
+                    </p>
+                  ) : null}
                 </OutfitCanvas>
               </motion.div>
-            ) : (
+            ) : isFinishing ? (
               <motion.div
                 key="finishing"
-                initial={{ opacity: 0, y: 16 }}
+                initial={prefersReducedMotion ? false : { opacity: 0, y: 16 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.28, ease: 'easeOut' }}
-                className="flex min-h-[520px] items-center justify-center rounded-lg border border-[#d8cec2] bg-white/65 p-8 text-center shadow-sm"
+                transition={{ duration: prefersReducedMotion ? 0 : 0.28, ease: 'easeOut' }}
+                className="flex min-h-[32rem] items-center justify-center rounded-[2rem] border border-[#d8cec2] bg-[#fffdfa]/65 p-8 text-center"
               >
                 <div className="max-w-md">
                   <p className="text-sm font-medium uppercase tracking-[0.18em] text-[#7a6f62]">
@@ -206,16 +235,24 @@ export default function OutfitCalibrationScreen({
                   <p className="mt-3 text-sm leading-6 text-[#6d6257]">
                     Your reactions are saved. Preparing Today from what StyleGraph has learned.
                   </p>
-                  {errorMessage && (
-                    <p className="mt-5 text-sm font-medium text-red-700">{errorMessage}</p>
-                  )}
                 </div>
+              </motion.div>
+            ) : (
+              <motion.div
+                key="transitioning"
+                role="status"
+                aria-label="Loading the next look"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className="h-[clamp(28rem,68vw,42rem)] animate-pulse rounded-[2rem] bg-[#ebe3d8] motion-reduce:animate-none"
+              >
+                <span className="sr-only">Loading the next look…</span>
               </motion.div>
             )}
           </AnimatePresence>
         </section>
 
-        <aside className="lg:pt-[88px]">
+        <aside aria-label="Style learning summary" className="self-start lg:sticky lg:top-8 lg:pt-28">
           <FashionDnaPanel signals={signals} feedbackCount={swipeCount} />
         </aside>
       </div>

@@ -502,4 +502,9 @@ describe('updateWardrobeItemAttributes', () => {
     mockAuthenticatedUser()
     await expect(updateWardrobeItemAttributes('item-1', { category: 'footwear', subcategory: 'sneakers', brand: 'Acme', color: { primary: 'white' }, fit: {}, style_tags: {} })).resolves.toEqual({ success: true })
   })
+  it('rejects invalid category and subcategory combinations before persistence', async () => {
+    mockAuthenticatedUser()
+    await expect(updateWardrobeItemAttributes('item-1', { category: 'footwear', subcategory: 'jeans' })).rejects.toThrow('Invalid wardrobe category')
+    expect(mockSupabase.from).not.toHaveBeenCalledWith('wardrobe_items')
+  })
 })

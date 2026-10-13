@@ -1,22 +1,15 @@
 import type { NextConfig } from "next";
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseHostname = supabaseUrl
-  ? new URL(supabaseUrl).hostname
-  : "svbkadgcpbpnbfzaqvsf.supabase.co";
+import { createWardrobeImageConfig } from "./src/lib/media/image-policy";
 
 const nextConfig: NextConfig = {
   images: {
-    remotePatterns: [
-      {
-        protocol: "https",
-        hostname: supabaseHostname,
-        pathname: "/storage/v1/object/public/wardrobe-images/**",
-      },
-    ],
+    ...createWardrobeImageConfig(
+      process.env.NEXT_PUBLIC_SUPABASE_URL,
+      process.env.NODE_ENV,
+    ),
   },
   // Allow connections from local network for testing on mobile devices
-  allowedDevOrigins: ["192.168.137.1", "shaking-heading-erased.ngrok-free.dev", "*.ngrok-free.dev"],
+  allowedDevOrigins: ["192.168.1.36","192.168.137.1", "shaking-heading-erased.ngrok-free.dev", "*.ngrok-free.dev"],
   experimental: {
     serverActions: {
       bodySizeLimit: "10mb",

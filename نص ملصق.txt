@@ -1,0 +1,393 @@
+(.venv) PS F:\project\autofashion> Write-Host "`n===== BATCH PROCESS_ONE ====="
+>> Get-Content curated_pipeline\batch_processor.py |
+>>   Select-Object -Skip 80 -First 90
+>> 
+>> Write-Host "`n===== CONTRACT VALIDATION ====="
+>> Get-Content curated_pipeline\contracts.py |
+>>   Select-Object -Skip 1 -First 220
+>> 
+>> Write-Host "`n===== FAKE PROVIDER + TEST ====="
+>> Get-Content tests\test_curated_batch_processor.py |
+>>   Select-Object -Skip 1 -First 100
+
+===== BATCH PROCESS_ONE =====
+        return {"total": self.total, "processed": self.processed, "skipped": self.skipped,
+                "failed": self.failed, "category_counts": self.category_counts,
+                "presentation_counts": self.presentation_counts}
+
+
+class BatchProcessor:
+    def __init__(self, layout: DatasetLayout, provider: BatchProvider,
+                 *, background_remover: Callable[[bytes, str], Image.Image | bytes],
+                 force_reprocess: bool = False, min_confidence: float = 0.6,
+                 reports_root: Path | None = None):
+        self.layout = layout
+        self.provider = provider
+        self.background_remover = background_remover
+        self.force_reprocess = force_reprocess
+        self.min_confidence = min_confidence
+        self.reports_root = reports_root or layout.reports_root
+
+    def _record_from_manifest(self, source: Path, manifest: dict[str, Any], status: str) -> dict[str, Any]:
+        attrs = manifest["attributes"]
+        return {"source_relative_path": manifest["source_relative_path"],
+                "presentation_profile": manifest["presentation_profile"],
+                "expected_category": manifest["expected_category"],
+                "category": attrs["category"], "subcategory": attrs["subcategory"],
+                "display_name": attrs["display_name"],
+                "model_confidence": attrs["model_confidence"], "status": status}
+
+    def process_one(self, source: Path) -> tuple[str, dict[str, Any]]:
+        relative_path = source.relative_to(self.layout.raw_root)
+        profile, expected = derive_hints(relative_path)
+        source_hash = file_sha256(source)
+        if not self.force_reprocess:
+            processed_candidate = self.layout.processed_root / relative_path.with_suffix(".png")
+            manifest_candidate = self.layout.manifests_root / relative_path.with_suffix(".json")
+            if not processed_candidate.exists() and not manifest_candidate.exists():
+                cached = None
+            else:
+                cached = load_valid_cache(self.layout, relative_path, source_hash, min_confidence=self.min_confidence)
+            if cached:
+                return "skipped", self._record_from_manifest(source, cached, "skipped")
+        try:
+            original = source.read_bytes()
+            mime = _mime(source)
+            removed = self.background_remover(original, mime)
+            cutout_bytes = removed if isinstance(removed, bytes) else transparent_png(removed)
+            with Image.open(source) as original_image:
+                original_image.verify()
+            with Image.open(__import__("io").BytesIO(cutout_bytes)) as cutout:
+                cutout.load()
+                cutout_width, cutout_height = cutout.size
+            attributes = self.provider.infer(original, mime, presentation_profile=profile, expected_category=expected)
+            encoded = base64.b64encode(cutout_bytes).decode("ascii")
+            payload = {"schema_version": "curated-v1", "attributes": attributes,
+                       "cutout": {"mime_type": "image/png", "width": cutout_width,
+                                  "height": cutout_height, "png_base64": encoded}}
+            validated = validate_remote_response(payload, min_confidence=self.min_confidence)
+            manifest = build_manifest(self.layout, relative_path, validated, source_hash=source_hash)
+            write_cache(self.layout, relative_path, cutout_bytes, manifest)
+            return "processed", self._record_from_manifest(source, manifest, "processed")
+        except Exception as exc:
+            return "failed", {"source_relative_path": relative_path.as_posix(), "presentation_profile": profile,
+                               "expected_category": expected, "status": "failed",
+                               "error_code": _safe_error(exc)}
+
+    def run(self) -> tuple[BatchSummary, list[dict[str, Any]], list[dict[str, Any]]]:
+        started = time.monotonic()
+        records: list[dict[str, Any]] = []
+        failures: list[dict[str, Any]] = []
+        counts = Counter(); presentations = Counter()
+        sources = list(self.layout.photos())
+        for source in sources:
+            status, record = self.process_one(source)
+            records.append(record)
+            if status == "failed":
+                failures.append(record)
+            else:
+                counts[record["category"]] += 1
+                presentations[record["presentation_profile"]] += 1
+        self.reports_root.mkdir(parents=True, exist_ok=True)
+        summary = BatchSummary(len(sources), sum(r["status"] == "processed" for r in records),
+                               sum(r["status"] == "skipped" for r in records), len(failures),
+                               dict(sorted(counts.items())), dict(sorted(presentations.items())))
+        report = {"summary": summary.as_dict(), "duration_ms": round((time.monotonic() - started) * 1000, 2),
+                  "results": records}
+        (self.reports_root / "results.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+        (self.reports_root / "failed.json").write_text(json.dumps(failures, indent=2) + "\n", encoding="utf-8")
+        return summary, records, failures
+
+
+class GeminiCuratedMetadataProvider:
+    """Official Google GenAI structured-output adapter; imports SDK lazily."""
+
+===== CONTRACT VALIDATION =====
+
+import base64
+import binascii
+import io
+from dataclasses import dataclass
+from typing import Any
+
+from PIL import Image
+
+
+SCHEMA_VERSION = "curated-v1"
+MANIFEST_VERSION = "curated-cache-v1"
+MAX_CUTOUT_BYTES = 25 * 1024 * 1024
+
+FORBIDDEN_KEYS = {
+    "brand",
+    "brand_name",
+    "product_name",
+    "sku",
+    "price",
+    "retailer",
+    "logo",
+}
+REQUIRED_FIELDS = {
+    "category",
+    "subcategory",
+    "display_name",
+    "color",
+    "material",
+    "fit",
+    "pattern",
+    "style_tags",
+    "formality_score",
+    "season_weights",
+    "layer_role",
+    "model_confidence",
+}
+VALID_CATEGORIES = {"top", "bottom", "one_piece", "outerwear", "footwear", "accessory"}
+VALID_LAYER_ROLES = {
+    "base_layer",
+    "mid_layer",
+    "outerwear",
+    "bottom",
+    "one_piece",
+    "footwear",
+    "accessory",
+}
+
+
+class ContractError(ValueError):
+    """A remote response or cached artifact does not satisfy the contract."""
+
+
+@dataclass(frozen=True)
+class ValidatedRemoteResult:
+    schema_version: str
+    attributes: dict[str, Any]
+    png_bytes: bytes
+    width: int
+    height: int
+
+
+def strip_forbidden_keys(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: strip_forbidden_keys(child)
+            for key, child in value.items()
+            if key.lower() not in FORBIDDEN_KEYS
+        }
+    if isinstance(value, list):
+        return [strip_forbidden_keys(item) for item in value]
+    return value
+
+
+def normalize_attributes(attributes: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(attributes)
+    category = str(attributes.get("category", "")).strip().lower()
+    if category in VALID_CATEGORIES:
+        normalized["category"] = category
+    else:
+        lowered = category.replace("-", " ").replace("_", " ")
+        if any(word in lowered for word in ("dress", "jumpsuit", "romper", "gown")):
+            normalized["category"] = "one_piece"
+        elif any(word in lowered for word in ("shoe", "sneaker", "boot", "loafer")):
+            normalized["category"] = "footwear"
+        elif any(word in lowered for word in ("coat", "outerwear", "blazer")):
+            normalized["category"] = "outerwear"
+        elif any(word in lowered for word in ("shirt", "top", "blouse", "tee", "sweater", "jacket")):
+            normalized["category"] = "top"
+        elif any(word in lowered for word in ("pant", "trouser", "jean", "skirt", "short", "bottom")):
+            normalized["category"] = "bottom"
+        elif any(word in lowered for word in ("accessory", "bag", "belt", "hat", "jewelry")):
+            normalized["category"] = "accessory"
+        else:
+            normalized["category"] = category or "accessory"
+
+    layer_role = str(attributes.get("layer_role", "")).strip().lower()
+    if layer_role == "outer_layer":
+        layer_role = "outerwear"
+    if layer_role in VALID_LAYER_ROLES:
+        normalized["layer_role"] = layer_role
+    else:
+        normalized["layer_role"] = {
+            "top": "base_layer",
+            "bottom": "bottom",
+            "one_piece": "one_piece",
+            "outerwear": "outerwear",
+            "footwear": "footwear",
+        }.get(str(normalized.get("category")), "accessory")
+    return normalized
+
+
+def validate_attributes(attributes: dict[str, Any], min_confidence: float) -> list[str]:
+    problems: list[str] = []
+    missing = sorted(field for field in REQUIRED_FIELDS if field not in attributes)
+    if missing:
+        problems.append(f"missing required fields: {', '.join(missing)}")
+
+    category = str(attributes.get("category", "")).strip().lower()
+    if category not in VALID_CATEGORIES:
+        problems.append(f"category must be one of {sorted(VALID_CATEGORIES)}, got {attributes.get('category')!r}")
+    layer_role = str(attributes.get("layer_role", "")).strip().lower()
+    if layer_role not in VALID_LAYER_ROLES:
+        problems.append(f"layer_role must be one of {sorted(VALID_LAYER_ROLES)}, got {attributes.get('layer_role')!r}")
+
+    confidence = attributes.get("model_confidence")
+    if isinstance(confidence, bool) or not isinstance(confidence, (int, float)):
+        problems.append("model_confidence is missing or not numeric")
+    elif not 0 <= float(confidence) <= 1:
+        problems.append("model_confidence must be between 0 and 1")
+    elif confidence < min_confidence:
+        problems.append(f"model_confidence {confidence} is below minimum {min_confidence}")
+
+    for field in ("color", "material", "fit", "style_tags", "season_weights"):
+        if field in attributes and not isinstance(attributes[field], dict):
+            problems.append(f"{field} must be a JSON object")
+    for field in ("subcategory", "display_name", "pattern"):
+        if field in attributes and (not isinstance(attributes[field], str) or not attributes[field].strip()):
+            problems.append(f"{field} must be a non-empty string")
+    formality = attributes.get("formality_score")
+    if "formality_score" in attributes and (
+        isinstance(formality, bool) or not isinstance(formality, (int, float)) or not 0 <= float(formality) <= 1
+    ):
+        problems.append("formality_score must be between 0 and 1")
+    return problems
+
+
+def _decode_and_verify_png(cutout: Any) -> tuple[bytes, int, int]:
+    if not isinstance(cutout, dict):
+        raise ContractError("cutout must be a JSON object")
+    if cutout.get("mime_type") != "image/png":
+        raise ContractError("cutout.mime_type must be image/png")
+    width, height = cutout.get("width"), cutout.get("height")
+    if isinstance(width, bool) or not isinstance(width, int) or width <= 0:
+        raise ContractError("cutout.width must be a positive integer")
+    if isinstance(height, bool) or not isinstance(height, int) or height <= 0:
+        raise ContractError("cutout.height must be a positive integer")
+    encoded = cutout.get("png_base64")
+    if not isinstance(encoded, str) or not encoded:
+        raise ContractError("cutout.png_base64 must be a non-empty string")
+    try:
+        png_bytes = base64.b64decode(encoded, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise ContractError("cutout.png_base64 is invalid") from exc
+    if len(png_bytes) > MAX_CUTOUT_BYTES:
+        raise ContractError("decoded cutout exceeds the size limit")
+    try:
+        with Image.open(io.BytesIO(png_bytes)) as image:
+            image.verify()
+        with Image.open(io.BytesIO(png_bytes)) as image:
+            actual_width, actual_height = image.size
+            has_alpha = image.mode in {"RGBA", "LA"} or "transparency" in image.info
+            image_format = image.format
+    except Exception as exc:
+        raise ContractError("decoded cutout is not a valid PNG") from exc
+    if image_format != "PNG":
+        raise ContractError("decoded cutout is not a PNG")
+    if (actual_width, actual_height) != (width, height):
+        raise ContractError("cutout dimensions do not match the PNG")
+    if not has_alpha:
+        raise ContractError("cutout PNG must support transparency")
+    return png_bytes, width, height
+
+
+def validate_remote_response(payload: Any, min_confidence: float) -> ValidatedRemoteResult:
+    if not isinstance(payload, dict):
+        raise ContractError("response must be a JSON object")
+    if payload.get("schema_version") != SCHEMA_VERSION:
+        raise ContractError(f"schema_version must be {SCHEMA_VERSION}")
+    raw_attributes = payload.get("attributes")
+    if not isinstance(raw_attributes, dict):
+        raise ContractError("attributes must be a JSON object")
+    attributes = normalize_attributes(strip_forbidden_keys(raw_attributes))
+    problems = validate_attributes(attributes, min_confidence)
+    if problems:
+        raise ContractError("; ".join(problems))
+    png_bytes, width, height = _decode_and_verify_png(payload.get("cutout"))
+    return ValidatedRemoteResult(SCHEMA_VERSION, attributes, png_bytes, width, height)
+
+===== FAKE PROVIDER + TEST =====
+import base64
+import io
+import json
+
+from PIL import Image
+
+from curated_pipeline.batch_processor import BatchProcessor, BatchContractError, export_processed_zip, transparent_png
+from curated_pipeline.cache import DatasetLayout
+
+
+def _image(path: Path, *, empty: bool = False):
+    image = Image.new("RGBA", (40, 30), (0, 0, 0, 0))
+    if not empty:
+        for x in range(10, 30):
+            for y in range(7, 24):
+                image.putpixel((x, y), (220, 40, 60, 255))
+    image.convert("RGB").save(path, format="JPEG")
+
+
+class FakeProvider:
+    def __init__(self):
+        self.calls = 0
+
+    def infer(self, image_bytes, mime_type, *, presentation_profile, expected_category):
+        self.calls += 1
+        category = expected_category or "top"
+        role = "one_piece" if category == "one_piece" else "top"
+        return {"category": category, "subcategory": "dress" if category == "one_piece" else "shirt",
+                "display_name": "Red shirt", "color": {"primary": "red"},
+                "material": "cotton", "fit": "regular", "pattern": "solid",
+                "style_tags": ["casual"], "formality_score": 0.4,
+                "season_weights": {"spring": 0.8, "summer": 0.8, "fall": 0.3, "winter": 0.1},
+                "layer_role": role, "model_confidence": 0.95}
+
+
+def _remover(data, mime):
+    with Image.open(io.BytesIO(data)) as image:
+        return image.convert("RGBA")
+
+
+def test_batch_process_manifest_and_resume(tmp_path):
+    layout = DatasetLayout(tmp_path / "dataset")
+    source = layout.raw_root / "feminine" / "one_piece" / "nested" / "dress.jpg"
+    source.parent.mkdir(parents=True)
+    _image(source)
+    provider = FakeProvider()
+    first = BatchProcessor(layout, provider, background_remover=_remover).run()[0]
+    assert first.processed == 1
+    assert (layout.manifests_root / "feminine" / "one_piece" / "nested" / "dress.json").exists()
+    second = BatchProcessor(layout, provider, background_remover=_remover).run()[0]
+    assert second.skipped == 1 and provider.calls == 1
+    forced = BatchProcessor(layout, provider, background_remover=_remover, force_reprocess=True).run()[0]
+    assert forced.processed == 1 and provider.calls == 2
+
+
+def test_transparent_png_rejects_empty_foreground():
+    image = Image.new("RGBA", (20, 20), (0, 0, 0, 0))
+    try:
+        transparent_png(image)
+    except BatchContractError as exc:
+        assert str(exc) == "empty_foreground"
+    else:
+        raise AssertionError("expected empty foreground rejection")
+
+
+def test_batch_failure_isolated_and_reports_safe_fields(tmp_path):
+    layout = DatasetLayout(tmp_path / "dataset")
+    good = layout.raw_root / "masculine" / "tops" / "good.jpg"
+    bad = layout.raw_root / "neutral" / "bottoms" / "bad.jpg"
+    good.parent.mkdir(parents=True); bad.parent.mkdir(parents=True)
+    _image(good); bad.write_bytes(b"not an image")
+    summary, records, failures = BatchProcessor(layout, FakeProvider(), background_remover=_remover).run()
+    assert summary.total == 2 and summary.processed == 1 and summary.failed == 1
+    assert failures[0]["error_code"] in {"processing_failed", "invalid_response"}
+    assert "GEMINI" not in json.dumps(failures)
+
+
+def test_export_contains_only_cache_artifacts(tmp_path):
+    for folder in ("processed", "manifests", "reports", "raw"):
+        (tmp_path / folder).mkdir()
+        (tmp_path / folder / "x.txt").write_text(folder)
+    destination = export_processed_zip(tmp_path, tmp_path / "out.zip")
+    import zipfile
+    with zipfile.ZipFile(destination) as archive:
+        names = archive.namelist()
+    assert all(not name.startswith("raw/") for name in names)
+    assert {"processed/x.txt", "manifests/x.txt", "reports/x.txt"} <= set(names)
+(.venv) PS F:\project\autofashion> 

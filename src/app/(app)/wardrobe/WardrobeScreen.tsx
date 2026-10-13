@@ -1,34 +1,25 @@
 ﻿'use client'
 
-import Image from 'next/image'
 import Link from 'next/link'
 import { useState, useTransition } from 'react'
-import { Check, Filter, Search, Trash2, X } from 'lucide-react'
+import { Filter, Search, Trash2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { confirmDraftItem, discardDraftItem, removeWardrobeItem, replaceWardrobeItemPhoto, updateWardrobeItemAttributes, type UserWardrobeItem } from '@/src/app/actions/wardrobe'
 import type { WardrobeCategory } from '@/src/lib/wardrobe/normalize'
-import ItemEditor from '@/src/components/wardrobe/ItemEditor'
+import ItemEditor from '@/src/components/wardrobe/StructuredItemEditor'
+import GarmentCard from '@/src/components/wardrobe/GarmentCard'
 import WishlistScreen from '@/src/app/(app)/wishlist/WishlistScreen'
 import type { WishlistItem } from '@/src/app/actions/wishlist'
 import { categoryLabels, filterOptions, filterWardrobe, itemDescriptor, itemName, knownBrand, type WardrobeFilters } from './wardrobe-view'
 
 const selectClass = 'mt-2 w-full rounded-xl border border-[#D8CEC2] bg-[#FFFDFA] px-3 py-3 text-sm'
-const gridClass = 'grid grid-cols-2 gap-x-4 gap-y-8 md:grid-cols-3 lg:grid-cols-4'
+const gridClass = 'grid grid-cols-2 gap-x-4 gap-y-8 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6'
 const emptyFilters: WardrobeFilters = { search: '', category: 'all', subcategory: '', color: '', style: '', sort: 'newest' }
 
 function ItemCard({ item, selected, selecting, onToggle, onDraftEdit }: {
   item: UserWardrobeItem; selected: boolean; selecting: boolean; onToggle: () => void; onDraftEdit?: () => void
 }) {
-  const content = <>
-    <div className="relative aspect-[4/5] overflow-hidden rounded-2xl bg-[#EBE3D8]">
-      {item.image_url ? <Image src={item.image_url} alt={itemName(item)} fill unoptimized={item.image_url.includes('/storage/v1/object/sign/private-wardrobe-media/')} sizes="(min-width: 1024px) 250px, (min-width: 768px) 30vw, 45vw" className="object-contain p-4 sm:p-6 transition-transform duration-300 motion-safe:group-hover:scale-[1.03]" /> : <div className="flex h-full items-center justify-center text-sm text-[#6D6257]">Photo unavailable</div>}
-      {item.quantity > 1 && <span className="absolute right-2 top-2 rounded-full bg-[#FFFDFA] px-2 py-1 text-xs">{item.quantity} pieces</span>}
-      {selecting && <span aria-hidden="true" className={`absolute left-3 top-3 flex size-6 items-center justify-center rounded-full border ${selected ? 'border-[#1D1B18] bg-[#1D1B18] text-white' : 'border-[#D8CEC2] bg-[#FFFDFA] text-transparent'}`}><Check className="size-4" /></span>}
-    </div>
-    <p className="mt-3 truncate text-sm font-medium">{itemName(item)}</p>
-    <p className="mt-1 truncate text-xs text-[#6D6257]">{itemDescriptor(item)}</p>
-    {knownBrand(item.brand) && <p className="mt-1 truncate text-xs text-[#6D6257]">{knownBrand(item.brand)}</p>}
-  </>
+  const content = <GarmentCard image={item.image_url} name={itemName(item)} category={item.category} role={item.layer_role} brand={knownBrand(item.brand)} metadata={itemDescriptor(item)} variant="wardrobe" selected={selected} selectionMode={selecting} quantity={item.quantity} />
   const className = 'group block min-w-0 rounded-2xl text-left focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#6D6257]'
   if (selecting || onDraftEdit) return <button type="button" aria-pressed={selecting ? selected : undefined} aria-label={selecting ? `Select ${itemName(item)}` : `Review ${itemName(item)}`} onClick={selecting ? onToggle : onDraftEdit} className={className}>{content}</button>
   return <Link href={`/wardrobe/${item.id}`} className={className}>{content}</Link>
@@ -68,7 +59,7 @@ export default function WardrobeScreen({ items, drafts, wishlistItems, outfitPho
     })
   }
 
-  return <main className="min-h-screen bg-[#F7F4EF] px-4 py-7 text-[#1D1B18] sm:px-6 lg:px-8 lg:py-10"><div className="mx-auto max-w-6xl">
+  return <main className="px-4 py-7 text-[#1D1B18] sm:px-6 lg:px-8 lg:py-10"><div className="mx-auto max-w-6xl">
     <nav aria-label="Wardrobe views" className="mb-8 flex gap-7 text-sm">
       <button type="button" aria-pressed={view === 'closet'} onClick={() => setView('closet')} className={`min-h-11 border-b-2 ${view === 'closet' ? 'border-[#1D1B18]' : 'border-transparent text-[#6D6257]'}`}>Wardrobe</button>
       <button type="button" aria-pressed={view === 'wishlist'} onClick={() => setView('wishlist')} className={`min-h-11 border-b-2 ${view === 'wishlist' ? 'border-[#1D1B18]' : 'border-transparent text-[#6D6257]'}`}>Wishlist</button>
