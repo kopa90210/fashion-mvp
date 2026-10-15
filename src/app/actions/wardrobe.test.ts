@@ -14,9 +14,11 @@ const privateMediaMocks = vi.hoisted(() => ({
   signedOwnedPrivateUrl: vi.fn(),
   signedOwnedPrivatePreviewUrl: vi.fn(),
 }))
+const cacheMocks = vi.hoisted(() => ({ revalidatePath: vi.fn() }))
 
 vi.mock('server-only', () => ({}))
 vi.mock('@/src/lib/media/private-media', () => privateMediaMocks)
+vi.mock('next/cache', () => cacheMocks)
 
 // ---------------------------------------------------------------------------
 // Supabase mock setup
@@ -79,7 +81,7 @@ vi.mock('@/src/lib/supabase/server', () => ({
 // Import functions under test
 // ---------------------------------------------------------------------------
 
-const { getUserWardrobeItems, getUserDraftItems, getCuratedPieces, getRankedPieces, searchPieces, saveWardrobeSelection, findOrphanedWardrobeItems, replaceWardrobeItemPhoto, updateWardrobeItemAttributes, removeWardrobeItem, uploadDraftWardrobeItem, uploadOutfitPhoto, confirmOutfitPhotoDraft, confirmDraftItem } = await import(
+const { getUserWardrobeItems, getUserDraftItems, getCuratedPieces, getRankedPieces, searchPieces, saveWardrobeSelection, findOrphanedWardrobeItems, replaceWardrobeItemPhoto, updateWardrobeItemAttributes, removeWardrobeItem, uploadDraftWardrobeItem, uploadOutfitPhoto, confirmOutfitPhotoDraft, confirmDraftItem, discardDraftItem } = await import(
   '@/src/app/actions/wardrobe'
 )
 
@@ -485,6 +487,15 @@ describe('outfit photo upload', () => {
     expect(rpcCalls).toContainEqual({ name: 'confirm_outfit_photo_draft', args: {
       p_item_id: 'item-1', p_use_reconstructed: false,
     } })
+    expect(cacheMocks.revalidatePath).toHaveBeenCalledWith('/wardrobe')
+    expect(cacheMocks.revalidatePath).toHaveBeenCalledWith('/outfits')
+  })
+
+  it('revalidates owned experiences after rejecting only the selected draft', async () => {
+    mockAuthenticatedUser()
+    await expect(discardDraftItem('item-1')).resolves.toEqual({ success: true })
+    expect(cacheMocks.revalidatePath).toHaveBeenCalledWith('/wardrobe')
+    expect(cacheMocks.revalidatePath).toHaveBeenCalledWith('/outfits')
   })
 
   it('routes a generic confirm for an outfit draft through the same ownership RPC', async () => {

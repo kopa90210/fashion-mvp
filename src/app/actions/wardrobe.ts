@@ -1,5 +1,6 @@
 'use server'
 
+import { revalidatePath } from 'next/cache'
 import { createClient } from '@/src/lib/supabase/server'
 import { isValidWardrobeClassification, normalizeWardrobeItem } from '@/src/lib/wardrobe/normalize'
 import { deletePrivateObject, signedOwnedPrivatePreviewUrl, signedOwnedPrivateUrl, uploadValidatedPrivateImage } from '@/src/lib/media/private-media'
@@ -56,6 +57,11 @@ async function getAuthenticatedClient() {
   const { data, error } = await supabase.auth.getUser()
   if (error || !data?.user) throw new Error('Not authenticated')
   return { supabase, userId: data.user.id }
+}
+
+function revalidateOwnedWardrobeExperience() {
+  revalidatePath('/wardrobe')
+  revalidatePath('/outfits')
 }
 
 async function mapUserWardrobeRow(row: Record<string, unknown>, supabase: Awaited<ReturnType<typeof createClient>>): Promise<UserWardrobeItem | null> {
@@ -129,11 +135,13 @@ async function updateWardrobeStatus(itemId: string, status: 'confirmed' | 'rejec
         p_item_id: itemId, p_use_reconstructed: false,
       })
       if (error) throw new Error('Could not confirm outfit draft')
+      revalidateOwnedWardrobeExperience()
       return { success: true }
     }
   }
   const { error } = await supabase.from('wardrobe_items').update({ status }).eq('id', itemId)
   if (error) throw new Error('Could not update wardrobe item')
+  revalidateOwnedWardrobeExperience()
   return { success: true }
 }
 
@@ -309,6 +317,7 @@ export async function confirmOutfitPhotoDraft(itemId: string, useReconstructed: 
     p_item_id: itemId, p_use_reconstructed: useReconstructed,
   })
   if (error) throw new Error('Could not add extracted garment')
+  revalidateOwnedWardrobeExperience()
   return { success: true }
 }
 

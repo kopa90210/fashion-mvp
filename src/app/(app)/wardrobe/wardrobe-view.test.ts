@@ -50,6 +50,12 @@ describe('wardrobe browsing', () => {
     expect(filterWardrobe(pool, defaults)).toHaveLength(2)
     expect(filterOptions(pool, 'all').colors).toEqual(['blue', 'ivory'])
   })
+  it('renders a confirmed uploaded garment with its selected private preview', () => {
+    const html = render([item('confirmed-upload', { image_url: 'https://signed.test/selected-garment.webp' })])
+    expect(html).toContain('href="/wardrobe/confirmed-upload"')
+    expect(html).toContain('https://signed.test/selected-garment.webp')
+    expect(html).toContain('1 piece')
+  })
   it('derives real filter values, handles malformed attributes and ignores nonpositive style weights', () => {
     expect(filterOptions([item('one', { subcategory: 'oversized button-up', color: { primary: 'IVORY' }, style_tags: { minimal: 1, ignored: 0, negative: -1, invalid: NaN } }), item('two', { color: { primary: 'ivory' } })], 'top')).toEqual({ subcategories: ['linen shirt', 'oversized button-up'], colors: ['ivory'], styles: ['minimal'] })
     expect(primaryColor(item('bad', { color: 'raw' }))).toBe('')
