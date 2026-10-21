@@ -20,6 +20,10 @@ function primary(value: unknown) { const raw = objectValue(value).primary; retur
 function tags(value: unknown) { return Object.entries(objectValue(value)).filter(([, weight]) => typeof weight === 'number' && weight > 0).map(([key]) => key) }
 
 export default function SinglePieceReviewScreen({ initial }: { initial: UserWardrobeItem }) {
+  return <SinglePieceReviewForm key={JSON.stringify(initial)} initial={initial} />
+}
+
+function SinglePieceReviewForm({ initial }: { initial: UserWardrobeItem }) {
   const router = useRouter()
   const [item, setItem] = useState(initial)
   const [name, setName] = useState(initial.display_name ?? '')
@@ -35,10 +39,6 @@ export default function SinglePieceReviewScreen({ initial }: { initial: UserWard
   const subcategories = SUBCATEGORY_MAP[category as keyof typeof SUBCATEGORY_MAP] ?? []
   const ready = Boolean(name.trim() && category)
 
-  useEffect(() => {
-    setItem(initial); setName(initial.display_name ?? ''); setCategory(initial.category ?? ''); setSubcategory(initial.subcategory ?? '')
-    setColor(primary(initial.color)); setFit(primary(initial.fit)); setMaterial(initial.material ?? ''); setSeasonValues(tags(initial.season_weights)); setStyleTags(tags(initial.style_tags))
-  }, [initial])
   useEffect(() => {
     if (item.status === 'draft' && !item.display_name) {
       const timer = window.setInterval(() => router.refresh(), 3000)
