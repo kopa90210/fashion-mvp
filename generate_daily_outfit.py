@@ -39,21 +39,44 @@ def validate_config() -> tuple[str, str, str]:
     )
 
 
-def score_item(item: dict[str, Any], dna: dict[str, float]) -> float:
+def score_item(item: dict[str, Any], dna: dict[str, float], dna_mag: float | None = None) -> float:
     tags = item.get("style_tags") or {}
-    dims = set(tags) | set(dna)
-    dot = sum(float(tags.get(dim, 0) or 0) * float(dna.get(dim, 0) or 0) for dim in dims)
-    tag_mag = math.sqrt(sum(float(tags.get(dim, 0) or 0) ** 2 for dim in dims))
-    dna_mag = math.sqrt(sum(float(dna.get(dim, 0) or 0) ** 2 for dim in dims))
-    if tag_mag == 0 or dna_mag == 0:
+    if not tags:
         return 0.0
-    return dot / (tag_mag * dna_mag)
+
+    dot = 0.0
+    tag_mag_sq = 0.0
+    for dim, weight in tags.items():
+        w = float(weight or 0)
+        if w != 0.0:
+            tag_mag_sq += w * w
+            d = float(dna.get(dim, 0) or 0)
+            if d != 0.0:
+                dot += w * d
+
+    if tag_mag_sq == 0.0:
+        return 0.0
+
+    if dna_mag is None:
+        dna_mag_sq = sum(float(d or 0) ** 2 for d in dna.values())
+        if dna_mag_sq == 0.0:
+            return 0.0
+        dna_mag = math.sqrt(dna_mag_sq)
+
+    if dna_mag == 0.0:
+        return 0.0
+
+    mag = math.sqrt(tag_mag_sq) * dna_mag
+    return dot / mag if mag > 0 else 0.0
 
 
 def score_outfit(items: list[dict[str, Any]], dna: dict[str, float]) -> float:
     if not items:
         return 0.0
-    return round(sum(score_item(item, dna) for item in items) / len(items), 4)
+    dna_mag = math.sqrt(sum(float(d or 0) ** 2 for d in dna.values()))
+    if dna_mag == 0.0:
+        return 0.0
+    return round(sum(score_item(item, dna, dna_mag) for item in items) / len(items), 4)
 
 
 def validate_ai_response(
@@ -101,11 +124,12 @@ def deterministic_fallback(
     if any(not by_role[role] for role in REQUIRED_ROLES):
         return None
 
-    picks = [max(by_role[role], key=lambda item: score_item(item, dna)) for role in REQUIRED_ROLES]
+    dna_mag = math.sqrt(sum(float(d or 0) ** 2 for d in dna.values()))
+    picks = [max(by_role[role], key=lambda item: score_item(item, dna, dna_mag)) for role in REQUIRED_ROLES]
     for role in OPTIONAL_ROLES:
         if by_role[role]:
-            candidate = max(by_role[role], key=lambda item: score_item(item, dna))
-            if score_item(candidate, dna) >= 0.2:
+            candidate = max(by_role[role], key=lambda item: score_item(item, dna, dna_mag))
+            if score_item(candidate, dna, dna_mag) >= 0.2:
                 picks.append(candidate)
 
     return {
@@ -221,13 +245,7 @@ def call_groq_once(groq_client: Any, model: str, item_pool: list[dict[str, Any]]
         )
     except Exception as exc:
         text_exc = str(exc)
-        print(f"Groq API error: {exc}", file=sys.stderr)
-        try:
-            import traceback
-
-            traceback.print_exc()
-        except Exception:
-            pass
+        print("Groq API request failed", file=sys.stderr)
 
         # If the error indicates the model failed JSON validation, retry
         # without the enforced response_format to capture the raw text
@@ -240,27 +258,22 @@ def call_groq_once(groq_client: Any, model: str, item_pool: list[dict[str, Any]]
                     messages=messages,
                 )
             except Exception as exc2:
-                print(f"Groq fallback request also failed: {exc2}", file=sys.stderr)
+                print("Groq fallback request failed", file=sys.stderr)
                 return None
 
             try:
                 content = fallback_resp.choices[0].message.content
             except Exception:
-                print("Groq fallback response missing expected structure:", fallback_resp, file=sys.stderr)
+                print("Groq fallback response missing expected structure", file=sys.stderr)
                 return None
 
             if not content:
-                print("Groq fallback returned empty content. Full response:", fallback_resp, file=sys.stderr)
+                print("Groq fallback returned empty content", file=sys.stderr)
                 return None
 
             parsed = parse_groq_content(content)
             if parsed is None:
-                print("Failed to parse Groq fallback content as JSON. Raw content follows:\n", content, file=sys.stderr)
-                try:
-                    with open(".last_groq_response.json", "w", encoding="utf-8") as fh:
-                        fh.write(content)
-                except Exception as e:
-                    print("Failed to write debug file:", e, file=sys.stderr)
+                print("Groq fallback response was not valid JSON", file=sys.stderr)
                 return None
 
             return validate_ai_response(parsed or {}, item_pool)
@@ -272,20 +285,15 @@ def call_groq_once(groq_client: Any, model: str, item_pool: list[dict[str, Any]]
     try:
         content = response.choices[0].message.content
     except Exception:
-        print("Groq response missing expected structure:", response, file=sys.stderr)
+        print("Groq response missing expected structure", file=sys.stderr)
 
     if not content:
-        print("Groq returned empty content. Full response:", response, file=sys.stderr)
+        print("Groq returned empty content", file=sys.stderr)
         return None
 
     parsed = parse_groq_content(content)
     if parsed is None:
-        print("Failed to parse Groq content as JSON. Raw content follows:\n", content, file=sys.stderr)
-        try:
-            with open(".last_groq_response.json", "w", encoding="utf-8") as fh:
-                fh.write(content)
-        except Exception as e:
-            print("Failed to write debug file:", e, file=sys.stderr)
+        print("Groq response was not valid JSON", file=sys.stderr)
         return None
 
     return validate_ai_response(parsed or {}, item_pool)
@@ -301,30 +309,17 @@ def generate_ai_outfit(
     for attempt in range(2):
         try:
             return call_groq_once(groq_client, model, item_pool, dna)
-        except Exception as exc:
+        except Exception:
             if attempt == 0:
-                print(f"Groq request failed, retrying once: {exc}", file=sys.stderr)
+                print("Groq request failed, retrying once", file=sys.stderr)
                 time.sleep(backoff_seconds)
                 continue
-            print(f"Groq request failed after retry: {exc}", file=sys.stderr)
+            print("Groq request failed after retry", file=sys.stderr)
     return None
 
 
 def persist_outfit(supabase: Any, user_id: str, outfit: dict[str, Any], source: str) -> Any:
-    return (
-        supabase.table("outfits")
-        .insert(
-            {
-                "user_id": user_id,
-                "item_ids": outfit["item_ids"],
-                "reasoning": outfit["reasoning"],
-                "styling_tip": outfit.get("styling_tip"),
-                "confidence": outfit.get("confidence"),
-                "source": source,
-            }
-        )
-        .execute()
-    )
+    raise RuntimeError("Direct outfit persistence is retired; run the durable AI worker")
 
 
 def generate_for_user(
@@ -333,8 +328,10 @@ def generate_for_user(
     user_id: str,
     dry_run: bool = False,
 ) -> dict[str, Any] | None:
+    if not dry_run:
+        raise RuntimeError("Direct outfit persistence is retired; use a queued AI job")
     if has_outfit_today(supabase, user_id):
-        print(f"{user_id}: daily outfit already exists")
+        print("Daily outfit already exists")
         return None
 
     dna = ensure_fashion_dna(supabase, user_id)
@@ -351,16 +348,16 @@ def generate_for_user(
         source = "daily_fallback"
 
     if outfit is None:
-        print(f"{user_id}: no valid outfit could be generated")
+        print("No valid outfit could be generated")
         return None
 
     result = {**outfit, "source": source}
     if dry_run:
-        print(json.dumps(result, indent=2))
+        print(f"Dry run completed: source={source}")
         return result
 
     persist_outfit(supabase, user_id, outfit, source)
-    print(f"{user_id}: saved {source} outfit")
+    print(f"Saved {source} outfit")
     return result
 
 
@@ -374,6 +371,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if not args.all_users and not args.user_id:
         parser.error("Provide --user-id or --all-users")
+    if not args.dry_run:
+        parser.error("Direct outfit persistence is retired; run python -m ai_service.worker instead")
 
     load_environment()
     try:
@@ -382,8 +381,8 @@ def main(argv: list[str] | None = None) -> int:
         groq_client = Groq(api_key=groq_key)
         verify_database(supabase)
         user_ids = fetch_user_ids(supabase) if args.all_users else [args.user_id]
-    except Exception as exc:
-        print(f"Fatal config error: {exc}", file=sys.stderr)
+    except Exception:
+        print("Fatal config error", file=sys.stderr)
         return 1
 
     completed = 0
@@ -392,9 +391,9 @@ def main(argv: list[str] | None = None) -> int:
         try:
             generate_for_user(supabase, groq_client, str(user_id), dry_run=args.dry_run)
             completed += 1
-        except Exception as exc:
+        except Exception:
             failed += 1
-            print(f"{user_id}: failed: {exc}", file=sys.stderr)
+            print("User run failed", file=sys.stderr)
         if args.all_users and index < len(user_ids) - 1:
             time.sleep(args.user_delay)
 

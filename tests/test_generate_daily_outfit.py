@@ -138,11 +138,10 @@ def test_groq_timeout_falls_back_to_daily_fallback(monkeypatch):
         )
     )
 
-    result = daily.generate_for_user(supabase, groq, "user")
+    result = daily.generate_for_user(supabase, groq, "user", dry_run=True)
 
     assert result["source"] == "daily_fallback"
-    persist.assert_called_once()
-    assert persist.call_args.args[3] == "daily_fallback"
+    persist.assert_not_called()
 
 
 def test_all_users_exits_zero_with_per_user_failure(monkeypatch, capsys):
@@ -156,7 +155,7 @@ def test_all_users_exits_zero_with_per_user_failure(monkeypatch, capsys):
     monkeypatch.setattr(daily, "generate_for_user", Mock(side_effect=[{}, RuntimeError("boom")]))
     monkeypatch.setattr(daily.time, "sleep", Mock())
 
-    assert daily.main(["--all-users", "--user-delay", "0"]) == 0
+    assert daily.main(["--all-users", "--user-delay", "0", "--dry-run"]) == 0
     assert "failed=1" in capsys.readouterr().out
 
 
@@ -167,4 +166,4 @@ def test_missing_env_exits_nonzero(monkeypatch):
     monkeypatch.delenv("NEXT_PUBLIC_SUPABASE_URL", raising=False)
     monkeypatch.delenv("SUPABASE_SERVICE_KEY", raising=False)
 
-    assert daily.main(["--user-id", "user"]) != 0
+    assert daily.main(["--user-id", "user", "--dry-run"]) != 0

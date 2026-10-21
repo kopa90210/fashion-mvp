@@ -2,17 +2,9 @@
 
 import { useMemo, useRef, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { AnimatePresence, motion } from 'framer-motion'
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { Heart, ThumbsDown } from 'lucide-react'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card'
 import {
   submitCalibrationFeedback,
   skipOutfitCalibration,
@@ -20,225 +12,247 @@ import {
 } from '@/src/app/actions/outfit'
 import { getChangedTags, getOptimisticVector } from '@/src/lib/outfit/feedback-helpers'
 import { vectorToSignals } from '@/src/lib/fashion-dna/labels'
-import type { DnaSignal } from '@/src/lib/fashion-dna/types'
-import WhyThisExplainer from '@/src/components/outfit/WhyThisExplainer'
 import FashionDnaPanel from '@/src/components/fashion-dna/FashionDnaPanel'
-import FlatLay from '@/src/components/outfit/FlatLay'
+import OutfitCanvas from '@/src/components/outfit/OutfitCanvas'
 
 export default function OutfitCalibrationScreen({
-  outfits,
+  outfit: initialOutfit,
+  answeredCount: initialAnsweredCount,
   feedbackCount,
 }: {
-  outfits: CalibrationOutfit[]
-  initialSignals: DnaSignal[]
+  outfit: CalibrationOutfit
+  answeredCount: number
   feedbackCount: number
 }) {
   const router = useRouter()
-  const [outfitIndex, setOutfitIndex] = useState(0)
   const [visible, setVisible] = useState(true)
   const [lastFeedback, setLastFeedback] = useState<boolean | null>(null)
-  const [currentOutfit, setCurrentOutfit] = useState(outfits[0])
-  const [vector, setVector] = useState(outfits[0].vector)
+  const [currentOutfit, setCurrentOutfit] = useState(initialOutfit)
+  const [answeredCount, setAnsweredCount] = useState(initialAnsweredCount)
+  const [vector, setVector] = useState(initialOutfit.vector)
   const [isFinishing, setIsFinishing] = useState(false)
   const [isSkipping, setIsSkipping] = useState(false)
+  const [isSubmitting, setIsSubmitting] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [swipeCount, setSwipeCount] = useState(feedbackCount)
+  const submissionLock = useRef(false)
   const [, startTransition] = useTransition()
-  const feedbackQueue = useRef<Promise<unknown>>(Promise.resolve())
+  const prefersReducedMotion = useReducedMotion()
 
   const outfit = currentOutfit
-  const totalOutfits = outfits.length
-  const progressLabel = `${Math.min(outfitIndex + 1, totalOutfits)} of ${totalOutfits}`
+  const progressLabel = `Look ${Math.min(answeredCount + 1, 3)} of 3`
 
-  // Derive signals from the (potentially optimistically updated) vector
   const signals = useMemo(() => vectorToSignals(vector), [vector])
 
   function handleSkip() {
-    if (isSkipping || isFinishing) return
+    if (isSkipping || isSubmitting || isFinishing) return
     setIsSkipping(true)
     startTransition(async () => {
       try {
         await skipOutfitCalibration()
         router.replace('/outfits')
         router.refresh()
-      } catch (error) {
+      } catch {
         setIsSkipping(false)
-        setErrorMessage(
-          error instanceof Error ? error.message : 'Could not skip calibration.',
-        )
+        setErrorMessage('We could not skip the style check. Please try again.')
       }
     })
   }
 
   function handleFeedback(liked: boolean) {
-    if (!visible || isFinishing) return
+    if (!visible || isSubmitting || isFinishing || submissionLock.current) return
 
     const activeOutfit = outfit
-    const isFinalOutfit = outfitIndex >= totalOutfits - 1
+    const priorVector = vector
     const changedTags = getChangedTags(activeOutfit)
+    const idempotencyKey = `outfit-feedback:${activeOutfit.id}`
 
+    submissionLock.current = true
+    setIsSubmitting(true)
     setLastFeedback(liked)
     setErrorMessage(null)
-    setVisible(false)
     setVector((current) => getOptimisticVector(current, changedTags, liked))
-    setSwipeCount((c) => c + 1)
+    setSwipeCount((count) => count + 1)
 
-    const feedbackPromise = feedbackQueue.current.then(() =>
-      submitCalibrationFeedback(
-        activeOutfit.id,
-        liked,
-        isFinalOutfit,
-      ),
-    )
+    startTransition(async () => {
+      try {
+        const result = await submitCalibrationFeedback(
+          activeOutfit.id,
+          liked,
+          idempotencyKey,
+        )
 
-    feedbackQueue.current = feedbackPromise.catch(() => undefined)
+        setVector(result.vector)
+        setAnsweredCount(result.answeredCount)
 
-    window.setTimeout(() => {
-      if (!isFinalOutfit) {
-        startTransition(async () => {
-          try {
-            const result = await feedbackPromise
-            const nextIndex = outfitIndex + 1
-            const nextOutfit = result.nextOutfit ?? outfits[nextIndex]
-
-            if (nextOutfit) {
-              setCurrentOutfit(nextOutfit)
-              setOutfitIndex(nextIndex)
-            } else {
-              setIsFinishing(true)
-              setVisible(false)
-            }
-
-            setVector(result.vector)
-          } finally {
-            setLastFeedback(null)
-            setVisible(true)
-          }
-        })
-        return
-      }
-
-      setIsFinishing(true)
-      startTransition(async () => {
-        try {
-          const result = await feedbackPromise
-          setVector(result.vector)
+        if (result.completed) {
+          setIsFinishing(true)
+          setVisible(false)
           router.replace('/outfits')
           router.refresh()
-        } catch (error) {
-          setIsFinishing(false)
-          setVisible(true)
-          setErrorMessage(
-            error instanceof Error
-              ? error.message
-              : 'Calibration could not be saved. Try that last response again.',
-          )
+          return
         }
-      })
-    }, 300)
+
+        if (!result.nextOutfit) {
+          setErrorMessage(
+            'Your choice was saved, but we could not load the next look. Please try again.',
+          )
+          setLastFeedback(null)
+          setIsSubmitting(false)
+          submissionLock.current = false
+          return
+        }
+
+        setVisible(false)
+        await new Promise<void>((resolve) => {
+          window.setTimeout(resolve, prefersReducedMotion ? 0 : 180)
+        })
+        setCurrentOutfit(result.nextOutfit)
+        setLastFeedback(null)
+        setVisible(true)
+        setIsSubmitting(false)
+        submissionLock.current = false
+      } catch {
+        setVector(priorVector)
+        setSwipeCount((count) => count - 1)
+        setLastFeedback(null)
+        setVisible(true)
+        setIsSubmitting(false)
+        submissionLock.current = false
+        setErrorMessage('We could not save that choice. Please try again.')
+      }
+    })
   }
 
   return (
-    <main className="min-h-screen bg-[#f7f4ef] px-4 py-6 text-[#1d1b18] sm:px-6 lg:py-10">
-      <div className="mx-auto grid max-w-6xl gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
+    <main className="px-4 py-6 text-[#1d1b18] sm:px-6 lg:py-10">
+      <div className="mx-auto grid max-w-5xl gap-8 lg:grid-cols-[minmax(0,7fr)_minmax(17rem,3fr)] lg:gap-10">
         <section className="min-w-0">
-          <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
+          <header className="mb-6 flex flex-wrap items-start justify-between gap-4 sm:mb-8">
             <div>
-              <p className="text-sm font-medium uppercase tracking-[0.18em] text-[#7a6f62]">
-                Outfit calibration
+              <p className="text-xs font-medium uppercase tracking-[0.18em] text-[#7a6f62]">
+                Style check
               </p>
-              <h1 className="mt-1 text-3xl font-semibold tracking-tight sm:text-4xl">
-                Tune your first looks
+              <h1 className="mt-2 text-3xl font-medium tracking-tight sm:text-4xl">
+                What feels like you?
               </h1>
+              <p className="mt-3 max-w-xl text-sm leading-6 text-[#6d6257] sm:text-base">
+                Three quick looks help us understand your taste.
+              </p>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-4">
               <button
                 type="button"
                 onClick={handleSkip}
-                disabled={isSkipping || isFinishing}
-                className="text-xs text-[#7a6f62] underline-offset-4 hover:text-[#1d1b18] hover:underline transition-colors disabled:opacity-50"
+                disabled={isSkipping || isSubmitting || isFinishing}
+                className="rounded-sm text-xs text-[#7a6f62] underline-offset-4 transition-colors hover:text-[#1d1b18] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1d1b18] focus-visible:ring-offset-4 disabled:opacity-50"
               >
                 Skip for now
               </button>
-              <Badge variant="outline" className="border-[#b9aa99] bg-white/45 text-[#4f463d]">
+              <span
+                role="progressbar"
+                aria-label="Style check progress"
+                aria-valuemin={1}
+                aria-valuemax={3}
+                aria-valuenow={Math.min(answeredCount + 1, 3)}
+                className="rounded-full border border-[#b9aa99] bg-[#fffdfa]/60 px-3 py-1.5 text-xs font-medium text-[#4f463d]"
+              >
                 {progressLabel}
-              </Badge>
+              </span>
             </div>
-          </div>
+          </header>
 
           <AnimatePresence mode="wait">
             {visible && !isFinishing ? (
               <motion.div
                 key={outfit.id}
-                initial={{ opacity: 0, y: 18 }}
+                initial={prefersReducedMotion ? false : { opacity: 0, y: 14 }}
                 animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, x: lastFeedback ? 52 : -52, scale: 0.98 }}
-                transition={{ duration: 0.3, ease: 'easeOut' }}
+                exit={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, x: lastFeedback ? 36 : -36, scale: 0.99 }}
+                transition={{ duration: prefersReducedMotion ? 0 : 0.24, ease: 'easeOut' }}
+                aria-busy={isSubmitting}
               >
-                <Card className="rounded-lg border-[#d8cec2] bg-white/70 shadow-sm">
-                  <CardHeader className="gap-2">
-                    <CardTitle className="text-xl">Would you wear this?</CardTitle>
-                    <CardDescription>
-                      React to the generated outfits before your first daily recommendation.
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-5">
-                    <FlatLay items={outfit.items} />
-
-                    <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[#e4dbd0] pt-4">
-                      <WhyThisExplainer reasons={outfit.reasons} />
-
-                      <div className="flex items-center gap-2">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="icon-lg"
-                          aria-label="Dislike this calibration outfit"
-                          onClick={() => handleFeedback(false)}
-                        >
-                          <ThumbsDown className="size-4" />
-                        </Button>
-                        <Button
-                          type="button"
-                          size="icon-lg"
-                          aria-label="Like this calibration outfit"
-                          onClick={() => handleFeedback(true)}
-                        >
-                          <Heart className="size-4" />
-                        </Button>
-                      </div>
+                <OutfitCanvas
+                  items={outfit.items}
+                  reasons={outfit.reasons}
+                  variant="editorial"
+                >
+                  <section
+                    aria-label="Style preference feedback"
+                    className="sticky bottom-[calc(5.75rem+env(safe-area-inset-bottom))] z-40 -mx-1 mt-5 rounded-2xl border border-[#d8cec2] bg-[#f7f4ef]/95 p-2 shadow-[0_8px_24px_rgba(62,51,40,0.10)] backdrop-blur-sm lg:static lg:mx-0 lg:border-0 lg:bg-transparent lg:p-0 lg:shadow-none"
+                  >
+                    <div className="grid grid-cols-2 gap-2.5 sm:gap-3">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      aria-label="Not my style"
+                      aria-pressed={isSubmitting && lastFeedback === false}
+                      onClick={() => handleFeedback(false)}
+                      disabled={isSubmitting || isFinishing}
+                      className="h-14 rounded-full border-[#b9aa99] bg-[#fffdfa] px-3 text-sm focus-visible:ring-2 focus-visible:ring-[#1d1b18] focus-visible:ring-offset-2 disabled:opacity-60 sm:text-base"
+                    >
+                      <ThumbsDown aria-hidden="true" className="size-4" />
+                      Not my style
+                    </Button>
+                    <Button
+                      type="button"
+                      aria-label="Love this"
+                      aria-pressed={isSubmitting && lastFeedback === true}
+                      onClick={() => handleFeedback(true)}
+                      disabled={isSubmitting || isFinishing}
+                      className="h-14 rounded-full bg-[#1d1b18] px-3 text-sm text-[#fffdfa] focus-visible:ring-2 focus-visible:ring-[#1d1b18] focus-visible:ring-offset-2 disabled:opacity-60 sm:text-base"
+                    >
+                      <Heart aria-hidden="true" className="size-4" />
+                      Love this
+                    </Button>
                     </div>
-                  </CardContent>
-                </Card>
+                    <p aria-live="polite" className="min-h-5 pt-2 text-center text-xs text-[#6d6257]">
+                      {isSubmitting ? 'Saving your choice…' : ''}
+                    </p>
+                  </section>
+                  {errorMessage ? (
+                    <p role="alert" className="mt-3 rounded-2xl border border-[#c9a8a3] bg-[#fffdfa] px-4 py-3 text-sm text-[#8a352e]">
+                      {errorMessage}
+                    </p>
+                  ) : null}
+                </OutfitCanvas>
               </motion.div>
-            ) : (
+            ) : isFinishing ? (
               <motion.div
                 key="finishing"
-                initial={{ opacity: 0, y: 16 }}
+                initial={prefersReducedMotion ? false : { opacity: 0, y: 16 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.28, ease: 'easeOut' }}
-                className="flex min-h-[520px] items-center justify-center rounded-lg border border-[#d8cec2] bg-white/65 p-8 text-center shadow-sm"
+                transition={{ duration: prefersReducedMotion ? 0 : 0.28, ease: 'easeOut' }}
+                className="flex min-h-[32rem] items-center justify-center rounded-[2rem] border border-[#d8cec2] bg-[#fffdfa]/65 p-8 text-center"
               >
                 <div className="max-w-md">
                   <p className="text-sm font-medium uppercase tracking-[0.18em] text-[#7a6f62]">
-                    Calibrating
+                    Style check complete
                   </p>
                   <h2 className="mt-3 text-2xl font-semibold tracking-tight">
-                    Preparing your first daily outfit.
+                    Your taste profile is ready.
                   </h2>
                   <p className="mt-3 text-sm leading-6 text-[#6d6257]">
-                    Your three reactions are being folded into Fashion DNA now.
+                    Your reactions are saved. Preparing Today from what StyleGraph has learned.
                   </p>
-                  {errorMessage && (
-                    <p className="mt-5 text-sm font-medium text-red-700">{errorMessage}</p>
-                  )}
                 </div>
+              </motion.div>
+            ) : (
+              <motion.div
+                key="transitioning"
+                role="status"
+                aria-label="Loading the next look"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className="h-[clamp(28rem,68vw,42rem)] animate-pulse rounded-[2rem] bg-[#ebe3d8] motion-reduce:animate-none"
+              >
+                <span className="sr-only">Loading the next look…</span>
               </motion.div>
             )}
           </AnimatePresence>
         </section>
 
-        <aside className="lg:pt-[88px]">
+        <aside aria-label="Style learning summary" className="self-start lg:sticky lg:top-8 lg:pt-28">
           <FashionDnaPanel signals={signals} feedbackCount={swipeCount} />
         </aside>
       </div>

@@ -1,0 +1,51 @@
+{
+  "attributes": {
+    "category": "footwear",
+    "color": {
+      "primary": "black",
+      "secondary": null
+    },
+    "display_name": "Black High Heeled Pumps",
+    "fit": {
+      "primary": "regular"
+    },
+    "formality_score": 1.0,
+    "layer_role": "footwear",
+    "material": {
+      "primary": "leather"
+    },
+    "model_confidence": 0.9,
+    "pattern": "solid",
+    "season_weights": {
+      "fall": 0.0,
+      "spring": 0.0,
+      "summer": 0.0,
+      "winter": 0.0
+    },
+    "style_tags": {
+      "bohemian": 0.0,
+      "casual": 0.0,
+      "edgy": 0.0,
+      "formal": 1.0,
+      "minimal": 0.0,
+      "smart_casual": 0.0,
+      "sporty": 0.0,
+      "streetwear": 0.0
+    },
+    "subcategory": "high_heeled_pumps"
+  },
+  "cutout": {
+    "height": 928,
+    "mime_type": "image/png",
+    "processed_relative_path": "feminine/footwear/1791293593.png",
+    "sha256": "773912c3e00df3b774bda94f612c023155d579d0b9f5a2b213f04e634120e4d0",
+    "width": 1664
+  },
+  "expected_category": "footwear",
+  "manifest_version": "curated-cache-v1",
+  "photo_sha256": "21d27147992058448603c45235b303bd6cb4fd94ef138c66ad4a225401b4baad",
+  "presentation_profile": "feminine",
+  "processed_at": "2026-10-07T05:46:50.457896+00:00",
+  "schema_version": "curated-v1",
+  "source_relative_path": "feminine/footwear/1791293593.png"
+}

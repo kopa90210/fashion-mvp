@@ -1,0 +1,51 @@
+{
+  "attributes": {
+    "category": "accessory",
+    "color": {
+      "primary": "black",
+      "secondary": null
+    },
+    "display_name": "Black Leather Shoulder Bag",
+    "fit": {
+      "primary": "regular"
+    },
+    "formality_score": 0.6,
+    "layer_role": "accessory",
+    "material": {
+      "primary": "leather"
+    },
+    "model_confidence": 0.9,
+    "pattern": "solid",
+    "season_weights": {
+      "fall": 0.8,
+      "spring": 0.7,
+      "summer": 0.6,
+      "winter": 0.7
+    },
+    "style_tags": {
+      "bohemian": 0.4,
+      "casual": 0.8,
+      "edgy": 0.5,
+      "formal": 0.2,
+      "minimal": 0.9,
+      "smart_casual": 0.7,
+      "sporty": 0.3,
+      "streetwear": 0.1
+    },
+    "subcategory": "handbag"
+  },
+  "cutout": {
+    "height": 928,
+    "mime_type": "image/png",
+    "processed_relative_path": "feminine/accessories/1791293834.png",
+    "sha256": "dae617b26e8d51690e75300cf982391c1a0cf3af4ee481cde44296eef9bd4ddc",
+    "width": 1664
+  },
+  "expected_category": "accessory",
+  "manifest_version": "curated-cache-v1",
+  "photo_sha256": "e41e597bf1da41519476eab9d46537f9ff46bf833cde4e4e2d67a9b00617ded1",
+  "presentation_profile": "feminine",
+  "processed_at": "2026-10-07T05:45:23.635766+00:00",
+  "schema_version": "curated-v1",
+  "source_relative_path": "feminine/accessories/1791293834.png"
+}

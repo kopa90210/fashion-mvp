@@ -2,7 +2,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 
 export default function LoadingQuiz() {
   return (
-    <div className="min-h-screen bg-[#0a0a0a] pb-32 pt-12 text-white px-4 sm:px-6 md:px-8">
+    <div className="stylegraph-quiz-surface pb-32 pt-12 text-white px-4 sm:px-6 md:px-8">
       <div className="mx-auto max-w-4xl space-y-12">
         <div className="text-center space-y-3 flex flex-col items-center">
           <Skeleton className="h-9 w-80 bg-white/10" />

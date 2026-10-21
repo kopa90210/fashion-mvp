@@ -1,47 +1,44 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import {
-  getCalibrationOutfits,
-  shouldShowOutfitCalibration,
-} from '@/src/app/actions/outfit'
+import { getCalibrationState } from '@/src/app/actions/outfit'
 import { getFashionDnaSummary } from '@/src/app/actions/fashion-dna'
 import { buttonVariants } from '@/components/ui/button'
 import OutfitCalibrationScreen from './OutfitCalibrationScreen'
 
 export default async function OutfitCalibrationPage() {
-  if (!(await shouldShowOutfitCalibration())) {
+  const state = await getCalibrationState()
+
+  if (state.completed) {
     redirect('/outfits')
   }
 
-  const outfits = await getCalibrationOutfits()
-
-  if (outfits.length === 0) {
+  if (!state.outfit) {
     return (
-      <main className="min-h-screen bg-[#f7f4ef] px-4 py-10 text-[#1d1b18] sm:px-6">
+      <main className="px-4 py-10 text-[#1d1b18] sm:px-6">
         <div className="mx-auto flex min-h-[70vh] max-w-xl flex-col items-center justify-center text-center">
           <p className="text-sm font-medium uppercase tracking-[0.18em] text-[#7a6f62]">
-            Outfit calibration
+            Style check
           </p>
           <h1 className="mt-3 text-3xl font-semibold tracking-tight">
-            Add a few more wardrobe pieces.
+            Choose a few more pieces you&apos;d wear.
           </h1>
           <p className="mt-3 text-sm leading-6 text-[#6d6257]">
-            I need enough top, bottom, and footwear combinations before calibration can begin.
+            We need enough style references to build a valid look. These picks guide your taste profile; they are not added to your wardrobe.
           </p>
           <Link href="/quiz?done=true" className={buttonVariants({ className: 'mt-6' })}>
-            Choose wardrobe pieces
+            Choose more style pieces
           </Link>
         </div>
       </main>
     )
   }
 
-  const { signals, feedbackCount } = await getFashionDnaSummary()
+  const { feedbackCount } = await getFashionDnaSummary()
 
   return (
     <OutfitCalibrationScreen
-      outfits={outfits}
-      initialSignals={signals}
+      outfit={state.outfit}
+      answeredCount={state.answeredCount}
       feedbackCount={feedbackCount}
     />
   )

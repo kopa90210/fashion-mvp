@@ -3,17 +3,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useRouter } from 'next/navigation'
-import Image from 'next/image'
-import { Card } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
-import { Check, Search, X, ChevronLeft, ChevronRight, Sparkles } from 'lucide-react'
+import { Search, X, ChevronLeft, ChevronRight, Sparkles } from 'lucide-react'
+import GarmentCard from '@/src/components/wardrobe/GarmentCard'
 import {
   CuratedItem,
   getRankedPieces,
   searchPieces,
   saveWardrobeSelection,
 } from '@/src/app/actions/wardrobe'
-import { SELECTION_STEPS } from './selection-steps'
+import { isCalibrationSelectionEligible, SELECTION_STEPS } from './selection-steps'
+import { STYLE_SELECTION_COPY } from './selection-copy'
 
 export default function PieceSelectionScreen() {
   const router = useRouter()
@@ -45,9 +44,16 @@ export default function PieceSelectionScreen() {
   )
   const selectedCount = currentSelectedIds.size
 
-  const isStepValid = currentStep.required
-    ? selectedCount >= currentStep.minSelections
-    : true
+  const selectionCounts = Object.fromEntries(
+    Object.entries(selections).map(([category, selected]) => [category, selected.size]),
+  )
+  const isFinalStep = currentStepIndex === SELECTION_STEPS.length - 1
+  const isGloballyEligible = isCalibrationSelectionEligible(selectionCounts)
+  const isStepValid = isFinalStep
+    ? isGloballyEligible
+    : currentStep.required
+      ? selectedCount >= currentStep.minSelections
+      : true
 
   // Total selected across all steps
   const totalSelectedCount = Object.values(selections).reduce(
@@ -180,6 +186,10 @@ export default function PieceSelectionScreen() {
   }
 
   const handleSubmit = async () => {
+    if (!isGloballyEligible) {
+      setSubmitError(STYLE_SELECTION_COPY.eligibilityError)
+      return
+    }
     setSubmitError(null)
     setIsSubmitting(true)
 
@@ -191,10 +201,10 @@ export default function PieceSelectionScreen() {
     try {
       await saveWardrobeSelection(allSelectedIds)
       setTimeout(() => {
-        router.push('/outfits')
+        router.push('/outfits/calibration')
       }, 2200)
     } catch (err) {
-      console.error('Failed to submit wardrobe selection:', err)
+      console.error('Failed to submit style selection:', err)
       setIsSubmitting(false)
       setSubmitError('We could not save your selections. Please try again.')
     }
@@ -215,10 +225,10 @@ export default function PieceSelectionScreen() {
       return true
     })
   }, [rawDisplayItems, currentSelectedIds])
-  // Submission screen ("Building your wardrobe...")
+  // Submission screen: curated picks become style signals, not ownership.
   if (isSubmitting) {
     return (
-      <div className="flex min-h-screen w-full flex-col items-center justify-center bg-[#070708] px-6 text-white overflow-hidden">
+      <div className="stylegraph-quiz-surface flex w-full flex-col items-center justify-center bg-[#070708] px-6 text-white overflow-hidden">
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
@@ -226,10 +236,10 @@ export default function PieceSelectionScreen() {
         >
           <Sparkles className="h-10 w-10 mx-auto text-amber-300 animate-pulse" />
           <h1 className="text-3xl font-bold tracking-tight">
-            Building your wardrobe...
+            {STYLE_SELECTION_COPY.submitTitle}
           </h1>
           <p className="text-sm text-white/50">
-            Fusing your chosen pieces with your Style DNA to generate your first look.
+            {STYLE_SELECTION_COPY.submitBody}
           </p>
         </motion.div>
       </div>
@@ -237,7 +247,7 @@ export default function PieceSelectionScreen() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-[#0a0a0c] via-[#0d0d12] to-[#070708] pb-32 pt-8 text-white px-4 sm:px-6 md:px-8">
+    <div className="stylegraph-quiz-surface bg-gradient-to-b from-[#0a0a0c] via-[#0d0d12] to-[#070708] pb-[calc(6rem+env(safe-area-inset-bottom))] pt-8 text-white px-4 sm:px-6 md:px-8">
       <div className="mx-auto max-w-4xl space-y-8">
         
         {/* Step Header & Progress */}
@@ -255,7 +265,7 @@ export default function PieceSelectionScreen() {
                 </button>
               )}
               <span className="text-xs font-semibold uppercase tracking-[0.2em] text-amber-200/80">
-                Step {currentStepIndex + 1} of 5 - {currentStep.label}
+                Step {currentStepIndex + 1} of {SELECTION_STEPS.length} - {currentStep.label}
               </span>
             </div>
 
@@ -290,9 +300,14 @@ export default function PieceSelectionScreen() {
                 Choose your {currentStep.label.toLowerCase()}
               </h1>
               <p className="text-xs text-white/50 mt-1">
-                {currentStep.required
+                {isFinalStep && !isGloballyEligible
+                  ? STYLE_SELECTION_COPY.finalEligibilityHint
+                  : currentStep.required
                   ? `Select at least ${currentStep.minSelections} items to advance.`
-                  : 'Optional - select any pieces you own or skip.'}
+                  : STYLE_SELECTION_COPY.optionalHint}
+              </p>
+              <p className="mt-2 max-w-xl text-xs leading-5 text-white/40">
+                {STYLE_SELECTION_COPY.referenceNote}
               </p>
             </div>
 
@@ -400,50 +415,14 @@ export default function PieceSelectionScreen() {
                         onClick={() => toggleSelection(item.id)}
                         className="relative w-32 shrink-0 cursor-pointer snap-start"
                       >
-                        <Card
-                          className={`overflow-hidden rounded-2xl bg-white/5 border-2 transition-all ${
-                            currentSelectedIds.has(item.id)
-                              ? 'border-amber-300 ring-2 ring-amber-300/30'
-                              : 'border-transparent hover:border-white/20'
-                          }`}
-                        >
-                          <div className="relative aspect-[3/4] w-full bg-white/5">
-                            {item.image_url ? (
-                              <Image
-                                src={item.image_url}
-                                alt={item.display_name}
-                                fill
-                                sizes="(min-width: 1024px) 20vw, (min-width: 768px) 25vw, (min-width: 640px) 33vw, 50vw"
-                                unoptimized
-                                className="object-cover"
-                              />
-                            ) : (
-                              <div className="flex h-full w-full items-center justify-center bg-white/10 text-xs text-white/30">
-                                No Image
-                              </div>
-                            )}
-
-                            <AnimatePresence>
-                              {currentSelectedIds.has(item.id) && (
-                                <motion.div
-                                  initial={{ scale: 0, opacity: 0 }}
-                                  animate={{ scale: 1, opacity: 1 }}
-                                  exit={{ scale: 0, opacity: 0 }}
-                                  className="absolute right-2 top-2"
-                                >
-                                  <Badge className="h-6 w-6 rounded-full p-0 flex items-center justify-center bg-amber-300 text-black shadow-md border-none">
-                                    <Check className="h-3.5 w-3.5" strokeWidth={3} />
-                                  </Badge>
-                                </motion.div>
-                              )}
-                            </AnimatePresence>
-                          </div>
-                          <div className="p-3">
-                            <p className="truncate text-sm font-medium text-white/90">
-                              {item.display_name}
-                            </p>
-                          </div>
-                        </Card>
+                        <GarmentCard
+                          image={item.image_url}
+                          name={item.display_name}
+                          category={item.category}
+                          variant="style_reference"
+                          selected={currentSelectedIds.has(item.id)}
+                          selectionMode
+                        />
                       </motion.div>
                     )
                   })}
@@ -498,7 +477,7 @@ export default function PieceSelectionScreen() {
       </div>
 
       {submitError && (
-        <div className="fixed bottom-20 left-4 right-4 z-50 mx-auto max-w-4xl rounded-xl border border-red-300/30 bg-red-950/90 px-4 py-3 text-sm text-red-100">
+        <div className="fixed bottom-[calc(5.5rem+env(safe-area-inset-bottom))] left-4 right-4 z-50 mx-auto max-w-4xl rounded-xl border border-red-300/30 bg-red-950/90 px-4 py-3 text-sm text-red-100">
           <div className="flex items-center justify-between gap-3">
             <span>{submitError}</span>
             <button
@@ -513,7 +492,7 @@ export default function PieceSelectionScreen() {
       )}
 
       {/* Sticky Bottom Navigation Bar */}
-      <div className="fixed bottom-0 left-0 right-0 z-50 border-t border-white/10 bg-[#070708]/90 px-6 py-4 backdrop-blur-lg">
+      <div className="fixed bottom-0 left-0 right-0 z-50 border-t border-white/10 bg-[#070708]/90 px-6 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-4 backdrop-blur-lg">
         <div className="mx-auto flex max-w-4xl items-center justify-between">
           <div className="text-xs text-white/60">
             <span className="font-medium text-white">
@@ -544,7 +523,7 @@ export default function PieceSelectionScreen() {
               }`}
             >
               {currentStepIndex === SELECTION_STEPS.length - 1 ? (
-                'Build my wardrobe'
+                STYLE_SELECTION_COPY.finalCta
               ) : (
                 <>
                   Next

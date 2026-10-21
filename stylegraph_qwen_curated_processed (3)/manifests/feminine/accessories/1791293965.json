@@ -1,0 +1,51 @@
+{
+  "attributes": {
+    "category": "accessory",
+    "color": {
+      "primary": "black",
+      "secondary": null
+    },
+    "display_name": "Black Square Frame Glasses",
+    "fit": {
+      "primary": "regular"
+    },
+    "formality_score": 0.6,
+    "layer_role": "accessory",
+    "material": {
+      "primary": "plastic"
+    },
+    "model_confidence": 0.9,
+    "pattern": "solid",
+    "season_weights": {
+      "fall": 0.8,
+      "spring": 0.7,
+      "summer": 0.6,
+      "winter": 0.9
+    },
+    "style_tags": {
+      "bohemian": 0.4,
+      "casual": 0.8,
+      "edgy": 0.5,
+      "formal": 0.2,
+      "minimal": 0.9,
+      "smart_casual": 0.7,
+      "sporty": 0.3,
+      "streetwear": 0.1
+    },
+    "subcategory": "eyewear"
+  },
+  "cutout": {
+    "height": 928,
+    "mime_type": "image/png",
+    "processed_relative_path": "feminine/accessories/1791293965.png",
+    "sha256": "6d36edd6c29814128c6b406c8c995a27702da0c10f337f655d222938bce0e4c6",
+    "width": 1664
+  },
+  "expected_category": "accessory",
+  "manifest_version": "curated-cache-v1",
+  "photo_sha256": "962491f230673e09cccccfb77c9a92e1d505720513240e79e4157b77d22e03ec",
+  "presentation_profile": "feminine",
+  "processed_at": "2026-10-07T05:46:06.711252+00:00",
+  "schema_version": "curated-v1",
+  "source_relative_path": "feminine/accessories/1791293965.png"
+}

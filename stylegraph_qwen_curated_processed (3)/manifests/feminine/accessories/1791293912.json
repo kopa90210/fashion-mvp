@@ -1,0 +1,51 @@
+{
+  "attributes": {
+    "category": "accessory",
+    "color": {
+      "primary": "black",
+      "secondary": null
+    },
+    "display_name": "Black Leather Belt",
+    "fit": {
+      "primary": "regular"
+    },
+    "formality_score": 0.5,
+    "layer_role": "accessory",
+    "material": {
+      "primary": "leather"
+    },
+    "model_confidence": 0.9,
+    "pattern": "solid",
+    "season_weights": {
+      "fall": 0.4,
+      "spring": 0.3,
+      "summer": 0.2,
+      "winter": 0.1
+    },
+    "style_tags": {
+      "bohemian": 0.05,
+      "casual": 0.8,
+      "edgy": 0.05,
+      "formal": 0.2,
+      "minimal": 0.6,
+      "smart_casual": 0.4,
+      "sporty": 0.05,
+      "streetwear": 0.1
+    },
+    "subcategory": "belt"
+  },
+  "cutout": {
+    "height": 928,
+    "mime_type": "image/png",
+    "processed_relative_path": "feminine/accessories/1791293912.png",
+    "sha256": "fcc9ff44240a5161b0a8edd8780a1c390165be6e787af0d13d61d17938476464",
+    "width": 1664
+  },
+  "expected_category": "accessory",
+  "manifest_version": "curated-cache-v1",
+  "photo_sha256": "d3b52766aaf1f142686fe6d40f020cd80e4b7e0c34e79fec4d8e21814d27920b",
+  "presentation_profile": "feminine",
+  "processed_at": "2026-10-07T05:45:45.331905+00:00",
+  "schema_version": "curated-v1",
+  "source_relative_path": "feminine/accessories/1791293912.png"
+}

@@ -1,0 +1,33 @@
+{
+  "user_id": "test-user-1",
+  "fashion_dna": {
+    "minimal": 1.0,
+    "streetwear": 0.3
+  },
+  "wardrobe_items": [
+    {
+      "id": "t1",
+      "display_name": "White Tee",
+      "layer_role": "base_layer",
+      "style_tags": {
+        "minimal": 1.0
+      }
+    },
+    {
+      "id": "p1",
+      "display_name": "Slim Jeans",
+      "layer_role": "bottom",
+      "style_tags": {
+        "minimal": 0.8
+      }
+    },
+    {
+      "id": "s1",
+      "display_name": "White Sneakers",
+      "layer_role": "footwear",
+      "style_tags": {
+        "minimal": 0.9
+      }
+    }
+  ]
+}

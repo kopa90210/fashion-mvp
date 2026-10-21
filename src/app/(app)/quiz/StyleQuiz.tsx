@@ -131,7 +131,7 @@ export default function StyleQuiz() {
   }, [])
 
   return (
-    <div className="relative flex min-h-screen w-full flex-col items-center bg-[#0a0a0a] text-white selection:bg-white/20">
+    <div className="stylegraph-quiz-surface relative flex w-full flex-col items-center text-white selection:bg-white/20">
       {/* ── Progress bar — hidden during intro ───────────────────────────── */}
       {!showIntro && (
         <div className="fixed top-0 left-0 z-50 h-1 w-full bg-white/5">

@@ -1,228 +1,163 @@
-# AI Daily Outfit Generation — Implementation Plan
+# AI Daily Outfit Generation - Product Purpose and Current Architecture
 
-## Architecture decision (do not deviate without discussion)
+Documentation review: 2026-10-05, branch `feat/outfit-gemini-v2`.
+This describes the checked repository implementation, not a deployment audit.
+It supersedes this file's older scheduled-script/direct-persistence plan.
 
-The AI generation step runs **out of band** as a scheduled Python job
-(`generate_daily_outfit.py`), not synchronously inside a Next.js request.
-The job writes one `outfits` row per user per day, tagged via
-`source` (`daily_ai` | `daily_fallback`). `getDailyOutfit()` in
-`src/app/actions/outfit.ts` checks for today's pre-generated row first;
-if none exists, it falls through to the existing live
-`recommendOutfits()` engine unchanged (which continues to insert
-`source = 'engine'` rows as it does today).
+## Product purpose: cold-start style learning
 
-This keeps Groq entirely off the request path — a slow or failing AI
-call can never make a page load hang.
+StyleGraph deliberately learns useful style preferences before a user has
+uploaded a large real wardrobe. The intended funnel is:
 
-Work through the phases below in order. Each phase has its own
-acceptance criteria; do not start the next phase until the current
-one's criteria are met.
+1. Complete the style quiz to initialize Fashion DNA.
+2. Select curated pieces that approximate what the user would realistically
+   wear or own.
+3. Use those selections as a bootstrap/proxy wardrobe.
+4. Generate calibration outfits from that proxy wardrobe.
+5. Use reactions to refine Fashion DNA.
+6. Upload and confirm the user's actual clothing.
+7. Progressively base daily recommendations on confirmed owned pieces while
+   retaining the preferences learned during calibration.
 
----
+Curated calibration is an active product capability. The move to a durable
+queue retires an old persistence mechanism, not cold-start learning, daily
+outfit generation, or calibration functionality. Keep `generate_daily_outfit.py`
+and the calibration flow; neither is made obsolete by real-wardrobe uploads.
 
-## Phase 0 — Schema migration
+## Calibration mode: curated/proxy wardrobe plus feedback
 
-**Task**
-Apply `supabase/migrations/0005_ai_outfit_reasoning.sql` (already
-drafted): adds `reasoning jsonb`, `styling_tip text`, `confidence
-numeric`, `source text not null default 'engine'` to `public.outfits`,
-plus a check constraint on `source`.
+The quiz UI computes a style vector and calls `submitStyleQuiz()` in
+`src/app/(app)/quiz/actions.ts`. Its `submit_style_quiz` RPC persists the quiz
+results and a Fashion DNA version. `/quiz?done=true` shows
+`PieceSelectionScreen.tsx`.
 
-**Files**
-- `supabase/migrations/0005_ai_outfit_reasoning.sql`
+`getRankedPieces()` in `src/app/actions/wardrobe.ts` ranks `source='curated'`
+pieces against the user's DNA. `saveWardrobeSelection()` saves selected item
+IDs as user-associated entries in `user_wardrobe_items`, then the selection
+screen navigates to `/outfits`.
 
-**Acceptance criteria**
-- [ ] Migration applies cleanly against the current schema with no
-      manual intervention (`if not exists` guards present).
-- [ ] Existing rows in `outfits` are unaffected — `source` backfills to
-      `'engine'` for all pre-existing rows, no nulls, no errors.
-- [ ] `alter table ... add constraint` uses `drop constraint if
-      exists` first so the migration is re-runnable.
-- [ ] No existing TypeScript code breaks — `outfits` reads elsewhere in
-      the codebase (`outfitKey`, `getShownOutfitKeys`, etc.) don't
-      select `*` and aren't affected by new columns.
+`shouldShowOutfitCalibration()` redirects an eligible user who has not
+completed calibration to `/outfits/calibration`. `getCalibrationOutfits()`
+uses the deterministic `recommendOutfits()` engine and saves up to three
+candidates via `create_outfit_with_items`, with outfit `source='engine'`.
+It does not enqueue a daily AI job or call an AI provider.
 
----
+`submitCalibrationFeedback()` calls `submit_outfit_feedback` with
+`p_feedback_source='calibration'` and an idempotency key. The database records
+feedback/preference events and updates/version-controls Fashion DNA. The
+action can select a further diverse candidate using the updated vector.
+Completing or skipping calibration sets `has_completed_calibration`.
 
-## Phase 1 — Harden the Python generator
+## Personal wardrobe mode: confirmed owned pieces
 
-**Task**
-Take `generate_daily_outfit.py` (already drafted) from "working script"
-to "safe to run unattended daily." Add:
-- A `pytest` suite mocking the Supabase client and Groq client (follow
-  the mocking style already used in `tests/test_extract_and_upload.py`
-  — fixture-based fakes, no real network calls).
-- One retry with a short backoff on Groq timeout/5xx before falling
-  back to `deterministic_fallback`.
-- A small delay between users in `--all-users` mode to stay under Groq
-  rate limits.
-- Distinct process exit codes: `0` for a run that completed (even with
-  some per-user failures logged), non-zero only for fatal config
-  errors (missing env vars, DB unreachable).
+| Item concept | Repository representation | Product meaning |
+| --- | --- | --- |
+| Selected curated piece | `wardrobe_items.source='curated'`, linked in `user_wardrobe_items` | Preference/bootstrap data; selection does not prove physical ownership. |
+| Uploaded draft | `source='user_upload'`, `status='draft'` | Awaiting review/confirmation; excluded from outfit pools. |
+| Confirmed uploaded piece | `source='user_upload'`, `status='confirmed'`, active user membership | Actual user-owned clothing available for personal wardrobe recommendations. |
 
-**Files**
+`user_wardrobe_items` is the canonical user association/authorization relation
+for both selected curated pieces and uploaded pieces. Sharing this relation
+does not make the two product concepts equivalent. Likewise,
+`status='confirmed'` is an eligibility state; on its own it does not mean an
+item is physically owned. Interpret it together with the item's origin.
+
+Outfit `source` describes the generator (`engine`, `daily_ai`,
+`daily_fallback`), not whether the clothing is curated or uploaded.
+Feedback `source` separately distinguishes `calibration` from `daily`.
+
+## Transition: preferences persist as the item pool changes
+
+Calibration and daily recommendation paths read the same current
+`fashion_dna.vector`. Adding and confirming uploaded garments makes them
+eligible without resetting that learned vector. Daily feedback continues to
+refine it through the same transactional feedback RPC.
+
+The intended transition is from a proxy wardrobe toward actual confirmed
+ownership. **The current code does not implement a distinct uploaded-only
+mode, a source-based switch, an upload-count threshold, or automatic retirement
+of curated selections.** Both `fetchWardrobeItems()` in
+`src/app/actions/outfit.ts` and `_daily_outfit()` in `ai_service/worker.py`
+read active user memberships and confirmed items; neither filters that pool
+to `source='user_upload'`. Curated selections therefore remain eligible
+alongside confirmed uploads. These are product modes, not new persisted
+runtime enums. A later transition policy must preserve calibration signals
+and distinguish proxy selection from actual ownership.
+
+## Current daily-outfit runtime: durable queue and worker
+
+1. `getDailyOutfit()` authenticates the user and loads the current DNA,
+   eligible user-associated items, and user timezone.
+2. When `ENABLE_AI_DAILY_OUTFITS === 'true'`, it first looks for a generated
+   `daily_ai`/`daily_fallback` outfit whose `scheduled_for` matches the user's
+   local calendar date. It resolves relational `outfit_items` in position
+   order, with legacy `item_ids` fallback. Unresolvable item references count
+   as a miss; valid stored reasoning is returned rather than regenerated.
+3. On a miss it runs `recommendOutfits()`. If no candidate is possible, it
+   returns `null` before enqueueing. Otherwise, with the flag enabled, it
+   calls `enqueue_daily_outfit_job`, which creates/reuses an idempotent
+   `ai_jobs` record for the authenticated user and local date.
+4. The request immediately saves and returns the deterministic candidate
+   through `create_outfit_with_items`, with `source='engine'`. Successful
+   enqueueing adds job linkage and `fallback_reason='ai_queued'` to the
+   context snapshot. Enqueue failure still allows the engine result.
+5. A separately running `python -m ai_service.worker` claims queued work via
+   `claim_ai_jobs`. For `job_type='daily_outfit'`, `_daily_outfit()` reloads
+   the current DNA and eligible pool and invokes `OutfitService`/`GroqProvider`.
+   It calls the service implementation inside the worker process, not the
+   FastAPI HTTP endpoint and not Gemini's outfit-photo extraction provider.
+6. `OutfitService` returns validated AI output as `daily_ai`, or its
+   deterministic fallback as `daily_fallback`. If neither can produce a valid
+   outfit, the worker reports the existing classified failure.
+7. The worker calls `complete_ai_job`. That RPC validates the current lease
+   and result, records `ai_runs`, persists the outfit and relational items
+   atomically on success, and updates job lifecycle/retry state. A later
+   request can read the completed daily result.
+
+With the flag false/unset, the daily action uses the deterministic engine
+without the stored daily-AI lookup or enqueue. Calibration remains a
+separate deterministic flow regardless of this flag. Groq generation stays
+off the Next.js request path; application persistence remains behind RPCs.
+Database authorization/eligibility validation also applies to curated proxy
+items and must not be described as proof of physical ownership.
+
+## Historical script and scheduling descriptions
+
+| Older statement in this plan | Verified current implementation |
+| --- | --- |
+| The scheduled Python script writes one outfit row per user/day. | `generate_daily_outfit.py` rejects non-dry-run execution, and `persist_outfit()` raises; queued results are completed via `complete_ai_job`. |
+| Read today's AI outfit using a `created_at` start-of-day filter. | The application reads `scheduled_for` in the user's timezone and `status='generated'`; the legacy script's date check still uses UTC `created_at`. |
+| Save outfits with a direct table insert. | Application engine/calibration persistence uses `create_outfit_with_items`; daily worker persistence uses `complete_ai_job`. |
+| Every displayed item must be an individually user-owned row. | Items must be traceable to eligible user-associated membership; curated proxy selections are authorized inputs without asserting actual ownership. |
+| Any generation failure is silently handled at every layer. | The request has an engine path, the service has a deterministic fallback, and unrecoverable worker failures use durable job failure/retry state. Invalid configuration, insufficient items, and persistence failures are not universal silent-success cases. |
+
+`generate_daily_outfit.py` remains a legacy diagnostic/dry-run generator;
+its generation helpers and bootstrap purpose are retained. Its CLI requires
+`--dry-run`; it is not the current production writer. Do not describe dry-run
+as entirely read-only: `ensure_fashion_dna()` can seed a missing DNA row.
+
+The repository still contains `.github/workflows/daily-outfit-generation.yml`
+with a cron/manual trigger calling `python generate_daily_outfit.py --all-users`
+without `--dry-run`. That command conflicts with the script's current guard
+and cannot deliver the queued daily runtime as written. Worker supervision
+and scheduling rollout must be verified separately; this documentation does
+not claim that workflow or a deployed worker has been repaired.
+
+## Scope and evidence
+
+This clarification changes documentation only. It introduces no new mode
+switch, queue behavior, schema change, recommendation policy, or deployment
+configuration. The old phase checklist is superseded as a current-runtime
+instruction; its historical text remains available in Git history.
+
+Reviewed implementation:
+
 - `generate_daily_outfit.py`
-- `tests/test_generate_daily_outfit.py` (new)
-- `requirements.txt` (add `pytest` if not already present as a dev
-  dependency)
-
-**Acceptance criteria**
-- [ ] `pytest tests/test_generate_daily_outfit.py` passes locally with
-      no network access.
-- [ ] Tests cover: `score_item` (known-vector cosine check),
-      `validate_ai_response` (valid response, id not in pool,
-      malformed reasoning, out-of-range confidence — each rejected or
-      accepted correctly), `deterministic_fallback` (returns None when
-      a required category pool is empty, returns valid picks
-      otherwise), `has_outfit_today` (true/false branches).
-- [ ] `--dry-run` never calls `persist_outfit` — verify via a mock
-      assertion, not just log inspection.
-- [ ] A simulated Groq timeout results in a `daily_fallback`-sourced
-      result, not a crash and not a skipped user.
-- [ ] Script exits `0` after a full `--all-users` run even if
-      individual users failed (failures are counted and printed in the
-      summary line, matching the existing pattern in
-      `extract_and_upload.py`'s `main()`).
-- [ ] Script exits non-zero immediately if `GROQ_API_KEY`,
-      `SUPABASE_URL`, or `SUPABASE_SERVICE_KEY` is missing.
-
----
-
-## Phase 2 — Next.js read path
-
-**Task**
-Modify `getDailyOutfit()` in `src/app/actions/outfit.ts` to check for
-an already-generated outfit before running the live engine:
-
-1. Query `outfits` for a row where `user_id` matches, `source` is
-   `'daily_ai'` or `'daily_fallback'`, and `created_at` is today
-   (reuse the existing `startOfDay` pattern already in this file).
-2. If found: resolve each id in `item_ids` against the user's current
-   `fetchWardrobeItems()` result to build full `WardrobeItem[]`. If any
-   id can't be resolved (item removed/edited since generation), treat
-   this as a miss and fall through to step 3 — never throw.
-3. If found and fully resolvable: return a `DailyOutfit` using the
-   stored `reasoning` column as `reasons` (verbatim — do not regenerate
-   via `buildReasons()`), `score` computed via the existing
-   `scoreOutfit()` for consistency, and `vector = dna` as today.
-4. If not found or not resolvable: run the existing live-engine logic
-   completely unchanged (including its own `outfits` insert, which
-   remains `source = 'engine'` — no change needed there since the
-   column default handles it).
-
-Gate steps 1–3 behind `process.env.ENABLE_AI_DAILY_OUTFITS === 'true'`
-— when unset/false, skip straight to step 4 (today's exact current
-behavior).
-
-**Files**
 - `src/app/actions/outfit.ts`
-- `src/app/actions/outfit.test.ts`
-- `.env.example` (add `ENABLE_AI_DAILY_OUTFITS=false`)
-
-**Acceptance criteria**
-- [ ] All existing tests in `outfit.test.ts` pass unmodified — the
-      live-engine path (flag off) is byte-for-byte the current
-      behavior.
-- [ ] New test: flag on, mock `outfits` table returns a valid
-      `source='daily_ai'` row with resolvable `item_ids` and a
-      `reasoning` array → `getDailyOutfit()` returns those exact
-      reasons and items, and `recommendOutfits()` is never invoked
-      (assert via spy/mock call count).
-- [ ] New test: flag on, mock row references an item id not present in
-      the user's current `fetchWardrobeItems()` result →
-      `getDailyOutfit()` falls through to the live-engine path and
-      returns a valid outfit with no thrown error.
-- [ ] New test: flag on, no row exists for today → falls through to
-      live-engine path, identical to flag-off behavior.
-- [ ] New test: flag off entirely → the `outfits` table is never
-      queried for `source` (assert the read-path query isn't called),
-      confirming zero behavior change when disabled.
-
----
-
-## Phase 3 — Scheduling
-
-**Task**
-Add a GitHub Actions scheduled workflow that runs
-`generate_daily_outfit.py --all-users` daily, alongside a manual
-`workflow_dispatch` trigger for on-demand runs/testing.
-
-**Files**
-- `.github/workflows/daily-outfit-generation.yml` (new — separate from
-  `ci.yml`, do not modify `ci.yml`)
-
-**Acceptance criteria**
-- [ ] Workflow triggers on a daily `cron` schedule (early morning UTC,
-      before users' typical wake time) and on `workflow_dispatch`.
-- [ ] Installs `requirements.txt` via pip, not npm.
-- [ ] Reads `GROQ_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_KEY` from
-      GitHub Actions repository secrets — never hardcoded, never
-      echoed/printed in logs.
-- [ ] Job fails (non-zero step, red check) if the script's fatal exit
-      code is non-zero; a run with some per-user failures but overall
-      exit 0 shows as a passing check with the failure count visible
-      in the job log/summary.
-- [ ] Workflow does not touch or depend on `ci.yml`'s Node/npm setup.
-
----
-
-## Phase 4 — Observability
-
-**Task**
-Extend `scripts/phase_gate_report.py` to break down daily like-rate by
-`outfits.source`, so `daily_ai` and `daily_fallback` performance can be
-compared against the historical `engine` baseline.
-
-**Files**
-- `scripts/phase_gate_report.py`
-
-**Acceptance criteria**
-- [ ] Report output gains a new section showing like-rate and swipe
-      count per distinct `source` value present in the last 7 days of
-      `feedback` joined through `outfits`.
-- [ ] Existing report sections (daily/calibration like rate, D1 return
-      rate, active users) are unchanged in output format — this is
-      additive only, verify by diffing output on a fixture with only
-      `source='engine'` rows (should match current output plus an
-      empty/skipped new section).
-- [ ] Script still runs with zero `source`-tagged rows (pre-migration
-      or pre-launch state) without crashing.
-
----
-
-## Phase 5 — Regression pass
-
-**Task**
-Full verification pass before considering this done.
-
-**Acceptance criteria**
-- [ ] `npm run lint` clean.
-- [ ] `npm test` fully green, including all new tests from Phase 2.
-- [ ] `pytest` fully green, including all new tests from Phase 1.
-- [ ] Manual smoke test (document actual steps taken + results in the
-      PR description):
-  1. Run `generate_daily_outfit.py --user-id <test-user> --dry-run` →
-     confirm printed JSON has valid ids and non-empty reasoning.
-  2. Run without `--dry-run` → confirm a row appears in `outfits` with
-     `source='daily_ai'` (or `daily_fallback` if Groq was unreachable).
-  3. With `ENABLE_AI_DAILY_OUTFITS=true`, load `/outfits` as that user
-     → confirm the UI shows the outfit built from that row, and the
-     "Why this" explainer shows the stored reasoning text, not
-     re-derived `buildReasons()` output.
-  4. Delete the row (or wait a day) and reload → confirm it falls back
-     to the live engine with no visible error.
-
----
-
-## Definition of done
-
-- No synchronous Groq call exists anywhere in the Next.js request path.
-- Every outfit ever shown in the UI, AI-sourced or not, is composed
-  entirely of item ids traceable to the viewing user's own
-  `wardrobe_items` rows at render time.
-- `ENABLE_AI_DAILY_OUTFITS=false` (or unset) reproduces today's exact
-  behavior, verified by unmodified passing tests.
-- A Groq outage, malformed model response, or stale/deleted item
-  reference degrades silently to the deterministic engine at every
-  layer — script-level fallback, and app-level fallback — never a
-  user-facing error.
+- `src/app/actions/wardrobe.ts`
+- `src/app/(app)/quiz/actions.ts`, `page.tsx`, `StyleQuiz.tsx`, `PieceSelectionScreen.tsx`
+- `src/app/(app)/outfits/page.tsx`
+- `ai_service/worker.py`, `ai_service/services/outfit_service.py`
+- `supabase/migrations/20260919100000_gate4_preference_events_dna_versions.sql`
+- `supabase/migrations/20260919120000_gate5_ai_jobs_runs.sql`
+- `.github/workflows/daily-outfit-generation.yml`

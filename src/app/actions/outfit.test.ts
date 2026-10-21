@@ -9,7 +9,12 @@
  * resolves to whatever fixture data the test configures.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+
+const mediaMocks = vi.hoisted(() => ({
+  signedOwnedPrivateUrl: vi.fn(async (_client: unknown, id: string) => `https://signed.test/${id}`),
+}))
+vi.mock('@/src/lib/media/private-media', () => mediaMocks)
 
 // ---------------------------------------------------------------------------
 // Supabase mock setup
@@ -34,6 +39,10 @@ let insertCalls: Record<string, unknown[]> = {}
 
 /** Track which tables had .update() called and with what payload. */
 let updateCalls: Record<string, unknown[]> = {}
+
+let rpcCalls: Array<{ name: string; payload: unknown }> = []
+let rpcResponse: { data: unknown; error: unknown } = { data: 'saved', error: null }
+let rpcResponseSequence: Array<{ data: unknown; error: unknown }> = []
 
 let queryBuilders: Array<{ table: string; builder: Record<string, unknown> }> = []
 
@@ -104,6 +113,11 @@ const mockSupabase = {
     getUser: vi.fn(),
   },
   from: vi.fn().mockImplementation((table: string) => createQueryBuilder(table)),
+  rpc: vi.fn().mockImplementation((name: string, payload: unknown) => {
+    rpcCalls.push({ name, payload })
+    const response = rpcResponseSequence.shift() ?? rpcResponse
+    return Promise.resolve(response)
+  }),
 }
 
 vi.mock('@/src/lib/supabase/server', () => ({
@@ -124,8 +138,10 @@ vi.mock('@/src/lib/outfit/engine', async (importActual) => {
 
 const {
   getCalibrationOutfits,
+  getCalibrationState,
   getDailyOutfit,
   shouldShowOutfitCalibration,
+  submitCalibrationFeedback,
   submitOutfitFeedback,
   skipOutfitCalibration,
 } = await import('@/src/app/actions/outfit')
@@ -140,6 +156,16 @@ const DNA = { minimal: 0.8, streetwear: 0.2, formal: 0.1 }
 
 /** Convenience to set a Supabase table's mock response. */
 function mockTable(table: string, data: unknown, error: unknown = null) {
+  if ((table === 'user_wardrobe_items' || table === 'user_style_seed_items') && Array.isArray(data)) {
+    data = data.map((row) => {
+      if (!row || typeof row !== 'object') return row
+      const record = row as Record<string, unknown>
+      const item = record.wardrobe_items
+      if (!item || typeof item !== 'object' || Array.isArray(item)) return row
+      return { ...record, retired_at: record.retired_at ?? null,
+        wardrobe_items: { status: 'confirmed', media_asset_id: null, ...item } }
+    })
+  }
   tableResponses[table] = { data, error }
 }
 
@@ -167,8 +193,12 @@ beforeEach(() => {
   tableResponseSequences = {}
   insertCalls = {}
   updateCalls = {}
+  rpcCalls = []
+  rpcResponse = { data: 'saved', error: null }
+  rpcResponseSequence = []
   queryBuilders = []
   delete process.env.ENABLE_AI_DAILY_OUTFITS
+  vi.stubEnv('AI_OUTFIT_SERVICE_URL', '')
 })
 
 // ---------------------------------------------------------------------------
@@ -176,6 +206,23 @@ beforeEach(() => {
 // ---------------------------------------------------------------------------
 
 describe('getDailyOutfit', () => {
+  it('returns a daily outfit from one owned dress and footwear', async () => {
+    mockAuthenticatedUser()
+    mockTable('fashion_dna', { vector: DNA })
+    mockTable('users', { timezone: 'UTC' })
+    mockTable('outfits', [])
+    mockTable('user_wardrobe_items', [
+      { wardrobe_items: { id: 'dress-1', display_name: 'Midi dress', category: 'one_piece', image_url: null,
+        layer_role: 'one_piece', style_tags: { minimal: 0.9 } } },
+      { wardrobe_items: { id: 'shoe-1', display_name: 'Shoes', category: 'footwear', image_url: null,
+        layer_role: 'footwear', style_tags: { minimal: 0.8 } } },
+    ])
+
+    const result = await getDailyOutfit()
+    expect(result?.items.map((piece) => piece.id)).toEqual(['dress-1', 'shoe-1'])
+    expect(rpcCalls.some((call) => call.name === 'create_outfit_with_items')).toBe(true)
+  })
+
   it('returns null when the user has fewer than 3 valid wardrobe items', async () => {
     mockAuthenticatedUser()
 
@@ -209,6 +256,20 @@ describe('getDailyOutfit', () => {
     expect(result).toBeNull()
   })
 
+  it('does not recommend an extracted garment before the user confirms it', async () => {
+    mockAuthenticatedUser()
+    mockTable('fashion_dna', { vector: DNA })
+    mockTable('user_wardrobe_items', [
+      { wardrobe_items: { id: 'tee', display_name: 'Tee', image_url: null,
+        layer_role: 'base_layer', style_tags: { minimal: 0.8 } } },
+      { wardrobe_items: { id: 'pants', display_name: 'Pants', image_url: null,
+        layer_role: 'bottom', style_tags: { minimal: 0.8 } } },
+      { wardrobe_items: { id: 'shoe-draft', display_name: 'Detected shoes', image_url: null,
+        status: 'draft', layer_role: 'footwear', style_tags: { minimal: 0.8 } } },
+    ])
+    expect(await getDailyOutfit()).toBeNull()
+  })
+
   it('returns a pre-generated AI outfit with stored reasons when the feature flag is on', async () => {
     process.env.ENABLE_AI_DAILY_OUTFITS = 'true'
     mockAuthenticatedUser()
@@ -216,7 +277,7 @@ describe('getDailyOutfit', () => {
     mockTable('user_wardrobe_items', [
       {
         wardrobe_items: {
-          id: 'tee-1', display_name: 'Tee', image_url: null,
+          id: 'tee-1', display_name: 'Tee', image_url: 'private://private-wardrobe-media/old.png', media_asset_id: 'asset-tee',
           layer_role: 'base_layer', style_tags: { minimal: 0.9 },
         },
       },
@@ -243,6 +304,7 @@ describe('getDailyOutfit', () => {
 
     expect(result?.id).toBe('ai-outfit-1')
     expect(result?.items.map((item) => item.id)).toEqual(['tee-1', 'chino-1', 'sneaker-1'])
+    expect(result?.items[0].image_url).toBe('https://signed.test/asset-tee')
     expect(result?.reasons).toEqual(['stored reason one', 'stored reason two'])
     expect(outfitEngine.recommendOutfits).not.toHaveBeenCalled()
   })
@@ -285,7 +347,7 @@ describe('getDailyOutfit', () => {
 
     const result = await getDailyOutfit()
 
-    expect(result?.id).toBe('engine-outfit-1')
+    expect(result?.id).toBe('saved')
     expect(result?.items.map((item) => item.id)).toEqual(['tee-1', 'chino-1', 'sneaker-1'])
     expect(outfitEngine.recommendOutfits).toHaveBeenCalled()
   })
@@ -322,7 +384,7 @@ describe('getDailyOutfit', () => {
 
     const result = await getDailyOutfit()
 
-    expect(result?.id).toBe('engine-outfit-1')
+    expect(result?.id).toBe('saved')
     expect(outfitEngine.recommendOutfits).toHaveBeenCalled()
   })
 
@@ -359,8 +421,26 @@ describe('getDailyOutfit', () => {
       .filter((query) => query.table === 'outfits')
       .map((query) => query.builder.select as ReturnType<typeof vi.fn>)
 
-    expect(result?.id).toBe('engine-outfit-1')
+    expect(result?.id).toBe('saved')
     expect(outfitsSelects.some((select) => select.mock.calls.some((call) => call[0] === 'id, item_ids, reasoning'))).toBe(false)
+  })
+})
+
+
+describe('style-seed isolation from daily outfits', () => {
+  it('does not use style seeds when the owned wardrobe is empty', async () => {
+    mockAuthenticatedUser()
+    mockTable('fashion_dna', { vector: DNA })
+    mockTable('user_wardrobe_items', [])
+    mockTable('user_style_seed_items', [
+      { wardrobe_items: { id: 'seed-top', display_name: 'Seed Top', layer_role: 'base_layer', style_tags: { minimal: 0.9 } } },
+      { wardrobe_items: { id: 'seed-bottom', display_name: 'Seed Bottom', layer_role: 'bottom', style_tags: { minimal: 0.8 } } },
+      { wardrobe_items: { id: 'seed-shoe', display_name: 'Seed Shoe', layer_role: 'footwear', style_tags: { minimal: 0.7 } } },
+    ])
+    mockTable('users', { timezone: 'UTC' })
+    mockTable('outfits', [])
+
+    await expect(getDailyOutfit()).resolves.toBeNull()
   })
 })
 
@@ -373,7 +453,7 @@ describe('shouldShowOutfitCalibration', () => {
     mockAuthenticatedUser()
 
     mockTable('fashion_dna', { vector: DNA })
-    mockTable('user_wardrobe_items', [
+    mockTable('user_style_seed_items', [
       {
         wardrobe_items: {
           id: 'tee-1', display_name: 'Tee', image_url: null,
@@ -420,7 +500,7 @@ describe('shouldShowOutfitCalibration', () => {
   it('returns true when at least one valid outfit can be generated', async () => {
     mockAuthenticatedUser()
     mockTable('fashion_dna', { vector: DNA })
-    mockTable('user_wardrobe_items', [
+    mockTable('user_style_seed_items', [
       {
         wardrobe_items: {
           id: 'tee-1', display_name: 'Tee', image_url: null,
@@ -445,61 +525,255 @@ describe('shouldShowOutfitCalibration', () => {
     const result = await shouldShowOutfitCalibration()
     expect(result).toBe(true)
   })
+
+  it('returns true for two dresses and two footwear options', async () => {
+    mockAuthenticatedUser()
+    mockTable('fashion_dna', { vector: DNA })
+    mockTable('user_style_seed_items', [
+      { wardrobe_items: { id: 'dress-1', display_name: 'Dress 1', category: 'one_piece', layer_role: 'one_piece', style_tags: { minimal: 0.9 } } },
+      { wardrobe_items: { id: 'dress-2', display_name: 'Dress 2', category: 'one_piece', layer_role: 'one_piece', style_tags: { formal: 0.8 } } },
+      { wardrobe_items: { id: 'shoe-1', display_name: 'Shoes 1', category: 'footwear', layer_role: 'footwear', style_tags: { minimal: 0.8 } } },
+      { wardrobe_items: { id: 'shoe-2', display_name: 'Shoes 2', category: 'footwear', layer_role: 'footwear', style_tags: { formal: 0.8 } } },
+    ])
+    mockTable('users', { has_completed_calibration: false, timezone: 'UTC' })
+    expect(await shouldShowOutfitCalibration()).toBe(true)
+  })
 })
 
 // ---------------------------------------------------------------------------
-// getCalibrationOutfits
+// C6 calibration state machine
 // ---------------------------------------------------------------------------
 
-describe('getCalibrationOutfits', () => {
-  it('returns up to three calibration outfits when the wardrobe can support them', async () => {
+describe('getCalibrationState', () => {
+  const styleSeeds = [
+    { wardrobe_items: { id: 'dress-1', display_name: 'Dress 1', category: 'one_piece', layer_role: 'one_piece', style_tags: { minimal: 0.9 } } },
+    { wardrobe_items: { id: 'dress-2', display_name: 'Dress 2', category: 'one_piece', layer_role: 'one_piece', style_tags: { formal: 0.8 } } },
+    { wardrobe_items: { id: 'shoe-1', display_name: 'Shoes 1', category: 'footwear', layer_role: 'footwear', style_tags: { minimal: 0.8 } } },
+    { wardrobe_items: { id: 'shoe-2', display_name: 'Shoes 2', category: 'footwear', layer_role: 'footwear', style_tags: { formal: 0.8 } } },
+  ]
+
+  it('persists only the current first calibration step', async () => {
     mockAuthenticatedUser()
-    mockTable('fashion_dna', { vector: DNA })
-    mockTable('user_wardrobe_items', [
-      {
-        wardrobe_items: {
-          id: 'tee-1', display_name: 'Tee', image_url: null,
-          layer_role: 'base_layer', style_tags: { minimal: 0.9 },
-        },
-      },
-      {
-        wardrobe_items: {
-          id: 'tee-2', display_name: 'Button-up', image_url: null,
-          layer_role: 'base_layer', style_tags: { formal: 0.8 },
-        },
-      },
-      {
-        wardrobe_items: {
-          id: 'chino-1', display_name: 'Chinos', image_url: null,
-          layer_role: 'bottom', style_tags: { minimal: 0.7 },
-        },
-      },
-      {
-        wardrobe_items: {
-          id: 'trouser-1', display_name: 'Trousers', image_url: null,
-          layer_role: 'bottom', style_tags: { formal: 0.9 },
-        },
-      },
-      {
-        wardrobe_items: {
-          id: 'sneaker-1', display_name: 'Sneakers', image_url: null,
-          layer_role: 'footwear', style_tags: { minimal: 0.8 },
-        },
-      },
-      {
-        wardrobe_items: {
-          id: 'boot-1', display_name: 'Boots', image_url: null,
-          layer_role: 'footwear', style_tags: { formal: 0.8 },
-        },
-      },
-    ])
     mockTable('users', { has_completed_calibration: false })
-    mockTable('outfits', { id: 'outfit-1' })
+    mockTable('preference_events', [])
+    mockTable('fashion_dna', { vector: DNA })
+    mockTable('user_style_seed_items', styleSeeds)
+    mockTable('outfits', null)
+
+    const state = await getCalibrationState()
+
+    expect(state.answeredCount).toBe(0)
+    expect(state.target).toBe(3)
+    expect(state.completed).toBe(false)
+    expect(state.outfit?.items.some((piece) => piece.layer_role === 'one_piece')).toBe(true)
+    expect(rpcCalls).toEqual([
+      expect.objectContaining({
+        name: 'create_calibration_outfit_with_items',
+        payload: expect.objectContaining({
+          p_context_snapshot: {
+            relationship: 'style_seed',
+            calibration_step: 1,
+          },
+        }),
+      }),
+    ])
+  })
+
+  it('reuses the persisted current step on refresh without creating another outfit', async () => {
+    mockAuthenticatedUser()
+    mockTable('users', { has_completed_calibration: false })
+    mockTable('preference_events', [])
+    mockTable('fashion_dna', { vector: DNA })
+    mockTable('user_style_seed_items', styleSeeds)
+    mockTable('outfits', {
+      id: 'existing-step-1',
+      item_ids: ['dress-1', 'shoe-1'],
+      reasoning: ['stored calibration reason'],
+      outfit_items: [
+        { wardrobe_item_id: 'dress-1', position: 0 },
+        { wardrobe_item_id: 'shoe-1', position: 1 },
+      ],
+    })
+
+    const state = await getCalibrationState()
+
+    expect(state.outfit?.id).toBe('existing-step-1')
+    expect(state.outfit?.items.map((item) => item.id)).toEqual(['dress-1', 'shoe-1'])
+    expect(rpcCalls).toHaveLength(0)
+  })
+
+  it('derives the next calibration step from answered preference events', async () => {
+    mockAuthenticatedUser()
+    mockTable('users', { has_completed_calibration: false })
+    mockTable('preference_events', [{ id: 'event-1' }])
+    mockTable('fashion_dna', { vector: DNA })
+    mockTable('user_style_seed_items', styleSeeds)
+    mockTable('outfits', null)
+
+    const state = await getCalibrationState()
+
+    expect(state.answeredCount).toBe(1)
+    expect(state.outfit).not.toBeNull()
+    expect(rpcCalls).toEqual([
+      expect.objectContaining({
+        name: 'create_calibration_outfit_with_items',
+        payload: expect.objectContaining({
+          p_context_snapshot: {
+            relationship: 'style_seed',
+            calibration_step: 2,
+          },
+        }),
+      }),
+    ])
+  })
+
+  it('reports completion from the server ledger without generating another outfit', async () => {
+    mockAuthenticatedUser()
+    mockTable('users', { has_completed_calibration: false })
+    mockTable('preference_events', [{ id: 'event-1' }, { id: 'event-2' }, { id: 'event-3' }])
+
+    const state = await getCalibrationState()
+
+    expect(state).toEqual({
+      outfit: null,
+      answeredCount: 3,
+      target: 3,
+      completed: true,
+    })
+    expect(rpcCalls).toHaveLength(0)
+  })
+})
+
+describe('getCalibrationOutfits compatibility wrapper', () => {
+  it('returns at most the single current outfit', async () => {
+    mockAuthenticatedUser()
+    mockTable('users', { has_completed_calibration: false })
+    mockTable('preference_events', [])
+    mockTable('fashion_dna', { vector: DNA })
+    mockTable('user_style_seed_items', [
+      { wardrobe_items: { id: 'dress-seed', display_name: 'Seed Dress', category: 'one_piece', layer_role: 'one_piece', style_tags: { minimal: 0.9 } } },
+      { wardrobe_items: { id: 'shoe-seed', display_name: 'Seed Shoes', category: 'footwear', layer_role: 'footwear', style_tags: { minimal: 0.8 } } },
+    ])
+    mockTable('outfits', null)
 
     const result = await getCalibrationOutfits()
 
-    expect(result).toHaveLength(3)
-    expect(insertCalls.outfits).toHaveLength(3)
+    expect(result).toHaveLength(1)
+    expect(rpcCalls).toEqual([
+      expect.objectContaining({
+        name: 'create_calibration_outfit_with_items',
+        payload: expect.objectContaining({
+          p_item_ids: ['dress-seed', 'shoe-seed'],
+          p_context_snapshot: {
+            relationship: 'style_seed',
+            calibration_step: 1,
+          },
+        }),
+      }),
+    ])
+  })
+})
+
+describe('submitCalibrationFeedback', () => {
+  const styleSeeds = [
+    { wardrobe_items: { id: 'dress-1', display_name: 'Dress 1', category: 'one_piece', layer_role: 'one_piece', style_tags: { minimal: 0.9 } } },
+    { wardrobe_items: { id: 'dress-2', display_name: 'Dress 2', category: 'one_piece', layer_role: 'one_piece', style_tags: { formal: 0.9 } } },
+    { wardrobe_items: { id: 'shoe-1', display_name: 'Shoe 1', category: 'footwear', layer_role: 'footwear', style_tags: { minimal: 0.8 } } },
+    { wardrobe_items: { id: 'shoe-2', display_name: 'Shoe 2', category: 'footwear', layer_role: 'footwear', style_tags: { formal: 0.8 } } },
+  ]
+
+  it('uses the calibration RPC and generates exactly the next server-derived step', async () => {
+    mockAuthenticatedUser()
+    mockTable('user_style_seed_items', styleSeeds)
+    mockTableSequence('outfits', [
+      {
+        data: {
+          id: 'current-step-1',
+          item_ids: ['dress-1', 'shoe-1'],
+          outfit_items: [
+            { wardrobe_item_id: 'dress-1' },
+            { wardrobe_item_id: 'shoe-1' },
+          ],
+        },
+      },
+      { data: null },
+      { data: [{ item_ids: ['dress-1', 'shoe-1'] }] },
+      { data: null },
+    ])
+    rpcResponseSequence = [
+      {
+        data: [{
+          vector: { minimal: 0.75, formal: 0.2 },
+          changed_tags: ['minimal'],
+          version: 2,
+          event_id: 'event-1',
+          answered_count: 1,
+          completed: false,
+        }],
+        error: null,
+      },
+      { data: 'step-2-id', error: null },
+    ]
+
+    const result = await submitCalibrationFeedback(
+      'current-step-1',
+      false,
+      'calibration-feedback:current-step-1',
+    )
+
+    expect(result.answeredCount).toBe(1)
+    expect(result.completed).toBe(false)
+    expect(result.nextOutfit?.id).toBe('step-2-id')
+    expect(rpcCalls).toEqual([
+      {
+        name: 'submit_calibration_feedback',
+        payload: {
+          p_outfit_id: 'current-step-1',
+          p_liked: false,
+          p_idempotency_key: 'calibration-feedback:current-step-1',
+        },
+      },
+      expect.objectContaining({
+        name: 'create_calibration_outfit_with_items',
+        payload: expect.objectContaining({
+          p_context_snapshot: {
+            relationship: 'style_seed',
+            calibration_step: 2,
+          },
+        }),
+      }),
+    ])
+    expect(updateCalls.users).toBeUndefined()
+  })
+
+  it('trusts server completion after the third distinct calibration answer', async () => {
+    mockAuthenticatedUser()
+    rpcResponseSequence = [{
+      data: [{
+        vector: { minimal: 0.85 },
+        changed_tags: ['minimal'],
+        version: 4,
+        event_id: 'event-3',
+        answered_count: 3,
+        completed: true,
+      }],
+      error: null,
+    }]
+
+    const result = await submitCalibrationFeedback(
+      'step-3',
+      true,
+      'calibration-feedback:step-3',
+    )
+
+    expect(result).toEqual({
+      vector: { minimal: 0.85 },
+      changedTags: ['minimal'],
+      answeredCount: 3,
+      completed: true,
+    })
+    expect(rpcCalls.map((call) => call.name)).toEqual(['submit_calibration_feedback'])
+    expect(updateCalls.users).toBeUndefined()
   })
 })
 
@@ -524,49 +798,88 @@ describe('skipOutfitCalibration', () => {
 // ---------------------------------------------------------------------------
 
 describe('submitOutfitFeedback', () => {
-  it('re-fetches item style_tags from the database rather than trusting client input', async () => {
+  it('passes the interaction key to the authenticated RPC and uses its server-computed vector', async () => {
     mockAuthenticatedUser()
-
-    // Feedback insert succeeds
-    mockTable('feedback', { id: 'fb-1' })
-
-    // The outfit row on the server knows item_ids
-    const serverItemIds = ['item-a', 'item-b']
-    mockTable('outfits', { item_ids: serverItemIds })
-
-    // Server-side style_tags — these are the REAL tags the DNA
-    // update should be based on, NOT anything a client sends.
-    const serverStyleTags = [
-      { style_tags: { minimal: 0.9, earth_tones: 0.3 } },
-      { style_tags: { minimal: 0.6 } },
-    ]
-    mockTable('wardrobe_items', serverStyleTags)
-
-    // Current DNA vector
-    mockTable('fashion_dna', { vector: { minimal: 0.5, earth_tones: 0.2 } })
-
-    const result = await submitOutfitFeedback('outfit-xyz', true)
-
-    // changedTags should be derived from the server items, not from
-    // any client-supplied data (submitOutfitFeedback only takes
-    // outfitId and liked — there is no items parameter).
-    expect(result.changedTags).toContain('minimal')
-    expect(result.changedTags).toContain('earth_tones')
-
-    // The updated vector should have the liked delta (+0.05) applied
-    expect(result.vector.minimal).toBeCloseTo(0.55, 2)
-    expect(result.vector.earth_tones).toBeCloseTo(0.25, 2)
-
-    // Verify the server actually queried the outfits table
-    expect(mockSupabase.from).toHaveBeenCalledWith('outfits')
-
-    // Verify the server queried wardrobe_items for style_tags
-    expect(mockSupabase.from).toHaveBeenCalledWith('wardrobe_items')
+    rpcResponse = { data: [{ vector: { minimal: 0.55 }, changed_tags: ['minimal'], version: 1 }], error: null }
+    const result = await submitOutfitFeedback('outfit-xyz', true, 'interaction-1')
+    expect(result).toEqual({ vector: { minimal: 0.55 }, changedTags: ['minimal'] })
+    expect(rpcCalls).toEqual([{ name: 'submit_outfit_feedback', payload: {
+      p_outfit_id: 'outfit-xyz', p_liked: true, p_feedback_source: 'daily', p_idempotency_key: 'interaction-1',
+    } }])
+    expect(insertCalls.feedback).toBeUndefined()
+    expect(updateCalls.fashion_dna).toBeUndefined()
   })
 
-  it('does not accept an items parameter in its signature', () => {
-    // TypeScript enforces this at compile time, but we verify at
-    // runtime that the function only has 2 parameters (outfitId, liked).
-    expect(submitOutfitFeedback.length).toBeLessThanOrEqual(2)
+  it('rejects a missing key before writing', async () => {
+    mockAuthenticatedUser()
+    await expect(submitOutfitFeedback('outfit-xyz', true, '')).rejects.toThrow('Invalid idempotency key')
+    expect(rpcCalls).toHaveLength(0)
+  })
+
+  it('surfaces transactional RPC errors without direct writes', async () => {
+    mockAuthenticatedUser()
+    rpcResponse = { data: null, error: { message: 'Outfit not found' } }
+    await expect(submitOutfitFeedback('foreign-outfit', true, 'interaction-2')).rejects.toThrow('Outfit not found')
+    expect(insertCalls.feedback).toBeUndefined()
+    expect(updateCalls.fashion_dna).toBeUndefined()
+  })
+})
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+  vi.unstubAllEnvs()
+})
+
+describe('queued daily AI integration', () => {
+  const wardrobe = [
+    { id: 'tee', display_name: 'Tee', image_url: null, layer_role: 'base_layer', style_tags: { minimal: 0.9 } },
+    { id: 'pants', display_name: 'Pants', image_url: null, layer_role: 'bottom', style_tags: { minimal: 0.8 } },
+    { id: 'shoes', display_name: 'Shoes', image_url: null, layer_role: 'footwear', style_tags: { minimal: 0.7 } },
+  ]
+
+  beforeEach(() => {
+    vi.stubEnv('ENABLE_AI_DAILY_OUTFITS', 'true')
+    mockAuthenticatedUser()
+    mockTable('fashion_dna', { vector: DNA })
+    mockTable('user_wardrobe_items', wardrobe.map((wardrobe_items) => ({ wardrobe_items })))
+    mockTableSequence('outfits', [{ data: null }, { data: [] }])
+    vi.stubGlobal('fetch', vi.fn())
+  })
+
+  it('queues once and returns a deterministic outfit without a synchronous provider call', async () => {
+    const result = await getDailyOutfit()
+    expect(result?.id).toBe('saved')
+    expect(outfitEngine.recommendOutfits).toHaveBeenCalled()
+    expect(fetch).not.toHaveBeenCalled()
+    expect(rpcCalls).toEqual([
+      { name: 'enqueue_daily_outfit_job', payload: undefined },
+      expect.objectContaining({ name: 'create_outfit_with_items', payload: expect.objectContaining({
+        p_source: 'engine', p_item_ids: ['tee', 'pants', 'shoes'],
+        p_context_snapshot: { ai_job_id: 'saved', fallback_reason: 'ai_queued' },
+      }) }),
+    ])
+  })
+
+  it('uses a stored AI outfit without enqueueing', async () => {
+    mockTableSequence('outfits', [{ data: { id: 'cached', item_ids: ['tee', 'pants', 'shoes'], reasoning: ['Good fit'], source: 'daily_ai' } }])
+    expect((await getDailyOutfit())?.id).toBe('cached')
+    expect(fetch).not.toHaveBeenCalled()
+    expect(rpcCalls).toHaveLength(0)
+  })
+
+  it('uses the engine when enqueue fails', async () => {
+    mockSupabase.rpc.mockResolvedValueOnce({ data: null, error: { message: 'queue unavailable' } })
+    await expect(getDailyOutfit()).resolves.toMatchObject({ id: 'saved' })
+    expect(fetch).not.toHaveBeenCalled()
+    expect(mockSupabase.rpc).toHaveBeenNthCalledWith(1, 'enqueue_daily_outfit_job')
+    expect(rpcCalls[0]).toMatchObject({ name: 'create_outfit_with_items', payload: expect.objectContaining({ p_source: 'engine' }) })
+  })
+
+  it('does not queue when disabled', async () => {
+    vi.stubEnv('ENABLE_AI_DAILY_OUTFITS', 'false')
+    mockTableSequence('outfits', [{ data: [] }])
+    await getDailyOutfit()
+    expect(rpcCalls.map((call) => call.name)).toEqual(['create_outfit_with_items'])
+    expect(fetch).not.toHaveBeenCalled()
   })
 })

@@ -28,6 +28,7 @@ __pycache__/
 *.pem
 
 # debug
+.last_groq_response.json
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -43,3 +44,19 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# InsForge & AI agent skills
+.insforge
+.agent
+.agents
+.augment
+.claude
+.cline
+.github/copilot*
+.kilocode
+.qoder
+.qwen
+.roo
+.trae
+.windsurf
+.insforge.worker.env

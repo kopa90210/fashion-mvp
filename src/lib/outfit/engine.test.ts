@@ -8,6 +8,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   recommendOutfits,
+  isValidOutfitStructure,
   scoreItem,
   scoreOutfit,
   type WardrobeItem,
@@ -237,5 +238,86 @@ describe('normalized wardrobe roles', () => {
     ], DNA, { topN: 1 })
     expect(results).toHaveLength(1)
     expect(results[0].items.map((i) => i.id)).toContain('tee')
+  })
+
+  it.each(['dress', 'midi dress', 'jumpsuit', 'romper'])('normalizes %s to one_piece', (name) => {
+    expect(normalizeWardrobeItem({ subcategory: name })).toEqual({ category: 'one_piece', layer_role: 'one_piece' })
+  })
+
+  it('keeps an explicit valid outerwear category over dress-like text', () => {
+    expect(normalizeWardrobeItem({ category: 'outerwear', display_name: 'Dress coat' })).toEqual({
+      category: 'outerwear', layer_role: 'outerwear',
+    })
+  })
+})
+
+describe('outfit archetypes', () => {
+  const shoe = item('shoe', 'footwear', { minimal: 0.8 })
+  const dress = item('dress', 'one_piece', { minimal: 0.9 })
+  const top = item('top', 'base_layer', { minimal: 0.8 })
+  const bottom = item('bottom', 'bottom', { minimal: 0.7 })
+  const outer = item('coat', 'outerwear', { minimal: 0.7 })
+  const accessory = item('bag', 'accessory', { minimal: 0.6 })
+
+  it('accepts separates with footwear', () => {
+    expect(isValidOutfitStructure([top, bottom, shoe])).toBe(true)
+  })
+
+  it('accepts a one-piece with footwear', () => {
+    expect(isValidOutfitStructure([dress, shoe])).toBe(true)
+    expect(recommendOutfits([dress, shoe], DNA, { topN: 1 })[0].items).toEqual([dress, shoe])
+  })
+
+  it('accepts one-piece optional outerwear and accessory', () => {
+    expect(isValidOutfitStructure([dress, shoe, outer, accessory])).toBe(true)
+  })
+
+  it('rejects incomplete and mixed cores', () => {
+    expect(isValidOutfitStructure([dress])).toBe(false)
+    expect(isValidOutfitStructure([dress, shoe, bottom])).toBe(false)
+    expect(isValidOutfitStructure([top, bottom])).toBe(false)
+  })
+
+  it('ranks candidates from both archetypes together', () => {
+    const results = recommendOutfits([top, bottom, dress, shoe], DNA, { topN: 10 })
+    expect(results.some((look) => look.items.some((piece) => piece.layer_role === 'one_piece'))).toBe(true)
+    expect(results.some((look) => look.items.some((piece) => piece.layer_role === 'base_layer'))).toBe(true)
+  })
+
+  it('preserves deterministic ordering', () => {
+    const wardrobe = [top, bottom, dress, shoe, outer, accessory]
+    expect(recommendOutfits(wardrobe, DNA, { topN: 10 })).toEqual(recommendOutfits(wardrobe, DNA, { topN: 10 }))
+  })
+})
+
+describe('anchored outfit recommendations', () => {
+  it.each(['base_layer', 'bottom', 'footwear', 'outerwear', 'accessory'] as const)('requires a %s anchor without changing score calculation', (role) => {
+    const anchor = WARDROBE.find((piece) => piece.layer_role === role)!
+    const ranked = recommendOutfits(WARDROBE, DNA, { topN: 3, anchorItemId: anchor.id })
+    const exhaustive = recommendOutfits(WARDROBE, DNA, { topN: 10000 }).filter((look) => look.items.some((piece) => piece.id === anchor.id)).slice(0, 3)
+    expect(ranked.map((look) => look.score)).toEqual(exhaustive.map((look) => look.score))
+    expect(ranked.length).toBeGreaterThan(0)
+    for (const look of ranked) {
+      expect(look.items.filter((piece) => piece.id === anchor.id)).toHaveLength(1)
+      expect(look.score).toBe(scoreOutfit(look.items, DNA))
+      expect(look.items.filter((piece) => piece.layer_role === role)).toHaveLength(1)
+    }
+  })
+
+  it('retains a low-ranked anchor before per-role candidate bounding', () => {
+    const anchor = item('least-preferred', 'base_layer', { bohemian: 1 })
+    const pool = [...WARDROBE, anchor]
+    const result = recommendOutfits(pool, DNA, { topN: 1, anchorItemId: anchor.id })
+    expect(result).toHaveLength(1)
+    expect(result[0].items.some((piece) => piece.id === anchor.id)).toBe(true)
+  })
+
+  it.each(['missing', ''])('never returns unanchored ideas for missing anchor %s', (anchorItemId) => {
+    expect(recommendOutfits(WARDROBE, DNA, { anchorItemId })).toEqual([])
+  })
+
+  it('keeps required-role validity for optional anchors', () => {
+    const anchor = WARDROBE.find((piece) => piece.layer_role === 'accessory')!
+    expect(recommendOutfits(WARDROBE.filter((piece) => piece.layer_role !== 'footwear'), DNA, { anchorItemId: anchor.id })).toEqual([])
   })
 })

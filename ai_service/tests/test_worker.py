@@ -1,0 +1,248 @@
+"""Unit checks for the Gate 5 CLI worker; database locking needs disposable Postgres."""
+
+from types import SimpleNamespace
+
+import httpx
+
+import pytest
+
+from ai_service.config import Settings
+from ai_service.worker import (
+    InvalidJobInput,
+    ShutdownController,
+    WorkerConfigurationError,
+    WorkerHealth,
+    _extract_garment,
+    build_worker_id,
+    classify_failure,
+    configure_worker_logging,
+    log_worker_event,
+    process_one,
+    run_worker_loop,
+    safe_usage,
+    validate_worker_settings,
+)
+
+
+@pytest.fixture
+def settings():
+    return SimpleNamespace(outfit_provider="notebook")
+
+
+class FakeOutfitProvider:
+    name = "test-outfit-provider"
+    model = "test-outfit-model"
+    prompt_version = "test-outfit-v1"
+    schema_version = "outfit-v1"
+
+    def __init__(
+        self,
+        garments=None,
+        error=None,
+    ):
+        self.garments = garments or []
+        self.error = error
+
+    def extract(self, db, job):
+        if self.error:
+            raise self.error
+
+        return self.garments
+class FakeDb:
+    def __init__(self, job=None):
+        self.job = job
+        self.calls = []
+
+    def rpc(self, name, payload):
+        self.calls.append((name, payload))
+        if name == "claim_ai_jobs":
+            return [self.job] if self.job else []
+        return None
+
+    def rows(self, table, params):
+        if table == "fashion_dna":
+            return [{"vector": {"minimal": 0.8}}]
+        if table == "user_wardrobe_items":
+            return [{"wardrobe_items": {"id": item_id, "display_name": item_id,
+                    "layer_role": role, "style_tags": {"minimal": 0.8}, "status": "confirmed"}}
+                    for item_id, role in (("tee", "base_layer"), ("pants", "bottom"),
+                                          ("shoes", "footwear"))]
+        raise AssertionError(f"Unexpected table {table}")
+
+
+def test_worker_does_not_call_provider_without_a_claim(settings):
+    db = FakeDb()
+    service = SimpleNamespace(_groq=SimpleNamespace(model="test-model"))
+    provider = FakeOutfitProvider(error=AssertionError("Provider called without a claim"))
+    assert process_one(db, "worker-a", service, object(), "vision-model",
+        settings=settings, outfit_provider=provider) is False
+    assert [name for name, _ in db.calls] == ["claim_ai_jobs"]
+
+
+def test_daily_fallback_keeps_source_and_provenance(settings):
+    job = {"id": "job-1", "user_id": "user-1", "job_type": "daily_outfit",
+           "total_attempts": 2}
+    db = FakeDb(job)
+
+    def generate(request):
+        assert {item.id for item in request.wardrobe_items} == {"tee", "pants", "shoes"}
+        return SimpleNamespace(model_dump=lambda: {
+            "item_ids": ["tee", "pants", "shoes"], "reasoning": ["Works together"],
+            "styling_tip": None, "confidence": 0.8, "source": "daily_fallback",
+        })
+
+    service = SimpleNamespace(_groq=SimpleNamespace(model="test-model"), generate=generate)
+    assert process_one(db, "worker-a", service, object(), "vision-model",
+        settings=settings, outfit_provider=FakeOutfitProvider()) is True
+    name, completion = db.calls[-1]
+    assert name == "complete_ai_job"
+    assert completion["p_result"]["source"] == "daily_fallback"
+    assert completion["p_outcome"] == "succeeded"
+    assert completion["p_attempt"] == 2
+    assert completion["p_model"] == "test-model"
+    assert completion["p_prompt_version"] and completion["p_schema_version"]
+
+
+def test_bad_input_is_permanent_and_timeout_is_retryable():
+    assert classify_failure(InvalidJobInput()) == ("permanent_error", "INVALID_INPUT", "invalid")
+    assert classify_failure(httpx.ReadTimeout("timeout")) == (
+        "retryable_error", "PROVIDER_TIMEOUT", "not_run")
+
+
+def test_usage_keeps_only_nonnegative_token_counts():
+    response = SimpleNamespace(usage=SimpleNamespace(
+        prompt_tokens=12, completion_tokens=True, total_tokens=-1, secret="do-not-store"))
+    assert safe_usage(response) == {"prompt_tokens": 12}
+
+
+def test_extraction_never_fetches_another_users_private_path():
+    class CrossOwnerDb:
+        def rows(self, table, params):
+            if table == "wardrobe_items":
+                return [{"id": "item-1", "status": "draft", "media_asset_id": "asset-1"}]
+            return [{"bucket_id": "private-wardrobe-media", "object_path": "other-user/image.jpg",
+                     "status": "active"}]
+
+        def private_image(self, bucket, path):
+            raise AssertionError("Cross-user object was fetched")
+
+    with pytest.raises(InvalidJobInput):
+        _extract_garment(CrossOwnerDb(), {"wardrobe_item_id": "item-1", "user_id": "owner"},
+                         object(), "vision-model")
+
+
+def test_invalid_daily_job_records_safe_code_without_raw_error(caplog, settings):
+    job = {"id": "job-1", "user_id": "user-1", "job_type": "daily_outfit",
+           "total_attempts": 1}
+    db = FakeDb(job)
+    db.rows = lambda table, params: []
+    service = SimpleNamespace(_groq=SimpleNamespace(model="test-model"))
+    assert process_one(db, "worker-a", service, object(), "vision-model",
+        settings=settings, outfit_provider=FakeOutfitProvider()) is True
+    completion = db.calls[-1][1]
+    assert completion["p_outcome"] == "permanent_error"
+    assert completion["p_safe_error_code"] == "INVALID_INPUT"
+    assert completion["p_result"] is None
+    assert "Fashion DNA missing" not in caplog.text
+
+
+def test_outfit_photo_uses_atomic_multi_garment_completion(settings):
+    job = {"id": "job-1", "user_id": "user-1", "job_type": "outfit_photo",
+           "source_photo_id": "photo-1", "total_attempts": 1}
+    db = FakeDb(job)
+    provider = FakeOutfitProvider(garments=[
+        {"category": "bottom", "original": {"object_path": "user-1/crop.png"}}])
+    service = SimpleNamespace(_groq=SimpleNamespace(model="daily-model"))
+    assert process_one(db, "worker-a", service, object(), "vision-model",
+        settings=settings, outfit_provider=provider) is True
+    assert [name for name, _ in db.calls] == ["claim_ai_jobs", "complete_outfit_photo_job"]
+    assert db.calls[-1][1]["p_garments"][0]["category"] == "bottom"
+
+
+def test_worker_config_validation_names_missing_variables_without_values():
+    settings = Settings(
+        supabase_url="",
+        supabase_secret_key="",
+        supabase_service_key="",
+        groq_api_key="",
+        outfit_provider="gemini",
+        gemini_api_key="",
+    )
+    with pytest.raises(WorkerConfigurationError) as error:
+        validate_worker_settings(settings)
+    message = str(error.value)
+    assert "SUPABASE_URL" in message
+    assert "GROQ_API_KEY" in message
+    assert "GEMINI_API_KEY" in message
+    assert "sb_secret" not in message
+
+
+def test_worker_identifier_is_unique_and_operationally_useful():
+    first = build_worker_id()
+    second = build_worker_id()
+    assert first != second
+    assert str(__import__("os").getpid()) in first
+    assert len(first) <= 100
+
+
+def test_shutdown_finishes_current_iteration_without_claiming_another_job():
+    shutdown = ShutdownController()
+    calls = 0
+
+    def process_next():
+        nonlocal calls
+        calls += 1
+        shutdown.request()
+        return True
+
+    run_worker_loop(
+        process_next,
+        shutdown,
+        WorkerHealth(worker_id="worker-a", started_at="start"),
+        poll_seconds=1,
+        heartbeat_seconds=60,
+    )
+    assert calls == 1
+
+
+def test_job_level_failure_does_not_stop_worker_loop():
+    shutdown = ShutdownController()
+    results = iter((True, False))
+    calls = 0
+
+    def process_next():
+        nonlocal calls
+        calls += 1
+        result = next(results)
+        if calls == 2:
+            shutdown.request()
+        return result
+
+    run_worker_loop(
+        process_next,
+        shutdown,
+        WorkerHealth(worker_id="worker-a", started_at="start"),
+        poll_seconds=1,
+        heartbeat_seconds=60,
+    )
+    assert calls == 2
+
+
+def test_worker_operational_log_contains_no_configuration_secrets(caplog):
+    caplog.set_level("INFO")
+    log_worker_event(
+        "WORKER_HEARTBEAT",
+        worker_id="host-123-token",
+        started_at="start",
+        last_claim_at=None,
+        last_success_at=None,
+    )
+    assert "WORKER_HEARTBEAT" in caplog.text
+    assert "GEMINI_API_KEY" not in caplog.text
+    assert "SUPABASE_SECRET_KEY" not in caplog.text
+
+
+def test_worker_suppresses_transport_logs_with_private_paths():
+    configure_worker_logging()
+    assert __import__("logging").getLogger("httpx").level == __import__("logging").WARNING
+    assert __import__("logging").getLogger("httpcore").level == __import__("logging").WARNING
