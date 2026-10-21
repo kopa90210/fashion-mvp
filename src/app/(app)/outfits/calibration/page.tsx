@@ -20,7 +20,7 @@ export default async function OutfitCalibrationPage() {
             Style check
           </p>
           <h1 className="mt-3 text-3xl font-semibold tracking-tight">
-            Choose a few more pieces you'd wear.
+            Choose a few more pieces you&apos;d wear.
           </h1>
           <p className="mt-3 text-sm leading-6 text-[#6d6257]">
             We need enough style references to build a valid look. These picks guide your taste profile; they are not added to your wardrobe.
