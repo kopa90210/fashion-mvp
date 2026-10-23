@@ -2,7 +2,7 @@
 
 import { createClient } from '@/src/lib/supabase/server'
 import { isValidOutfitStructure, scoreOutfit, type LayerRole, type WardrobeItem } from '@/src/lib/outfit/engine'
-import type { StyleVector } from '@/src/lib/quiz/scoring'
+import { readQuizSignals, type StyleVector } from '@/src/lib/quiz/scoring'
 import { normalizeWardrobeItem } from '@/src/lib/wardrobe/normalize'
 import { signedOwnedPrivateUrl } from '@/src/lib/media/private-media'
 
@@ -19,6 +19,8 @@ type WardrobeRow = {
   subcategory: string | null
   layer_role: string | null
   style_tags: Partial<StyleVector> | null
+  fit?: WardrobeItem['fit']
+  formality_score?: number | null
 }
 
 type OwnershipRow = {
@@ -66,6 +68,8 @@ function toEngineItem(row: WardrobeRow): WardrobeItem {
     image_url: row.image_url,
     layer_role: classification.layer_role,
     style_tags: row.style_tags && typeof row.style_tags === 'object' ? row.style_tags : {},
+    fit: row.fit ?? null,
+    formality_score: row.formality_score ?? null,
   }
 }
 
@@ -87,9 +91,9 @@ export async function getSwapCandidates(outfitId: string, itemId: string, limit 
     supabase.from('outfits')
       .select('id, outfit_items(wardrobe_item_id, slot, position)')
       .eq('id', outfitId).eq('user_id', userId).single(),
-    supabase.from('fashion_dna').select('vector').eq('user_id', userId).single(),
+    supabase.from('fashion_dna').select('vector, quiz_signals').eq('user_id', userId).single(),
     supabase.from('user_wardrobe_items')
-      .select('user_id, retired_at, wardrobe_items(id, display_name, image_url, media_asset_id, status, category, subcategory, layer_role, style_tags)')
+      .select('user_id, retired_at, wardrobe_items(id, display_name, image_url, media_asset_id, status, category, subcategory, layer_role, style_tags, fit, formality_score)')
       .eq('user_id', userId).is('retired_at', null),
   ])
 
@@ -119,11 +123,12 @@ export async function getSwapCandidates(outfitId: string, itemId: string, limit 
 
   const currentIds = new Set(currentItems.map((item) => item.id))
   const dna = dnaResult.data.vector as StyleVector
+  const signals = readQuizSignals(dnaResult.data.quiz_signals)
   const candidates = ownedItems
     .filter((candidate) => candidate.layer_role === selectedMembership.slot && !currentIds.has(candidate.id))
     .map((replacement) => {
       const resultingItems = currentItems.map((item) => item.id === itemId ? replacement : item)
-      return { replacement, resultingItems, outfitScore: scoreOutfit(resultingItems, dna) }
+      return { replacement, resultingItems, outfitScore: scoreOutfit(resultingItems, dna, signals) }
     })
     .filter((candidate) => isValidOutfitStructure(candidate.resultingItems))
     .sort((a, b) => b.outfitScore - a.outfitScore

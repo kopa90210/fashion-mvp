@@ -31,6 +31,7 @@ export type UserWardrobeItem = {
   image_url: string | null
   color: unknown
   fit: unknown
+  formality_score?: number
   style_tags: unknown
   material?: string | null
   season_weights?: unknown
@@ -79,6 +80,7 @@ async function mapUserWardrobeRow(row: Record<string, unknown>, supabase: Awaite
       : (item.image_url as string | null) ?? null,
     color: item.color ?? {},
     fit: item.fit ?? {},
+    ...(typeof item.formality_score === 'number' ? { formality_score: item.formality_score } : {}),
     style_tags: item.style_tags ?? {},
     material: (item.material as string | null) ?? null,
     season_weights: item.season_weights ?? {},
@@ -92,7 +94,7 @@ async function mapUserWardrobeRow(row: Record<string, unknown>, supabase: Awaite
 export async function getUserWardrobeItems(category?: string, subcategory?: string) {
   const { supabase, userId } = await getAuthenticatedClient()
   let query = supabase.from('user_wardrobe_items')
-    .select('item_id, quantity, added_at, wardrobe_items!inner (id, source, category, subcategory, brand, display_name, image_url, media_asset_id, color, fit, style_tags, material, season_weights, layer_role, status)')
+    .select('item_id, quantity, added_at, wardrobe_items!inner (id, source, category, subcategory, brand, display_name, image_url, media_asset_id, color, fit, formality_score, style_tags, material, season_weights, layer_role, status)')
     .eq('user_id', userId).eq('wardrobe_items.status', 'confirmed')
     .order('added_at', { ascending: false })
   if (category) query = query.eq('wardrobe_items.category', category)

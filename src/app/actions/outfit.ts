@@ -9,7 +9,7 @@ import {
   type WardrobeItem,
   type LayerRole,
 } from '@/src/lib/outfit/engine'
-import type { StyleVector } from '@/src/lib/quiz/scoring'
+import { readQuizSignals, type QuizSignals, type StyleVector } from '@/src/lib/quiz/scoring'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { normalizeWardrobeItem } from '@/src/lib/wardrobe/normalize'
 import type { GeneratedDailyOutfit } from '@/src/lib/outfit/ai-service'
@@ -63,6 +63,8 @@ type WardrobeJoinItem = {
   subcategory: string | null
   layer_role: string | null
   style_tags: Partial<StyleVector> | null
+  fit?: WardrobeItem['fit']
+  formality_score?: number | null
 }
 
 type UserWardrobeJoinRow = {
@@ -305,12 +307,13 @@ async function ensureCalibrationOutfitForStep(
   items: WardrobeItem[],
   step: number,
   currentItemIds: string[] = [],
+  signals: QuizSignals | null = null,
 ): Promise<CalibrationOutfit | null> {
   const existing = await getStoredCalibrationStep(supabase, userId, step, items, dna)
   if (existing) return existing
 
   const excludeKeys = await getShownOutfitKeys(supabase, userId)
-  const candidates = recommendOutfits(items, dna, { topN: 8 })
+  const candidates = recommendOutfits(items, dna, { topN: 8, signals })
   const picked = pickDiverseCalibrationCandidate(candidates, excludeKeys, currentItemIds)
   if (!picked) return null
 
@@ -349,7 +352,9 @@ async function fetchRelationshipItems(
         category,
         subcategory,
         layer_role,
-        style_tags
+        style_tags,
+        fit,
+        formality_score
       )
       `,
     )
@@ -377,6 +382,8 @@ async function fetchRelationshipItems(
         : item.image_url ?? null,
       layer_role: normalized.layer_role as LayerRole,
       style_tags: (item.style_tags as Partial<StyleVector>) ?? {},
+      fit: item.fit ?? null,
+      formality_score: item.formality_score ?? null,
     }
   }))
   if (excludedCount > 0) {
@@ -406,7 +413,7 @@ async function getUserDnaAndWardrobeInternal(
   const [dnaResult, items, userResult] = await Promise.all([
     supabase
       .from('fashion_dna')
-      .select('vector')
+      .select('vector, quiz_signals')
       .eq('user_id', userId)
       .single(),
     fetchOwnedWardrobeItems(supabase, userId),
@@ -422,6 +429,7 @@ async function getUserDnaAndWardrobeInternal(
     supabase,
     userId,
     dna: dnaResult.data.vector as StyleVector,
+    signals: readQuizSignals(dnaResult.data.quiz_signals),
     items,
     timezone: typeof userResult.data?.timezone === 'string' ? userResult.data.timezone : 'UTC',
   }
@@ -439,7 +447,7 @@ async function getUserDnaAndStyleSeedsInternal(
   const [dnaResult, items] = await Promise.all([
     supabase
       .from('fashion_dna')
-      .select('vector')
+      .select('vector, quiz_signals')
       .eq('user_id', userId)
       .single(),
     fetchStyleSeedItems(supabase, userId),
@@ -454,6 +462,7 @@ async function getUserDnaAndStyleSeedsInternal(
     supabase,
     userId,
     dna: dnaResult.data.vector as StyleVector,
+    signals: readQuizSignals(dnaResult.data.quiz_signals),
     items,
   }
 }
@@ -465,8 +474,8 @@ async function getUserDnaAndStyleSeedsInternal(
  * Scoped exclusively to user_wardrobe_items; never queries the full catalog.
  */
 export async function getRecommendedOutfits(topN = 5): Promise<Outfit[]> {
-  const { dna, items } = await getUserDnaAndWardrobe()
-  return recommendOutfits(items, dna, { topN })
+  const { dna, items, signals } = await getUserDnaAndWardrobe()
+  return recommendOutfits(items, dna, { topN, signals })
 }
 
 export async function shouldShowOutfitCalibration(): Promise<boolean> {
@@ -487,8 +496,8 @@ export async function shouldShowOutfitCalibration(): Promise<boolean> {
     return false
   }
 
-  const { dna, items } = await getUserDnaAndStyleSeedsInternal(supabase, userId)
-  return recommendOutfits(items, dna, { topN: 3 }).length >= 1
+  const { dna, items, signals } = await getUserDnaAndStyleSeedsInternal(supabase, userId)
+  return recommendOutfits(items, dna, { topN: 3, signals }).length >= 1
 }
 
 export async function getCalibrationState(): Promise<CalibrationState> {
@@ -516,7 +525,7 @@ export async function getCalibrationState(): Promise<CalibrationState> {
     }
   }
 
-  const { dna, items } = await getUserDnaAndStyleSeedsInternal(supabase, userId)
+  const { dna, items, signals } = await getUserDnaAndStyleSeedsInternal(supabase, userId)
   const step = answeredCount + 1
   const outfit = await ensureCalibrationOutfitForStep(
     supabase,
@@ -524,6 +533,8 @@ export async function getCalibrationState(): Promise<CalibrationState> {
     dna,
     items,
     step,
+    [],
+    signals,
   )
 
   return {
@@ -545,7 +556,7 @@ export async function getCalibrationOutfits(): Promise<CalibrationOutfit[]> {
 
 export async function getDailyOutfit(): Promise<DailyOutfit | null> {
   const t0 = performance.now()
-  const { supabase, userId, dna, items, timezone } = await getUserDnaAndWardrobe()
+  const { supabase, userId, dna, items, timezone, signals } = await getUserDnaAndWardrobe()
   const tData = performance.now() - t0
 
   const scheduledFor = localCalendarDate(timezone)
@@ -563,7 +574,7 @@ export async function getDailyOutfit(): Promise<DailyOutfit | null> {
   const excludeKeys = await getShownOutfitKeys(supabase, userId)
 
   const tEngine0 = performance.now()
-  const candidates = recommendOutfits(items, dna, { topN: 10 })
+  const candidates = recommendOutfits(items, dna, { topN: 10, signals })
   const tEngine = performance.now() - tEngine0
 
   const outfit =
@@ -667,6 +678,7 @@ export async function submitCalibrationFeedback(
   }
 
   const wardrobeItems = await fetchStyleSeedItems(supabase, userId)
+  const { data: quizRow } = await supabase.from('fashion_dna').select('quiz_signals').eq('user_id', userId).single()
   const nextStep = answeredCount + 1
   const nextOutfit = await ensureCalibrationOutfitForStep(
     supabase,
@@ -675,6 +687,7 @@ export async function submitCalibrationFeedback(
     wardrobeItems,
     nextStep,
     itemIds,
+    readQuizSignals(quizRow?.quiz_signals),
   )
 
   return {
