@@ -68,6 +68,7 @@ select set_config(
   'c6100000-0000-0000-0000-000000000001',
   true
 );
+select public.set_onboarding_owned_selection('{}'::uuid[], 0);
 
 -- ---------------------------------------------------------------------------
 -- Step 1: one persisted outfit, refresh/retry returns the same row.
@@ -203,7 +204,7 @@ select pg_temp.assert_true(
 );
 
 -- ---------------------------------------------------------------------------
--- Step 3: server completes the calibration.
+-- Step 3: feedback completes the style check; onboarding remains pending.
 -- ---------------------------------------------------------------------------
 select set_config(
   'c6.step3',
@@ -242,12 +243,15 @@ select pg_temp.assert_true(
 );
 
 select pg_temp.assert_true(
-  (
-    select has_completed_calibration
-    from public.users
-    where id = 'c6100000-0000-0000-0000-000000000001'
-  ),
-  'users.has_completed_calibration must be true after the third answer'
+  (select not has_completed_calibration from public.users
+   where id = 'c6100000-0000-0000-0000-000000000001'),
+  'third answer leaves onboarding pending'
+);
+select public.finalize_onboarding_owned_selection(1);
+select pg_temp.assert_true(
+  (select has_completed_calibration from public.users
+   where id = 'c6100000-0000-0000-0000-000000000001'),
+  'explicit finalization completes onboarding'
 );
 
 select pg_temp.assert_true(

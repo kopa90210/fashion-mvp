@@ -10,18 +10,33 @@ import {
   getRankedPieces,
   searchPieces,
   saveWardrobeSelection,
+  type PendingOwnedSelection,
 } from '@/src/app/actions/wardrobe'
-import { isCalibrationSelectionEligible, SELECTION_STEPS } from './selection-steps'
+import { SELECTION_STEPS } from './selection-steps'
 import { STYLE_SELECTION_COPY } from './selection-copy'
 
-export default function PieceSelectionScreen() {
+export default function PieceSelectionScreen({ pending }: { pending: PendingOwnedSelection }) {
   const router = useRouter()
   const [currentStepIndex, setCurrentStepIndex] = useState(0)
-  const [selections, setSelections] = useState<Record<string, Set<string>>>({})
+  const [selections, setSelections] = useState<Record<string, Set<string>>>(() => {
+    const groups: Record<string, Set<string>> = {}
+    for (const item of pending.items) {
+      (groups[item.category] ??= new Set()).add(item.id)
+    }
+    return groups
+  })
+  const [selectionVersion, setSelectionVersion] = useState(pending.version)
+  const versionRef = useRef(pending.version)
+  const saveQueue = useRef<Promise<void>>(Promise.resolve())
+  const [previewItem, setPreviewItem] = useState<CuratedItem | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   // Per-step data state
-  const [itemsByCategory, setItemsByCategory] = useState<Record<string, CuratedItem[]>>({})
+  const [itemsByCategory, setItemsByCategory] = useState<Record<string, CuratedItem[]>>(() => {
+    const grouped: Record<string, CuratedItem[]> = {}
+    for (const item of pending.items) (grouped[item.category] ??= []).push(item)
+    return grouped
+  })
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [batch, setBatch] = useState(0)
   const [hasMore, setHasMore] = useState(false)
@@ -44,16 +59,8 @@ export default function PieceSelectionScreen() {
   )
   const selectedCount = currentSelectedIds.size
 
-  const selectionCounts = Object.fromEntries(
-    Object.entries(selections).map(([category, selected]) => [category, selected.size]),
-  )
   const isFinalStep = currentStepIndex === SELECTION_STEPS.length - 1
-  const isGloballyEligible = isCalibrationSelectionEligible(selectionCounts)
-  const isStepValid = isFinalStep
-    ? isGloballyEligible
-    : currentStep.required
-      ? selectedCount >= currentStep.minSelections
-      : true
+  const isStepValid = true
 
   // Total selected across all steps
   const totalSelectedCount = Object.values(selections).reduce(
@@ -149,16 +156,31 @@ export default function PieceSelectionScreen() {
     }, 300)
   }
 
-  const toggleSelection = (id: string) => {
-    setSelections((prev) => {
-      const catSet = new Set(prev[currentCategory] ?? [])
-      if (catSet.has(id)) {
-        catSet.delete(id)
-      } else {
-        catSet.add(id)
-      }
-      return { ...prev, [currentCategory]: catSet }
+  const persistSelection = (next: Record<string, Set<string>>) => {
+    const ids = Object.values(next).flatMap((set) => Array.from(set))
+    saveQueue.current = saveQueue.current.then(async () => {
+      const result = await saveWardrobeSelection(ids, versionRef.current)
+      versionRef.current = result.version
+      setSelectionVersion(result.version)
+    }).catch(() => {
+      setSubmitError('We could not save that change. Refresh and try again.')
     })
+  }
+
+  const toggleSelection = (id: string) => {
+    if (isSubmitting) return
+    const catSet = new Set(selections[currentCategory] ?? [])
+    if (catSet.has(id)) catSet.delete(id)
+    else catSet.add(id)
+    const next = { ...selections, [currentCategory]: catSet }
+    setSelections(next)
+    persistSelection(next)
+  }
+
+  const clearCurrentStep = () => {
+    const next = { ...selections, [currentCategory]: new Set<string>() }
+    setSelections(next)
+    persistSelection(next)
   }
 
   const handleNextStep = () => {
@@ -176,20 +198,7 @@ export default function PieceSelectionScreen() {
     }
   }
 
-  const handleSkipStep = () => {
-    if (currentStep.required) return
-    if (currentStepIndex < SELECTION_STEPS.length - 1) {
-      setCurrentStepIndex((prev) => prev + 1)
-    } else {
-      handleSubmit()
-    }
-  }
-
   const handleSubmit = async () => {
-    if (!isGloballyEligible) {
-      setSubmitError(STYLE_SELECTION_COPY.eligibilityError)
-      return
-    }
     setSubmitError(null)
     setIsSubmitting(true)
 
@@ -199,10 +208,11 @@ export default function PieceSelectionScreen() {
     )
 
     try {
-      await saveWardrobeSelection(allSelectedIds)
-      setTimeout(() => {
-        router.push('/outfits/calibration')
-      }, 2200)
+      await saveQueue.current
+      const result = await saveWardrobeSelection(allSelectedIds, versionRef.current)
+      versionRef.current = result.version
+      setSelectionVersion(result.version)
+      router.push('/outfits/calibration')
     } catch (err) {
       console.error('Failed to submit style selection:', err)
       setIsSubmitting(false)
@@ -220,11 +230,11 @@ export default function PieceSelectionScreen() {
   const displayItems = useMemo(() => {
     const seen = new Set<string>()
     return rawDisplayItems.filter((item) => {
-      if (seen.has(item.id) || currentSelectedIds.has(item.id)) return false
+      if (seen.has(item.id)) return false
       seen.add(item.id)
       return true
     })
-  }, [rawDisplayItems, currentSelectedIds])
+  }, [rawDisplayItems])
   // Submission screen: curated picks become style signals, not ownership.
   if (isSubmitting) {
     return (
@@ -269,16 +279,6 @@ export default function PieceSelectionScreen() {
               </span>
             </div>
 
-            {/* Optional Step Skip Button */}
-            {!currentStep.required && (
-              <button
-                type="button"
-                onClick={handleSkipStep}
-                className="text-xs text-white/50 hover:text-white underline-offset-4 hover:underline transition-colors"
-              >
-                Skip this step
-              </button>
-            )}
           </div>
 
           {/* Progress Bar */}
@@ -297,17 +297,10 @@ export default function PieceSelectionScreen() {
           <div className="flex items-end justify-between gap-4 pt-2">
             <div>
               <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
-                Choose your {currentStep.label.toLowerCase()}
+                {STYLE_SELECTION_COPY.title}
               </h1>
-              <p className="text-xs text-white/50 mt-1">
-                {isFinalStep && !isGloballyEligible
-                  ? STYLE_SELECTION_COPY.finalEligibilityHint
-                  : currentStep.required
-                  ? `Select at least ${currentStep.minSelections} items to advance.`
-                  : STYLE_SELECTION_COPY.optionalHint}
-              </p>
               <p className="mt-2 max-w-xl text-xs leading-5 text-white/40">
-                {STYLE_SELECTION_COPY.referenceNote}
+                {STYLE_SELECTION_COPY.description}
               </p>
             </div>
 
@@ -412,7 +405,16 @@ export default function PieceSelectionScreen() {
                           ease: 'easeOut',
                         }}
                         whileTap={{ scale: 0.96 }}
-                        onClick={() => toggleSelection(item.id)}
+                        onClick={() => setPreviewItem(item)}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault()
+                            setPreviewItem(item)
+                          }
+                        }}
+                        role="button"
+                        tabIndex={0}
+                        aria-label={`Preview ${item.display_name}`}
                         className="relative w-32 shrink-0 cursor-pointer snap-start"
                       >
                         <GarmentCard
@@ -421,6 +423,7 @@ export default function PieceSelectionScreen() {
                           category={item.category}
                           variant="style_reference"
                           selected={currentSelectedIds.has(item.id)}
+                          selectionLabel={STYLE_SELECTION_COPY.selectedCardLabel}
                           selectionMode
                         />
                       </motion.div>
@@ -445,10 +448,10 @@ export default function PieceSelectionScreen() {
 
               {/* Hand tray - pieces the user has picked up for this step */}
               <div className="mt-4 flex min-h-[68px] items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
-                <span className="shrink-0 text-xs text-white/40">In hand</span>
+                  <span className="shrink-0 text-xs text-white/40">Selected</span>
                 <div className="flex flex-1 flex-wrap gap-2">
                   {currentSelectedIds.size === 0 ? (
-                    <span className="text-xs text-white/30">Tap a piece on the rail to pick it up</span>
+                    <span className="text-xs text-white/30">None selected yet</span>
                   ) : (
                     Array.from(currentSelectedIds).map((id) => {
                       const item = itemsByCategory[currentCategory]?.find((i) => i.id === id)
@@ -458,10 +461,13 @@ export default function PieceSelectionScreen() {
                         <motion.button
                           key={id}
                           layoutId={`card-${id}`}
+                          // The queued save ref is read only when this click handler runs.
+                          // eslint-disable-next-line react-hooks/refs
                           onClick={() => toggleSelection(id)}
                           className="flex items-center gap-1.5 rounded-full border border-amber-300/40 bg-amber-300/10 px-3 py-1 text-xs font-medium text-amber-200"
                         >
-                          {label}
+                          <span>{STYLE_SELECTION_COPY.selectedCardLabel}</span>
+                          <span className="sr-only">: {label}</span>
                           <X className="h-3 w-3" />
                         </motion.button>
                       )
@@ -470,11 +476,27 @@ export default function PieceSelectionScreen() {
                 </div>
               </div>
 
+              <button type="button" onClick={clearCurrentStep} className="mt-3 text-xs text-amber-200 underline underline-offset-4">
+                {STYLE_SELECTION_COPY.emptySelection}
+              </button>
+
             </motion.div>
           )}
         </AnimatePresence>
 
       </div>
+
+      {previewItem && (
+        <div role="dialog" aria-modal="true" aria-label={`Preview ${previewItem.display_name}`} className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 p-4">
+          <div className="w-full max-w-sm rounded-2xl border border-white/20 bg-[#17171a] p-5">
+            <button type="button" onClick={() => setPreviewItem(null)} aria-label="Close preview" className="mb-3 ml-auto block text-white"><X /></button>
+            <GarmentCard image={previewItem.image_url} name={previewItem.display_name} category={previewItem.category} variant="style_reference" selected={Boolean(selections[previewItem.category]?.has(previewItem.id))} selectionMode />
+            <button type="button" onClick={() => { toggleSelection(previewItem.id); setPreviewItem(null) }} className="mt-4 w-full rounded-full bg-amber-300 px-5 py-3 text-sm font-semibold text-black">
+              {selections[previewItem.category]?.has(previewItem.id) ? 'Remove from selected pieces' : STYLE_SELECTION_COPY.selectedCardLabel}
+            </button>
+          </div>
+        </div>
+      )}
 
       {submitError && (
         <div className="fixed bottom-[calc(5.5rem+env(safe-area-inset-bottom))] left-4 right-4 z-50 mx-auto max-w-4xl rounded-xl border border-red-300/30 bg-red-950/90 px-4 py-3 text-sm text-red-100">
@@ -499,6 +521,7 @@ export default function PieceSelectionScreen() {
               {selectedCount}
             </span>{' '}
             selected in {currentStep.label.toLowerCase()} ({totalSelectedCount} total)
+            <span className="sr-only">Selection version {selectionVersion}</span>
           </div>
 
           <div className="flex items-center gap-3">
@@ -523,7 +546,7 @@ export default function PieceSelectionScreen() {
               }`}
             >
               {currentStepIndex === SELECTION_STEPS.length - 1 ? (
-                STYLE_SELECTION_COPY.finalCta
+                STYLE_SELECTION_COPY.continueWithCount(totalSelectedCount)
               ) : (
                 <>
                   Next
@@ -533,6 +556,7 @@ export default function PieceSelectionScreen() {
             </button>
           </div>
         </div>
+        {isFinalStep && <p className="mx-auto mt-2 max-w-4xl text-right text-xs text-white/50">Your selected pieces will be added to your wardrobe after calibration.</p>}
       </div>
     </div>
   )

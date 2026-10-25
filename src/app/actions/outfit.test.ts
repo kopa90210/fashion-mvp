@@ -74,6 +74,7 @@ function createQueryBuilder(tableName: string) {
     order: vi.fn().mockReturnThis(),
     limit: vi.fn().mockReturnThis(),
     single: vi.fn().mockImplementation(() => response()),
+    maybeSingle: vi.fn().mockImplementation(() => response()),
     insert: vi.fn().mockImplementation((payload: unknown) => {
       if (!insertCalls[tableName]) insertCalls[tableName] = []
       insertCalls[tableName].push(payload)
@@ -206,20 +207,21 @@ beforeEach(() => {
 // ---------------------------------------------------------------------------
 
 describe('getDailyOutfit', () => {
-  it('returns a daily outfit from one owned dress and footwear', async () => {
+  it('builds daily outfits only from confirmed items in the ownership relation', async () => {
     mockAuthenticatedUser()
     mockTable('fashion_dna', { vector: DNA })
     mockTable('users', { timezone: 'UTC' })
     mockTable('outfits', [])
     mockTable('user_wardrobe_items', [
-      { wardrobe_items: { id: 'dress-1', display_name: 'Midi dress', category: 'one_piece', image_url: null,
+      { wardrobe_items: { id: 'selected-dress', source: 'curated', display_name: 'Midi dress', category: 'one_piece', image_url: null,
         layer_role: 'one_piece', style_tags: { minimal: 0.9 } } },
-      { wardrobe_items: { id: 'shoe-1', display_name: 'Shoes', category: 'footwear', image_url: null,
+      { wardrobe_items: { id: 'selected-shoes', source: 'curated', display_name: 'Shoes', category: 'footwear', image_url: null,
         layer_role: 'footwear', style_tags: { minimal: 0.8 } } },
     ])
 
     const result = await getDailyOutfit()
-    expect(result?.items.map((piece) => piece.id)).toEqual(['dress-1', 'shoe-1'])
+    expect(result?.items.map((piece) => piece.id)).toEqual(['selected-dress', 'selected-shoes'])
+    expect(mockSupabase.from.mock.calls.map(([table]) => table)).not.toContain('wardrobe_items')
     expect(rpcCalls.some((call) => call.name === 'create_outfit_with_items')).toBe(true)
   })
 
@@ -307,6 +309,28 @@ describe('getDailyOutfit', () => {
     expect(result?.items[0].image_url).toBe('https://signed.test/asset-tee')
     expect(result?.reasons).toEqual(['stored reason one', 'stored reason two'])
     expect(outfitEngine.recommendOutfits).not.toHaveBeenCalled()
+  })
+
+  it('does not reuse a prior same-day AI job after ownership is committed', async () => {
+    process.env.ENABLE_AI_DAILY_OUTFITS = 'true'
+    mockAuthenticatedUser()
+    mockTable('fashion_dna', { vector: DNA })
+    mockTable('users', { timezone: 'UTC' })
+    mockTable('onboarding_owned_selections', { committed_at: '2026-10-23T10:00:00Z', version: 2 })
+    mockTable('ai_jobs', { idempotency_key: 'daily:2026-10-23:v1' })
+    mockTable('user_wardrobe_items', [
+      { wardrobe_items: { id: 'tee', display_name: 'Tee', layer_role: 'base_layer', style_tags: { minimal: 0.8 } } },
+      { wardrobe_items: { id: 'pants', display_name: 'Pants', layer_role: 'bottom', style_tags: { minimal: 0.8 } } },
+      { wardrobe_items: { id: 'shoes', display_name: 'Shoes', layer_role: 'footwear', style_tags: { minimal: 0.8 } } },
+    ])
+    mockTableSequence('outfits', [
+      { data: { id: 'old-ai', ai_job_id: 'old-job', item_ids: ['tee', 'pants', 'shoes'], reasoning: [] } },
+      { data: [] },
+    ])
+
+    expect((await getDailyOutfit())?.id).toBe('saved')
+    expect(outfitEngine.recommendOutfits).toHaveBeenCalled()
+    expect(rpcCalls.map((call) => call.name)).toContain('enqueue_daily_outfit_job')
   })
 
   it('falls through to the live engine when a stored AI outfit references a missing item', async () => {
@@ -638,7 +662,7 @@ describe('getCalibrationState', () => {
       outfit: null,
       answeredCount: 3,
       target: 3,
-      completed: true,
+      completed: false,
     })
     expect(rpcCalls).toHaveLength(0)
   })
@@ -782,14 +806,14 @@ describe('submitCalibrationFeedback', () => {
 // ---------------------------------------------------------------------------
 
 describe('skipOutfitCalibration', () => {
-  it('updates has_completed_calibration to true on the users table', async () => {
+  it('leaves calibration and ownership pending', async () => {
     mockAuthenticatedUser()
     mockTable('users', { id: TEST_USER_ID, has_completed_calibration: true })
 
     const result = await skipOutfitCalibration()
     expect(result).toEqual({ success: true })
 
-    expect(mockSupabase.from).toHaveBeenCalledWith('users')
+    expect(mockSupabase.from).not.toHaveBeenCalledWith('users')
   })
 })
 

@@ -4,12 +4,20 @@ import { getCalibrationState } from '@/src/app/actions/outfit'
 import { getFashionDnaSummary } from '@/src/app/actions/fashion-dna'
 import { buttonVariants } from '@/components/ui/button'
 import OutfitCalibrationScreen from './OutfitCalibrationScreen'
+import OnboardingCompletionScreen from './OnboardingCompletionScreen'
+import { getPendingOwnedSelection } from '@/src/app/actions/wardrobe'
 
 export default async function OutfitCalibrationPage() {
   const state = await getCalibrationState()
 
   if (state.completed) {
     redirect('/outfits')
+  }
+
+  if (state.answeredCount >= state.target) {
+    const pending = await getPendingOwnedSelection()
+    if (!pending.exists) redirect('/quiz?done=true')
+    return <OnboardingCompletionScreen count={pending.itemIds.length} version={pending.version} />
   }
 
   if (!state.outfit) {
@@ -20,10 +28,10 @@ export default async function OutfitCalibrationPage() {
             Style check
           </p>
           <h1 className="mt-3 text-3xl font-semibold tracking-tight">
-            Choose a few more pieces you&apos;d wear.
+            We need a few more example pieces.
           </h1>
           <p className="mt-3 text-sm leading-6 text-[#6d6257]">
-            We need enough style references to build a valid look. These picks guide your taste profile; they are not added to your wardrobe.
+            We could not build a style check look from the available examples. Your ownership selections are safe; choose more only if they match clothes you own.
           </p>
           <Link href="/quiz?done=true" className={buttonVariants({ className: 'mt-6' })}>
             Choose more style pieces

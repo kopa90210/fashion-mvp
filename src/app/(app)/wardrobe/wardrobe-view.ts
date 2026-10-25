@@ -22,8 +22,14 @@ export function styleTags(item: Pick<UserWardrobeItem, 'style_tags'>): string[] 
   return Object.entries(raw).filter(([, value]) => typeof value === 'number' && Number.isFinite(value) && value > 0).map(([key]) => key)
 }
 
-export function itemName(item: UserWardrobeItem) { return item.display_name?.trim() || item.subcategory?.trim() || 'Your piece' }
+export function itemName(item: UserWardrobeItem) {
+  if (item.source === 'curated') {
+    return item.subcategory?.trim() || categoryLabels[item.category ?? ''] || 'Clothing'
+  }
+  return item.display_name?.trim() || item.subcategory?.trim() || 'Your piece'
+}
 export function itemDescriptor(item: UserWardrobeItem) {
+  if (item.source === 'curated') return item.subcategory?.trim() || categoryLabels[item.category ?? ''] || 'Clothing'
   return [item.subcategory?.trim() || categoryLabels[item.category ?? ''] || 'Clothing', primaryColor(item)].filter(Boolean).join(' · ')
 }
 

@@ -24,6 +24,7 @@ export type RankedPiecesResult = {
 
 export type UserWardrobeItem = {
   id: string
+  source: string | null
   category: string | null
   subcategory: string | null
   brand: string | null
@@ -71,6 +72,7 @@ async function mapUserWardrobeRow(row: Record<string, unknown>, supabase: Awaite
   const item = raw as Record<string, unknown>
   return {
     id: String(item.id),
+    source: (item.source as string | null) ?? null,
     category: (item.category as string | null) ?? null,
     subcategory: (item.subcategory as string | null) ?? null,
     brand: (item.brand as string | null) ?? null,
@@ -96,6 +98,7 @@ export async function getUserWardrobeItems(category?: string, subcategory?: stri
   let query = supabase.from('user_wardrobe_items')
     .select('item_id, quantity, added_at, wardrobe_items!inner (id, source, category, subcategory, brand, display_name, image_url, media_asset_id, color, fit, formality_score, style_tags, material, season_weights, layer_role, status)')
     .eq('user_id', userId).eq('wardrobe_items.status', 'confirmed')
+    .is('retired_at', null)
     .order('added_at', { ascending: false })
   if (category) query = query.eq('wardrobe_items.category', category)
   if (subcategory) query = query.eq('wardrobe_items.subcategory', subcategory)
@@ -417,8 +420,8 @@ export async function getRankedPieces(
 
   // 2. Prefer the database category filter, with a legacy fallback query.
   const [primaryResult, legacyResult] = await Promise.all([
-    supabase.from('wardrobe_items').select('id, category, subcategory, image_url, display_name, layer_role, style_tags').eq('source', 'curated').eq('category', category),
-    supabase.from('wardrobe_items').select('id, category, subcategory, image_url, display_name, layer_role, style_tags').eq('source', 'curated').or('category.is.null,category.eq.'),
+    supabase.from('wardrobe_items').select('id, category, subcategory, image_url, display_name, layer_role, style_tags').eq('source', 'curated').eq('status', 'confirmed').eq('category', category),
+    supabase.from('wardrobe_items').select('id, category, subcategory, image_url, display_name, layer_role, style_tags').eq('source', 'curated').eq('status', 'confirmed').or('category.is.null,category.eq.'),
   ])
   const itemsError = primaryResult.error ?? legacyResult.error
   const items = [...(primaryResult.data ?? []), ...(legacyResult.data ?? [])]
@@ -546,6 +549,7 @@ export async function searchPieces(
     .from('wardrobe_items')
     .select('id, category, subcategory, image_url, display_name, layer_role')
     .eq('source', 'curated')
+    .eq('status', 'confirmed')
     .or(`display_name.ilike.%${cleanQuery}%,subcategory.ilike.%${cleanQuery}%`)
 
   if (itemsError || !items) {
@@ -600,30 +604,71 @@ export async function findOrphanedWardrobeItems(): Promise<OrphanedWardrobeItems
   return { total, byUser }
 }
 
-export async function saveWardrobeSelection(itemIds: string[]) {
-  const supabase = await createClient()
+export type PendingOwnedSelection = {
+  exists: boolean
+  itemIds: string[]
+  items: CuratedItem[]
+  version: number
+  committed: boolean
+}
 
-  const { data: userData, error: authError } = await supabase.auth.getUser()
-  if (authError || !userData?.user) {
-    throw new Error('Not authenticated')
+export async function getPendingOwnedSelection(): Promise<PendingOwnedSelection> {
+  const { supabase, userId } = await getAuthenticatedClient()
+  const { data, error } = await supabase.from('onboarding_owned_selections')
+    .select('item_ids, version, committed_at').eq('user_id', userId).maybeSingle()
+  if (error) throw new Error('Could not load your selected pieces')
+  const itemIds: string[] = Array.isArray(data?.item_ids) ? data.item_ids : []
+  const { data: rows, error: itemsError } = itemIds.length
+    ? await supabase.from('wardrobe_items')
+      .select('id, category, subcategory, layer_role, display_name, image_url')
+      .in('id', itemIds).eq('source', 'curated')
+    : { data: [], error: null }
+  if (itemsError) throw new Error('Could not load selected piece details')
+  return {
+    exists: Boolean(data),
+    itemIds,
+    items: (rows ?? []).map((row) => ({
+      id: row.id,
+      category: mapWardrobeCategory(row),
+      display_name: row.display_name,
+      image_url: row.image_url,
+    })),
+    version: data?.version ?? 0,
+    committed: Boolean(data?.committed_at),
   }
+}
 
-  const userId = userData.user.id
-
-  const inserts = itemIds.map((itemId) => ({
-    user_id: userId,
-    item_id: itemId,
-  }))
-
-  const { error } = await supabase
-    .from('user_style_seed_items')
-    .upsert(inserts, { onConflict: 'user_id, item_id' })
-
-  if (error) {
-    throw new Error('Failed to save wardrobe selection')
+export async function saveWardrobeSelection(itemIds: string[], expectedVersion: number) {
+  const { supabase } = await getAuthenticatedClient()
+  if (!Array.isArray(itemIds) || !itemIds.every((id) => typeof id === 'string') ||
+      !Number.isInteger(expectedVersion) || expectedVersion < 0) {
+    throw new Error('Invalid selection')
   }
+  const { data, error } = await supabase.rpc('set_onboarding_owned_selection', {
+    p_item_ids: itemIds,
+    p_expected_version: expectedVersion,
+  })
+  if (error || typeof data !== 'number') {
+    throw new Error(error?.message ?? 'Could not save your selected pieces')
+  }
+  return { version: data }
+}
 
-  return { success: true }
+export async function finalizeOnboardingSelection(expectedVersion: number) {
+  const { supabase } = await getAuthenticatedClient()
+  if (!Number.isInteger(expectedVersion) || expectedVersion < 0) {
+    throw new Error('Invalid selection version')
+  }
+  const { data, error } = await supabase.rpc('finalize_onboarding_owned_selection', {
+    p_expected_version: expectedVersion,
+  })
+  const result = Array.isArray(data) ? data[0] : data
+  if (error || !result || result.completed !== true || typeof result.item_count !== 'number' ||
+      result.selection_version !== expectedVersion) {
+    throw new Error(error?.message ?? 'Could not finish onboarding')
+  }
+  revalidateOwnedWardrobeExperience()
+  return { itemCount: result.item_count as number, completed: true }
 }
 
 // ---------------------------------------------------------------------------

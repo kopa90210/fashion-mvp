@@ -41,8 +41,10 @@ function createQueryBuilder(tableName: string) {
     eq: vi.fn().mockReturnThis(),
     order: vi.fn().mockReturnThis(),
     in: vi.fn().mockReturnThis(),
+    is: vi.fn().mockReturnThis(),
     or: vi.fn().mockReturnThis(),
     single: vi.fn().mockImplementation(() => response()),
+    maybeSingle: vi.fn().mockImplementation(() => response()),
     insert: vi.fn().mockReturnThis(),
     update: vi.fn().mockReturnThis(),
     upsert: vi.fn().mockImplementation((payload: unknown) => {
@@ -81,7 +83,7 @@ vi.mock('@/src/lib/supabase/server', () => ({
 // Import functions under test
 // ---------------------------------------------------------------------------
 
-const { getUserWardrobeItems, getUserDraftItems, getCuratedPieces, getRankedPieces, searchPieces, saveWardrobeSelection, findOrphanedWardrobeItems, replaceWardrobeItemPhoto, updateWardrobeItemAttributes, removeWardrobeItem, uploadDraftWardrobeItem, uploadOutfitPhoto, confirmOutfitPhotoDraft, confirmDraftItem, discardDraftItem } = await import(
+const { getUserWardrobeItems, getUserDraftItems, getCuratedPieces, getRankedPieces, searchPieces, saveWardrobeSelection, getPendingOwnedSelection, finalizeOnboardingSelection, findOrphanedWardrobeItems, replaceWardrobeItemPhoto, updateWardrobeItemAttributes, removeWardrobeItem, uploadDraftWardrobeItem, uploadOutfitPhoto, confirmOutfitPhotoDraft, confirmDraftItem, discardDraftItem } = await import(
   '@/src/app/actions/wardrobe'
 )
 
@@ -170,12 +172,14 @@ describe('wardrobe image previews', () => {
       { wardrobe_items: { id: 'unknown-provenance', status: 'confirmed' } },
       { wardrobe_items: null },
     ], error: null }
-    expect((await getUserWardrobeItems()).map((item) => item.id)).toEqual([
+    const items = await getUserWardrobeItems()
+    expect(items.map((item) => item.id)).toEqual([
       'owned',
       'array-owned',
       'catalog-owned',
       'unknown-provenance',
     ])
+    expect(items.find((item) => item.id === 'catalog-owned')?.source).toBe('curated')
     expect(privateMediaMocks.signedOwnedPrivatePreviewUrl).not.toHaveBeenCalled()
   })
 })
@@ -342,8 +346,9 @@ describe('searchPieces', () => {
 // ---------------------------------------------------------------------------
 
 describe('saveWardrobeSelection', () => {
-  it('upserts every selected item across all six wardrobe categories', async () => {
+  it('sends every selected item to the versioned pending selection RPC without a browser owner ID', async () => {
     mockAuthenticatedUser()
+    mockSupabase.rpc.mockResolvedValueOnce({ data: 4, error: null })
 
     const selectedIdsByCategory = {
       top: ['top-1', 'top-2'],
@@ -355,21 +360,60 @@ describe('saveWardrobeSelection', () => {
     }
     const selectedIds = Object.values(selectedIdsByCategory).flat()
 
-    const result = await saveWardrobeSelection(selectedIds)
-    expect(result).toEqual({ success: true })
+    const result = await saveWardrobeSelection(selectedIds, 3)
+    expect(result).toEqual({ version: 4 })
+    expect(mockSupabase.rpc).toHaveBeenCalledWith('set_onboarding_owned_selection', {
+      p_item_ids: selectedIds, p_expected_version: 3,
+    })
+    expect(upsertCalls.user_wardrobe_items).toBeUndefined()
+  })
 
-    const [payload] = upsertCalls['user_style_seed_items'] as Array<
-      Array<{ user_id: string; item_id: string }>
-    >
-    const mockedFetchRows = payload.map((row) => ({ item_id: row.item_id }))
+  it('restores pending selection after a refresh and allows an explicit empty choice', async () => {
+    mockAuthenticatedUser()
+    tableResponses.onboarding_owned_selections = { data: { item_ids: ['top-1'], version: 2, committed_at: null }, error: null }
+    tableResponses.wardrobe_items = { data: [
+      { id: 'top-1', category: 'top', subcategory: 'shirt', display_name: 'Catalog reference', image_url: '/shirt.png' },
+    ], error: null }
+    expect(await getPendingOwnedSelection()).toEqual({
+      exists: true,
+      itemIds: ['top-1'],
+      items: [{ id: 'top-1', category: 'top', display_name: 'Catalog reference', image_url: '/shirt.png' }],
+      version: 2,
+      committed: false,
+    })
+    mockSupabase.rpc.mockResolvedValueOnce({ data: 3, error: null })
+    expect(await saveWardrobeSelection([], 2)).toEqual({ version: 3 })
+  })
 
-    expect(payload).toHaveLength(selectedIds.length)
-    expect(payload.map((row) => row.user_id)).toEqual(
-      selectedIds.map(() => TEST_USER_ID),
-    )
-    expect(mockedFetchRows.map((row) => row.item_id).sort()).toEqual(
-      [...selectedIds].sort(),
-    )
+  it('persists deselection as the latest versioned pending selection', async () => {
+    mockAuthenticatedUser()
+    mockSupabase.rpc
+      .mockResolvedValueOnce({ data: 2, error: null })
+      .mockResolvedValueOnce({ data: 3, error: null })
+    expect(await saveWardrobeSelection(['top-1'], 1)).toEqual({ version: 2 })
+    expect(await saveWardrobeSelection([], 2)).toEqual({ version: 3 })
+    expect(mockSupabase.rpc).toHaveBeenNthCalledWith(1, 'set_onboarding_owned_selection', {
+      p_item_ids: ['top-1'], p_expected_version: 1,
+    })
+    expect(mockSupabase.rpc).toHaveBeenNthCalledWith(2, 'set_onboarding_owned_selection', {
+      p_item_ids: [], p_expected_version: 2,
+    })
+  })
+
+  it('finalizes through the authenticated RPC and refreshes wardrobe and outfits', async () => {
+    mockAuthenticatedUser()
+    mockSupabase.rpc.mockResolvedValueOnce({ data: [{ item_count: 2, completed: true, selection_version: 3 }], error: null })
+    expect(await finalizeOnboardingSelection(3)).toEqual({ itemCount: 2, completed: true })
+    expect(mockSupabase.rpc).toHaveBeenCalledWith('finalize_onboarding_owned_selection', { p_expected_version: 3 })
+    expect(cacheMocks.revalidatePath).toHaveBeenCalledWith('/wardrobe')
+    expect(cacheMocks.revalidatePath).toHaveBeenCalledWith('/outfits')
+  })
+
+  it('rejects a completion response for a different selection version', async () => {
+    mockAuthenticatedUser()
+    mockSupabase.rpc.mockResolvedValueOnce({ data: [{ item_count: 2, completed: true, selection_version: 4 }], error: null })
+    await expect(finalizeOnboardingSelection(3)).rejects.toThrow('Could not finish onboarding')
+    expect(cacheMocks.revalidatePath).not.toHaveBeenCalled()
   })
 })
 // ---------------------------------------------------------------------------

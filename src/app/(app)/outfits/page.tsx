@@ -26,7 +26,7 @@ export default async function OutfitsPage() {
           </p>
           <h1 className="mt-3 text-3xl font-semibold tracking-tight">Your closet is taking shape</h1>
           <p className="mt-3 text-sm leading-6 text-[#6d6257]">
-            We need a few more everyday pieces before we can build a full look from your wardrobe.
+            Add a few more pieces to create your first outfit.
           </p>
           <Link href="/wardrobe/add" className={buttonVariants({ className: 'mt-6 h-12 rounded-full' })}>
             Add more clothes

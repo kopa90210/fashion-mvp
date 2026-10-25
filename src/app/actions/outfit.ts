@@ -74,6 +74,7 @@ type UserWardrobeJoinRow = {
 
 type StoredDailyOutfitRow = {
   id: string
+  ai_job_id?: string | null
   item_ids: string[] | null
   reasoning: string[] | null
   outfit_items?: Array<{ wardrobe_item_id: string; position: number }> | null
@@ -135,20 +136,30 @@ async function getStoredDailyOutfit(
   items: WardrobeItem[],
   dna: StyleVector,
   scheduledFor: string,
+  refreshedAfter: string | null,
+  selectionVersion: number | null,
 ) {
-  const { data } = await supabase
+  let query = supabase
     .from('outfits')
-    .select('id, item_ids, reasoning, outfit_items(wardrobe_item_id, position)')
+    .select('id, ai_job_id, item_ids, reasoning, outfit_items(wardrobe_item_id, position)')
     .eq('user_id', userId)
     .in('source', ['daily_ai', 'daily_fallback'])
     .eq('scheduled_for', scheduledFor)
     .eq('status', 'generated')
     .order('created_at', { ascending: false })
     .limit(1)
-    .single()
+  if (refreshedAfter) query = query.gte('created_at', refreshedAfter)
+  const { data } = await query.single()
 
   if (!data) {
     return null
+  }
+
+  if (selectionVersion !== null) {
+    if (!data.ai_job_id) return null
+    const { data: job } = await supabase.from('ai_jobs')
+      .select('idempotency_key').eq('id', data.ai_job_id).single()
+    if (!job?.idempotency_key?.endsWith(`:onboarding:${selectionVersion}`)) return null
   }
 
   return resolveStoredDailyOutfit(data as StoredDailyOutfitRow, items, dna)
@@ -444,7 +455,7 @@ async function getUserDnaAndStyleSeedsInternal(
   supabase: SupabaseClient,
   userId: string,
 ) {
-  const [dnaResult, items] = await Promise.all([
+  const [dnaResult, initialItems] = await Promise.all([
     supabase
       .from('fashion_dna')
       .select('vector, quiz_signals')
@@ -458,11 +469,39 @@ async function getUserDnaAndStyleSeedsInternal(
     throw new Error('Fashion DNA not found')
   }
 
+  let items = initialItems
+  const dna = dnaResult.data.vector as StyleVector
+  const signals = readQuizSignals(dnaResult.data.quiz_signals)
+  if (recommendOutfits(items, dna, { topN: 1, signals }).length === 0) {
+    // Examples support the style check when owned examples are sparse. They
+    // are never copied to onboarding_owned_selections or ownership.
+    const roles = ['base_layer', 'bottom', 'one_piece', 'footwear']
+    const results = await Promise.all(roles.map((role) => supabase.from('wardrobe_items')
+      .select('id').eq('source', 'curated').eq('status', 'confirmed')
+      .eq('layer_role', role).limit(3)))
+    if (results.some((result) => result.error)) {
+      throw new Error('Could not load calibration examples')
+    }
+    const present = new Set(items.map((item) => item.id))
+    const supplementalIds = results.flatMap((result) => result.data ?? [])
+      .map((row) => row.id).filter((id) => !present.has(id))
+    if (supplementalIds.length) {
+      const { error } = await supabase.from('user_style_seed_items').upsert(
+        supplementalIds.map((itemId) => ({
+          user_id: userId, item_id: itemId, retired_at: null, calibration_only: true,
+        })),
+        { onConflict: 'user_id,item_id' },
+      )
+      if (error) throw new Error('Could not prepare calibration examples')
+      items = await fetchStyleSeedItems(supabase, userId)
+    }
+  }
+
   return {
     supabase,
     userId,
-    dna: dnaResult.data.vector as StyleVector,
-    signals: readQuizSignals(dnaResult.data.quiz_signals),
+    dna,
+    signals,
     items,
   }
 }
@@ -492,12 +531,9 @@ export async function shouldShowOutfitCalibration(): Promise<boolean> {
   }
 
   const answeredCount = await getCalibrationAnsweredCount(supabase, userId)
-  if (answeredCount >= CALIBRATION_TARGET) {
-    return false
-  }
+  if (answeredCount >= CALIBRATION_TARGET) return true
 
-  const { dna, items, signals } = await getUserDnaAndStyleSeedsInternal(supabase, userId)
-  return recommendOutfits(items, dna, { topN: 3, signals }).length >= 1
+  return true
 }
 
 export async function getCalibrationState(): Promise<CalibrationState> {
@@ -514,7 +550,7 @@ export async function getCalibrationState(): Promise<CalibrationState> {
   }
 
   const answeredCount = await getCalibrationAnsweredCount(supabase, userId)
-  const completed = Boolean(userRow?.has_completed_calibration) || answeredCount >= CALIBRATION_TARGET
+  const completed = Boolean(userRow?.has_completed_calibration)
 
   if (completed) {
     return {
@@ -523,6 +559,10 @@ export async function getCalibrationState(): Promise<CalibrationState> {
       target: CALIBRATION_TARGET,
       completed: true,
     }
+  }
+
+  if (answeredCount >= CALIBRATION_TARGET) {
+    return { outfit: null, answeredCount, target: CALIBRATION_TARGET, completed: false }
   }
 
   const { dna, items, signals } = await getUserDnaAndStyleSeedsInternal(supabase, userId)
@@ -562,7 +602,13 @@ export async function getDailyOutfit(): Promise<DailyOutfit | null> {
   const scheduledFor = localCalendarDate(timezone)
 
   if (process.env.ENABLE_AI_DAILY_OUTFITS === 'true') {
-    const storedOutfit = await getStoredDailyOutfit(supabase, userId, items, dna, scheduledFor)
+    const { data: selection } = await supabase.from('onboarding_owned_selections')
+      .select('committed_at, version').eq('user_id', userId).maybeSingle()
+    const storedOutfit = await getStoredDailyOutfit(
+      supabase, userId, items, dna, scheduledFor,
+      selection?.committed_at ?? null,
+      selection?.committed_at ? selection.version : null,
+    )
     if (storedOutfit) {
       if (process.env.NODE_ENV !== 'production' || process.env.DEBUG_PERF === 'true') {
         console.log(`[outfit] total=${Math.round(performance.now() - t0)}ms data=${Math.round(tData)}ms hit=stored_daily`)
@@ -700,17 +746,8 @@ export async function submitCalibrationFeedback(
 }
 
 export async function skipOutfitCalibration(): Promise<{ success: boolean }> {
-  const { supabase, userId } = await getAuthedUserId()
-
-  const { error } = await supabase
-    .from('users')
-    .update({ has_completed_calibration: true })
-    .eq('id', userId)
-
-  if (error) {
-    throw new Error(`Failed to skip calibration: ${error.message}`)
-  }
-
+  await getAuthedUserId()
+  // Exiting leaves ownership pending and calibration incomplete.
   return { success: true }
 }
 

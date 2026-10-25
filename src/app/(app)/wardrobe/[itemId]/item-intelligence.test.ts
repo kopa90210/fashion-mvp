@@ -19,7 +19,7 @@ import { getItemIntelligence } from './item-intelligence'
 import WardrobeItemScreen from './WardrobeItemScreen'
 
 function piece(id: string, category: string): UserWardrobeItem {
-  return { id, category, subcategory: 'linen', display_name: id, brand: null, image_url: '/private-preview.png', color: { primary: 'Ivory' }, style_tags: { minimal: 0.8, formal: 0.2, asset_id: 1 }, layer_role: null, fit: {}, status: 'confirmed', quantity: 1, added_at: '2026-10-05' }
+  return { id, source: null, category, subcategory: 'linen', display_name: id, brand: null, image_url: '/private-preview.png', color: { primary: 'Ivory' }, style_tags: { minimal: 0.8, formal: 0.2, asset_id: 1 }, layer_role: null, fit: {}, status: 'confirmed', quantity: 1, added_at: '2026-10-05' }
 }
 const wardrobe = [piece('shirt', 'top'), piece('trousers', 'bottom'), piece('shoes', 'footwear'), piece('coat', 'outerwear'), piece('bag', 'accessory')]
 beforeEach(() => {

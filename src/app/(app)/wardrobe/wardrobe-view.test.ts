@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { UserWardrobeItem } from '@/src/app/actions/wardrobe'
 import { WARDROBE_CATEGORIES } from '@/src/lib/wardrobe/normalize'
-import { filterOptions, filterWardrobe, knownBrand, primaryColor, styleTags, type WardrobeFilters } from './wardrobe-view'
+import { filterOptions, filterWardrobe, itemDescriptor, itemName, knownBrand, primaryColor, styleTags, type WardrobeFilters } from './wardrobe-view'
 
 const mocks = vi.hoisted(() => ({ getUserWardrobeItems: vi.fn(), getItemIntelligence: vi.fn(), notFound: vi.fn(() => { throw new Error('NOT_FOUND') }) }))
 vi.mock('./[itemId]/item-intelligence', () => ({ getItemIntelligence: mocks.getItemIntelligence }))
@@ -21,7 +21,7 @@ import WardrobeItemScreen from './[itemId]/WardrobeItemScreen'
 
 const defaults: WardrobeFilters = { search: '', category: 'all', subcategory: '', color: '', style: '', sort: 'newest' }
 function item(id: string, overrides: Partial<UserWardrobeItem> = {}): UserWardrobeItem {
-  return { id, category: 'top', subcategory: 'linen shirt', brand: 'Arket', display_name: 'Linen shirt', image_url: '/shirt.png', color: { primary: 'Ivory' }, style_tags: { minimal: 0.8 }, fit: {}, layer_role: 'base_layer', quantity: 1, added_at: '2026-10-01', status: 'confirmed', ...overrides }
+  return { id, source: null, category: 'top', subcategory: 'linen shirt', brand: 'Arket', display_name: 'Linen shirt', image_url: '/shirt.png', color: { primary: 'Ivory' }, style_tags: { minimal: 0.8 }, fit: {}, layer_role: 'base_layer', quantity: 1, added_at: '2026-10-01', status: 'confirmed', ...overrides }
 }
 const items = [item('shirt'), item('jeans', { category: 'bottom', subcategory: 'straight jeans', display_name: 'Blue jeans', brand: null, color: { primary: 'Blue' }, style_tags: { casual: 1 }, added_at: '2026-10-02' })]
 const render = (pieces = items, photos: Array<{ id: string; status: string; createdAt: string }> = [], drafts: UserWardrobeItem[] = []) => renderToStaticMarkup(React.createElement(WardrobeScreen, { items: pieces, outfitPhotos: photos, drafts, wishlistItems: [], categories: WARDROBE_CATEGORIES }))
@@ -55,6 +55,24 @@ describe('wardrobe browsing', () => {
     expect(html).toContain('href="/wardrobe/confirmed-upload"')
     expect(html).toContain('https://signed.test/selected-garment.webp')
     expect(html).toContain('1 piece')
+  })
+  it('labels curated ownership references without showing catalog facts as the user garment', () => {
+    const reference = item('reference', {
+      source: 'curated',
+      subcategory: 'shirt',
+      brand: 'Catalog Brand',
+      display_name: 'Catalog Brand Linen Slim-Fit Shirt',
+      material: 'linen',
+      fit: { primary: 'slim' },
+    })
+    const html = render([reference])
+    expect(html).toContain('Similar to yours')
+    expect(html).toContain('Reference image similar to your shirt')
+    expect(html).toContain('>shirt<')
+    expect(html).not.toContain('Catalog Brand')
+    expect(html).not.toContain('Linen Slim-Fit')
+    expect(itemName(reference)).toBe('shirt')
+    expect(itemDescriptor(reference)).toBe('shirt')
   })
   it('derives real filter values, handles malformed attributes and ignores nonpositive style weights', () => {
     expect(filterOptions([item('one', { subcategory: 'oversized button-up', color: { primary: 'IVORY' }, style_tags: { minimal: 1, ignored: 0, negative: -1, invalid: NaN } }), item('two', { color: { primary: 'ivory' } })], 'top')).toEqual({ subcategories: ['linen shirt', 'oversized button-up'], colors: ['ivory'], styles: ['minimal'] })
@@ -116,5 +134,25 @@ describe('owned wardrobe detail navigation', () => {
   it('shows honest add affordances for missing supported metadata', () => {
     const html = renderToStaticMarkup(React.createElement(WardrobeItemScreen, { item: item(id, { brand: null, color: {}, fit: {}, material: null, season_weights: {}, style_tags: {}, subcategory: null }), looks: [], matches: [], descriptors: [] }))
     for (const label of ['Add brand', 'Add color', 'Add fit', 'Add material', 'Add seasons', 'Add style tags']) expect(html).toContain(label)
+  })
+  it('labels a curated reference and hides unverified details and editing controls', () => {
+    const html = renderToStaticMarkup(React.createElement(WardrobeItemScreen, { item: item(id, {
+      source: 'curated',
+      subcategory: 'shirt',
+      brand: 'Catalog Brand',
+      display_name: 'Catalog Brand Linen Slim-Fit Shirt',
+      material: 'linen',
+      fit: { primary: 'slim' },
+    }), looks: [], matches: [], descriptors: [] }))
+    expect(html).toContain('Similar to yours')
+    expect(html).toContain('This is a reference image, not a photo of your garment.')
+    expect(html).toContain('Reference image similar to your shirt')
+    expect(html).toContain('Brand, color, material, fit, and other details may differ.')
+    expect(html).not.toContain('Catalog Brand')
+    expect(html).not.toContain('Linen Slim-Fit')
+    expect(html).not.toContain('Edit details')
+    expect(html).not.toContain('Replace photo')
+    expect(html).not.toContain('Material')
+    expect(html).not.toContain('Fit')
   })
 })

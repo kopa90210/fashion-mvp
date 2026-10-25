@@ -22,6 +22,7 @@ function PieceImage({ piece }: { piece: LookPiece }) {
 }
 
 export default function WardrobeItemScreen({ item, looks = [], matches = [], descriptors = [] }: Pick<ItemIntelligence, 'item'> & Partial<Omit<ItemIntelligence, 'item'>>) {
+  const isReference = item.source === 'curated'
   const router = useRouter()
   const dialog = useRef<HTMLDialogElement>(null)
   const [editing, setEditing] = useState(false)
@@ -66,36 +67,38 @@ export default function WardrobeItemScreen({ item, looks = [], matches = [], des
   return <main className="min-h-dvh bg-[#F7F4EF] px-5 py-7 text-[#1D1B18]"><div className="mx-auto max-w-5xl">
     <Link href="/wardrobe" aria-label="Back to wardrobe" className="mb-7 inline-flex size-11 items-center justify-center rounded-full border border-[#D8CEC2]"><ArrowLeft className="size-5" /></Link>
     <div className="grid gap-8 md:grid-cols-2 md:gap-12">
-      <div className="relative aspect-[4/5] overflow-hidden rounded-3xl bg-[#EBE3D8]"><GarmentImage src={item.image_url} alt={itemName(item)} label={itemName(item)} role={item.layer_role} sizes="(min-width: 768px) 440px, 100vw" className="object-contain p-5 sm:p-8" /></div>
-      <section className="md:py-8"><p className="text-xs uppercase tracking-[0.2em] text-[#6D6257]">Your wardrobe</p><h1 className="mt-3 text-3xl font-medium">{itemName(item)}</h1><p className="mt-3 text-[#6D6257]">{itemDescriptor(item)}</p>{knownBrand(item.brand) && <p className="mt-2 text-sm text-[#6D6257]">{knownBrand(item.brand)}</p>}
+      <div className="relative aspect-[4/5] overflow-hidden rounded-3xl bg-[#EBE3D8]"><GarmentImage src={item.image_url} alt={isReference ? `Reference image similar to your ${itemName(item)}` : itemName(item)} label={itemName(item)} role={item.layer_role} sizes="(min-width: 768px) 440px, 100vw" className="object-contain p-5 sm:p-8" /></div>
+      <section className="md:py-8"><p className="text-xs uppercase tracking-[0.2em] text-[#6D6257]">Your wardrobe</p>{isReference && <span className="mt-3 inline-flex rounded-full bg-[#EBE3D8] px-3 py-1.5 text-xs font-medium">Similar to yours</span>}<h1 className="mt-3 text-3xl font-medium">{itemName(item)}</h1><p className="mt-3 text-[#6D6257]">{itemDescriptor(item)}</p>{isReference ? <p className="mt-3 text-sm leading-6 text-[#6D6257]">This is a reference image, not a photo of your garment. Brand, color, material, fit, and other details may differ.</p> : knownBrand(item.brand) && <p className="mt-2 text-sm text-[#6D6257]">{knownBrand(item.brand)}</p>}
         {descriptors.length > 0 && <p className="mt-5 text-sm text-[#6D6257]">{descriptors.join(' · ')}</p>}
-        <div className="mt-8 flex flex-col items-start gap-3">{looks.length > 0 ? <a href="#looks-with-piece" className="inline-flex min-h-12 items-center rounded-full bg-[#1D1B18] px-7 text-sm text-[#FFFDFA]">Style this piece</a> : <Button disabled aria-describedby="outfit-empty" className="h-12 rounded-full px-7">Style this piece</Button>}<button type="button" disabled={pending} onClick={() => setStructuredEditing(true)} className="min-h-11 text-sm underline underline-offset-4">Edit details</button></div>
-        <dialog ref={dialog} onCancel={(event) => { if (pending) event.preventDefault(); else setEditing(false) }} onClose={() => setEditing(false)} aria-labelledby="edit-piece-title" className="fixed inset-x-0 bottom-0 top-auto m-0 max-h-[90dvh] w-full max-w-none overflow-y-auto rounded-t-3xl bg-[#FFFDFA] p-6 text-[#1D1B18] backdrop:bg-black/35 sm:inset-0 sm:m-auto sm:max-w-lg sm:rounded-3xl"><div className="flex items-center justify-between"><h2 id="edit-piece-title" className="text-2xl font-medium">Edit details</h2><button type="button" disabled={pending} onClick={() => setEditing(false)} aria-label="Close details" className="flex size-11 items-center justify-center rounded-full"><X className="size-5" /></button></div><form onSubmit={(event) => { event.preventDefault(); save() }} className="mt-7 space-y-4">
+        <div className="mt-8 flex flex-col items-start gap-3">{looks.length > 0 ? <a href="#looks-with-piece" className="inline-flex min-h-12 items-center rounded-full bg-[#1D1B18] px-7 text-sm text-[#FFFDFA]">Style this piece</a> : <Button disabled aria-describedby="outfit-empty" className="h-12 rounded-full px-7">Style this piece</Button>}{!isReference && <button type="button" disabled={pending} onClick={() => setStructuredEditing(true)} className="min-h-11 text-sm underline underline-offset-4">Edit details</button>}</div>
+        {!isReference && <dialog ref={dialog} onCancel={(event) => { if (pending) event.preventDefault(); else setEditing(false) }} onClose={() => setEditing(false)} aria-labelledby="edit-piece-title" className="fixed inset-x-0 bottom-0 top-auto m-0 max-h-[90dvh] w-full max-w-none overflow-y-auto rounded-t-3xl bg-[#FFFDFA] p-6 text-[#1D1B18] backdrop:bg-black/35 sm:inset-0 sm:m-auto sm:max-w-lg sm:rounded-3xl"><div className="flex items-center justify-between"><h2 id="edit-piece-title" className="text-2xl font-medium">Edit details</h2><button type="button" disabled={pending} onClick={() => setEditing(false)} aria-label="Close details" className="flex size-11 items-center justify-center rounded-full"><X className="size-5" /></button></div><form onSubmit={(event) => { event.preventDefault(); save() }} className="mt-7 space-y-4">
           <label className="block text-sm">Name<input autoFocus required maxLength={120} value={name} onChange={(event) => setName(event.target.value)} disabled={pending} className={field} /></label>
           <label className="block text-sm">Category<select required value={category} onChange={(event) => setCategory(event.target.value)} disabled={pending} className={field}><option value="">Choose category</option>{WARDROBE_CATEGORIES.map((value) => <option key={value} value={value}>{categoryLabels[value]}</option>)}</select></label>
           <label className="block text-sm">Subcategory<input maxLength={120} value={subcategory} onChange={(event) => setSubcategory(event.target.value)} disabled={pending} className={field} /></label>
           <label className="block text-sm">Color<input maxLength={80} value={color} onChange={(event) => setColor(event.target.value)} disabled={pending} className={field} /></label>
           <label className="block text-sm">Brand (optional)<input maxLength={80} value={brand} onChange={(event) => setBrand(event.target.value)} disabled={pending} className={field} /></label>
           <div className="flex gap-3"><Button type="button" variant="outline" disabled={pending} onClick={() => { setEditing(false); setError(null) }} className="h-12 rounded-full">Cancel</Button><Button type="submit" disabled={pending} className="h-12 rounded-full">{pending ? 'Saving…' : 'Save details'}</Button></div>
-        </form>{error && <p role="alert" className="mt-4 text-sm text-red-700">{error}</p>}</dialog>
-        <div className="mt-7 flex flex-wrap gap-6"><button type="button" disabled={pending} aria-expanded={replacing} onClick={() => setReplacing(!replacing)} className="min-h-11 text-sm text-[#6D6257] underline underline-offset-4">Replace photo</button><button type="button" disabled={pending} onClick={remove} className="min-h-11 text-sm text-[#6D6257] underline underline-offset-4">Remove piece</button></div>
+        </form>{error && <p role="alert" className="mt-4 text-sm text-red-700">{error}</p>}</dialog>}
+        <div className="mt-7 flex flex-wrap gap-6">{!isReference && <button type="button" disabled={pending} aria-expanded={replacing} onClick={() => setReplacing(!replacing)} className="min-h-11 text-sm text-[#6D6257] underline underline-offset-4">Replace photo</button>}<button type="button" disabled={pending} onClick={remove} className="min-h-11 text-sm text-[#6D6257] underline underline-offset-4">Remove piece</button></div>
         {replacing && <PhotoUploadForm submitLabel="Replace photo" onUpload={async (file) => { try { await replaceWardrobeItemPhoto(item.id, file); setReplacing(false); router.refresh() } catch { throw new Error('Could not replace this photo. Please try again.') } }} />}
         {error && !editing && <p role="alert" className="mt-4 text-sm text-red-700">{error}</p>}
       </section>
     </div>
-    {structuredEditing && <StructuredItemEditor item={item} onClose={() => setStructuredEditing(false)} onSave={async (updates) => { await updateWardrobeItemAttributes(item.id, updates); router.refresh() }} onRemove={async () => { await removeWardrobeItem(item.id); router.push('/wardrobe'); router.refresh() }} onReplacePhoto={async (file) => { await replaceWardrobeItemPhoto(item.id, file); router.refresh() }} />}
+    {structuredEditing && !isReference && <StructuredItemEditor item={item} onClose={() => setStructuredEditing(false)} onSave={async (updates) => { await updateWardrobeItemAttributes(item.id, updates); router.refresh() }} onRemove={async () => { await removeWardrobeItem(item.id); router.push('/wardrobe'); router.refresh() }} onReplacePhoto={async (file) => { await replaceWardrobeItemPhoto(item.id, file); router.refresh() }} />}
     <section aria-labelledby="details-heading" className="mt-14 border-t border-[#D8CEC2] pt-8">
       <h2 id="details-heading" className="text-2xl font-medium">Details</h2>
       <ItemMetadataDisplay rows={[
         { label: 'Name', value: itemName(item) },
         { label: 'Category', value: item.category ? categoryLabels[item.category] ?? item.category : '' },
         { label: 'Subcategory', value: item.subcategory },
-        { label: 'Brand', value: knownBrand(item.brand) },
-        { label: 'Color', value: primaryColor(item) },
-        { label: 'Fit', value: fitValue },
-        { label: 'Material', value: item.material },
-        { label: 'Seasons', values: seasonValues },
-        { label: 'Style tags', values: styleValues },
+        ...(!isReference ? [
+          { label: 'Brand', value: knownBrand(item.brand) },
+          { label: 'Color', value: primaryColor(item) },
+          { label: 'Fit', value: fitValue },
+          { label: 'Material', value: item.material },
+          { label: 'Seasons', values: seasonValues },
+          { label: 'Style tags', values: styleValues },
+        ] : []),
       ]} />
     </section>
     <section className="mt-14 border-t border-[#D8CEC2] pt-8" aria-labelledby="activity-heading">
