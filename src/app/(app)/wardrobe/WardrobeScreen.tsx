@@ -19,7 +19,8 @@ const emptyFilters: WardrobeFilters = { search: '', category: 'all', subcategory
 function ItemCard({ item, selected, selecting, onToggle, onDraftEdit }: {
   item: UserWardrobeItem; selected: boolean; selecting: boolean; onToggle: () => void; onDraftEdit?: () => void
 }) {
-  const content = <GarmentCard image={item.image_url} name={itemName(item)} category={item.category} role={item.layer_role} brand={knownBrand(item.brand)} metadata={itemDescriptor(item)} variant="wardrobe" selected={selected} selectionMode={selecting} quantity={item.quantity} />
+  const isReference = item.source === 'curated'
+  const content = <GarmentCard image={item.image_url} imageAlt={isReference ? `Reference image similar to your ${itemName(item)}` : itemName(item)} name={itemName(item)} category={item.category} role={item.layer_role} brand={isReference ? null : knownBrand(item.brand)} metadata={isReference ? null : itemDescriptor(item)} badge={isReference ? 'Similar to yours' : undefined} variant="wardrobe" selected={selected} selectionMode={selecting} quantity={item.quantity} />
   const className = 'group block min-w-0 rounded-2xl text-left focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#6D6257]'
   if (selecting || onDraftEdit) return <button type="button" aria-pressed={selecting ? selected : undefined} aria-label={selecting ? `Select ${itemName(item)}` : `Review ${itemName(item)}`} onClick={selecting ? onToggle : onDraftEdit} className={className}>{content}</button>
   return <Link href={`/wardrobe/${item.id}`} className={className}>{content}</Link>

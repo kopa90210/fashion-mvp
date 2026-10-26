@@ -1,11 +1,9 @@
 'use client'
 
-import { useState, useCallback, useTransition, useMemo } from 'react'
+import { useState, useCallback, useTransition } from 'react'
 import { motion, AnimatePresence, Variants } from 'framer-motion'
-import { QUIZ_QUESTIONS, QUIZ_QUESTIONS_FOR_SCORING } from '@/src/lib/quiz/questions'
-import { computeStyleVector } from '@/src/lib/quiz/scoring'
+import { QUIZ_QUESTIONS } from '@/src/lib/quiz/questions'
 import type { QuizAnswer } from '@/src/lib/quiz/scoring'
-import { buildForcedPairQuestion } from '@/src/lib/quiz/buildForcedPair'
 import { getOptionImage } from '@/src/lib/quiz/imageSet'
 import type { ImageSet } from '@/src/lib/quiz/imageSet'
 import ImageSetIntroScreen from './ImageSetIntroScreen'
@@ -13,10 +11,10 @@ import { submitStyleQuiz } from './actions'
 
 // ---------------------------------------------------------------------------
 // Constants
-// The 11 static questions + 1 dynamic forced-pair = 12 total.
+// Five answer screens. The display-preference intro is not an answer.
 // ---------------------------------------------------------------------------
 
-const TOTAL_QUESTIONS = QUIZ_QUESTIONS.length + 1 // 11 + 1 = 12
+const TOTAL_QUESTIONS = QUIZ_QUESTIONS.length
 
 // ---------------------------------------------------------------------------
 // Animation variants
@@ -69,10 +67,9 @@ export default function StyleQuiz() {
   const [isPending, startTransition] = useTransition()
   const [imgErrors, setImgErrors] = useState<Set<string>>(new Set())
 
-  // ── Display-only image-set preference ────────────────────────────────────
+  // Display-only image-set preference
   // Lives ONLY in component state for the quiz session duration.
-  // Never included in QuizAnswer[], never passed to computeStyleVector,
-  // submitStyleQuiz, or any server action. Never persisted to Supabase,
+  // Never included in QuizAnswer[] or submitStyleQuiz. Never persisted to Supabase,
   // localStorage, or any analytics call.
   const [imageSet, setImageSet] = useState<ImageSet>('neutral')
   const [showIntro, setShowIntro] = useState(true)
@@ -82,20 +79,7 @@ export default function StyleQuiz() {
     setShowIntro(false)
   }, [])
 
-  // Build the forced-pair question dynamically once all 11 static answers
-  // are in — this re-computes whenever `answers` changes, which is cheap.
-  const forcedPairQuestion = useMemo(
-    () => buildForcedPairQuestion(answers, QUIZ_QUESTIONS),
-    [answers],
-  )
-
-  // The full 12-question sequence: 11 static + 1 dynamic forced-pair.
-  const allQuestions = useMemo(
-    () => [...QUIZ_QUESTIONS, forcedPairQuestion],
-    [forcedPairQuestion],
-  )
-
-  const question = allQuestions[currentStep]
+  const question = QUIZ_QUESTIONS[currentStep]
   const progress = (currentStep / TOTAL_QUESTIONS) * 100
 
   const handleSelect = useCallback(
@@ -113,26 +97,22 @@ export default function StyleQuiz() {
         setDirection(1)
         setCurrentStep((s) => s + 1)
       } else {
-        // Last question — compute & submit
+        // Last question: submit answer IDs for server-side scoring.
         startTransition(async () => {
-          const vector = computeStyleVector(
-            newAnswers,
-            QUIZ_QUESTIONS_FOR_SCORING,
-          )
-          await submitStyleQuiz(vector, newAnswers)
+          await submitStyleQuiz(newAnswers)
         })
       }
     },
     [answers, currentStep, isPending, question.id],
   )
 
-  const handleImageError = useCallback((optionId: string) => {
-    setImgErrors((prev) => new Set(prev).add(optionId))
+  const handleImageError = useCallback((imageKey: string) => {
+    setImgErrors((prev) => new Set(prev).add(imageKey))
   }, [])
 
   return (
     <div className="stylegraph-quiz-surface relative flex w-full flex-col items-center text-white selection:bg-white/20">
-      {/* ── Progress bar — hidden during intro ───────────────────────────── */}
+      {/* Progress bar */}
       {!showIntro && (
         <div className="fixed top-0 left-0 z-50 h-1 w-full bg-white/5">
           <motion.div
@@ -144,7 +124,7 @@ export default function StyleQuiz() {
         </div>
       )}
 
-      {/* ── Step counter — hidden during intro ───────────────────────────── */}
+      {/* Step counter */}
       {!showIntro && (
         <div className="mt-14 mb-4 flex items-center gap-3">
           {Array.from({ length: TOTAL_QUESTIONS }).map((_, i) => (
@@ -162,7 +142,7 @@ export default function StyleQuiz() {
         </div>
       )}
 
-      {/* ── Intro screen (shown before Q1, not counted in progress) ──────── */}
+      {/* Intro screen */}
       {showIntro ? (
         <div className="flex w-full flex-1 flex-col items-center justify-center">
           {/* Brand wordmark while on intro */}
@@ -177,7 +157,7 @@ export default function StyleQuiz() {
           <ImageSetIntroScreen onSelect={handleIntroSelect} />
         </div>
       ) : (
-        /* ── Question area ───────────────────────────────────────────────── */
+        /* Question area */
         <div className="flex w-full max-w-lg flex-1 flex-col items-center px-5 pb-10">
           <AnimatePresence mode="wait" custom={direction}>
             <motion.div
@@ -195,13 +175,18 @@ export default function StyleQuiz() {
                 {question.prompt}
               </h2>
 
-              {/* Option grid — 2×2 for 4-option questions, 2×1 for forced-pair */}
+              {/* Four answer cards in a two-column grid. */}
               <div className="grid w-full grid-cols-2 gap-3 sm:gap-4">
                 {question.options.map((option, i) => {
-                  const hasError = imgErrors.has(option.id)
+                  const imageKey = `${question.id}:${option.id}`
+                  const hasError = imgErrors.has(imageKey)
                   // Resolve the image URL via the display-only imageSet preference.
                   // getOptionImage is a pure function — it never stores imageSet anywhere.
-                  const resolvedSrc = getOptionImage(option, imageSet, currentStep)
+                  const resolvedSrc = option.imageUrl
+                    ? getOptionImage({ imageUrl: option.imageUrl }, imageSet, currentStep)
+                    : option.images
+                      ? getOptionImage({ images: option.images }, imageSet, currentStep + i)
+                      : null
                   return (
                     <motion.button
                       key={option.id}
@@ -218,14 +203,14 @@ export default function StyleQuiz() {
                     >
                       {/* Image or gradient fallback */}
                       <div className="absolute inset-0">
-                        {!hasError ? (
+                        {resolvedSrc && !hasError ? (
                           // eslint-disable-next-line @next/next/no-img-element
                           <img
                             src={resolvedSrc}
                             alt={option.label}
                             className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
                             loading={i < 2 ? 'eager' : 'lazy'}
-                            onError={() => handleImageError(option.id)}
+                            onError={() => handleImageError(imageKey)}
                           />
                         ) : (
                           <div
@@ -252,6 +237,7 @@ export default function StyleQuiz() {
             </motion.div>
           </AnimatePresence>
 
+          <p className="mt-5 text-sm text-white/60" aria-live="polite">Question {currentStep + 1} of {TOTAL_QUESTIONS}</p>
           {/* Submitting state */}
           {isPending && (
             <motion.div

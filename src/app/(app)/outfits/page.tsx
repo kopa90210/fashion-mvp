@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
+import { createClient } from '@/src/lib/supabase/server'
 import { getDailyOutfit, shouldShowOutfitCalibration } from '@/src/app/actions/outfit'
 import { getFashionDnaSummary } from '@/src/app/actions/fashion-dna'
 import { getUserWardrobeItems } from '@/src/app/actions/wardrobe'
@@ -7,6 +8,10 @@ import DailyOutfitScreen from './DailyOutfitScreen'
 import { buttonVariants } from '@/components/ui/button'
 
 export default async function OutfitsPage() {
+  const supabase = await createClient()
+  const { data, error } = await supabase.auth.getUser()
+  if (error || !data?.user) redirect('/login')
+
   if (await shouldShowOutfitCalibration()) {
     redirect('/outfits/calibration')
   }
@@ -26,7 +31,7 @@ export default async function OutfitsPage() {
           </p>
           <h1 className="mt-3 text-3xl font-semibold tracking-tight">Your closet is taking shape</h1>
           <p className="mt-3 text-sm leading-6 text-[#6d6257]">
-            We need a few more everyday pieces before we can build a full look from your wardrobe.
+            Add a few more pieces to create your first outfit.
           </p>
           <Link href="/wardrobe/add" className={buttonVariants({ className: 'mt-6 h-12 rounded-full' })}>
             Add more clothes

@@ -215,6 +215,7 @@ select set_config(
   'c6400000-0000-0000-0000-000000000001',
   true
 );
+select public.set_onboarding_owned_selection('{}'::uuid[], 0);
 
 select set_config(
   'c64.baseline_version',
@@ -455,12 +456,15 @@ select pg_temp.assert_true(
 );
 
 select pg_temp.assert_true(
-  (
-    select has_completed_calibration
-    from public.users
-    where id = 'c6400000-0000-0000-0000-000000000001'
-  ),
-  'server marks initial calibration complete after three distinct answers'
+  (select not has_completed_calibration from public.users
+   where id = 'c6400000-0000-0000-0000-000000000001'),
+  'style feedback alone leaves ownership pending'
+);
+select public.finalize_onboarding_owned_selection(1);
+select pg_temp.assert_true(
+  (select has_completed_calibration from public.users
+   where id = 'c6400000-0000-0000-0000-000000000001'),
+  'explicit finalization completes onboarding'
 );
 
 select pg_temp.assert_true(

@@ -4,12 +4,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DailyOutfit } from '@/src/app/actions/outfit'
 
 const mocks = vi.hoisted(() => ({
+  getUser: vi.fn(),
   feedback: vi.fn(), daily: vi.fn(), calibration: vi.fn(), owned: vi.fn(), dna: vi.fn(),
   worn: vi.fn(), notToday: vi.fn(),
   swapCandidates: vi.fn(), createSwap: vi.fn(),
   clicks: new Map<string, () => void>(), tasks: [] as Promise<void>[],
   redirect: vi.fn((path: string) => { throw new Error('REDIRECT:' + path) }),
 }))
+vi.mock('@/src/lib/supabase/server', () => ({ createClient: async () => ({ auth: { getUser: mocks.getUser } }) }))
 vi.mock('react', async (importOriginal) => {
   const original = await importOriginal<typeof import('react')>()
   return { ...original, useTransition: () => [false, (callback: () => Promise<void>) => { mocks.tasks.push(callback()) }] }
@@ -53,6 +55,7 @@ const ownedIds = outfit.items.map((item) => item.id)
 const render = (ownedItemIds = ownedIds) => renderToStaticMarkup(React.createElement(DailyOutfitScreen, { outfit, initialSignals: [], feedbackCount: 0, ownedItemIds }))
 
 beforeEach(() => {
+  mocks.getUser.mockResolvedValue({ data: { user: { id: 'test-user' } }, error: null })
   vi.clearAllMocks(); mocks.clicks.clear(); mocks.tasks.length = 0
   mocks.calibration.mockResolvedValue(false)
   mocks.daily.mockResolvedValue(outfit)
@@ -213,6 +216,13 @@ describe('Today presentation', () => {
 })
 
 describe('Today server orchestration remains unchanged', () => {
+  it('redirects signed-out visitors before querying wardrobe or generating outfits', async () => {
+    mocks.getUser.mockResolvedValue({ data: { user: null }, error: null })
+    await expect(OutfitsPage()).rejects.toThrow('REDIRECT:/login')
+    expect(mocks.calibration).not.toHaveBeenCalled()
+    expect(mocks.daily).not.toHaveBeenCalled()
+    expect(mocks.owned).not.toHaveBeenCalled()
+  })
   it('preserves the calibration redirect before daily generation', async () => {
     mocks.calibration.mockResolvedValue(true)
     await expect(OutfitsPage()).rejects.toThrow('REDIRECT:/outfits/calibration')
@@ -230,7 +240,7 @@ describe('Today server orchestration remains unchanged', () => {
     mocks.owned.mockResolvedValue([])
     const html = renderToStaticMarkup(await OutfitsPage())
     expect(html).toContain('Your closet is taking shape')
-    expect(html).toContain('We need a few more everyday pieces before we can build a full look from your wardrobe.')
+    expect(html).toContain('Add a few more pieces to create your first outfit.')
     expect(html).toContain('href="/wardrobe/add"')
     expect(html).toContain('Add more clothes')
     expect(html).not.toContain('/quiz?done=true')
@@ -241,7 +251,7 @@ describe('Today server orchestration remains unchanged', () => {
     mocks.owned.mockResolvedValue([{ id: 'owned-dress' }])
     const html = renderToStaticMarkup(await OutfitsPage())
     expect(html).toContain('Your closet is taking shape')
-    expect(html).toContain('We need a few more everyday pieces before we can build a full look from your wardrobe.')
+    expect(html).toContain('Add a few more pieces to create your first outfit.')
     expect(html).toContain('Add more clothes')
     expect(html).not.toContain('No eligible wardrobe items')
     expect(html).not.toContain('Fashion DNA missing')

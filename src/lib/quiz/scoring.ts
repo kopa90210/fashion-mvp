@@ -22,7 +22,7 @@ export interface QuizAnswer {
 /** An individual option within a question. */
 export interface QuizOption {
   id: string;
-  imageUrl: string;
+  imageUrl?: string;
   label: string;
   /** Partial weight map — only dimensions this option contributes to. */
   weights: Partial<StyleVector>;
@@ -56,6 +56,54 @@ export const STYLE_DIMENSIONS = [
 
 export type StyleDimension = (typeof STYLE_DIMENSIONS)[number];
 
+export interface QuizSignals {
+  primaryOccasion: 'work-university' | 'everyday-errands' | 'going-out' | 'mixed';
+  style: 'minimal' | 'classic' | 'relaxed' | 'streetwear';
+  fit: 'slim' | 'regular' | 'relaxed' | 'oversized';
+  formality: 'casual' | 'put-together' | 'polished' | 'formal';
+  exploration: 'familiar' | 'small-twist' | 'mix-it-up' | 'bold';
+}
+
+const SIGNAL_QUESTIONS = {
+  'primary-occasion': 'primaryOccasion',
+  'personal-style': 'style',
+  'preferred-fit': 'fit',
+  'preferred-formality': 'formality',
+  'exploration-level': 'exploration',
+} as const;
+
+/** Reject duplicate, missing, and unknown answers before deriving saved state. */
+export function parseQuizSignals(answers: unknown, questions: QuizQuestion[]): QuizSignals {
+  if (!Array.isArray(answers) || answers.length !== 5 || questions.length !== 5) {
+    throw new Error('Answer all five questions');
+  }
+  const result: Record<string, string> = {};
+  for (const question of questions) {
+    if (!(question.id in SIGNAL_QUESTIONS) || question.options.length !== 4) throw new Error('Invalid quiz configuration');
+    const matches = answers.filter((answer) => answer?.questionId === question.id);
+    if (matches.length !== 1 || !question.options.some((option) => option.id === matches[0].optionId)) {
+      throw new Error('Invalid quiz answer');
+    }
+    result[SIGNAL_QUESTIONS[question.id as keyof typeof SIGNAL_QUESTIONS]] = matches[0].optionId;
+  }
+  return result as unknown as QuizSignals;
+}
+
+/** Legacy users have no quiz_signals; retain their existing vector ranking. */
+export function readQuizSignals(value: unknown): QuizSignals | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const valid: Record<keyof QuizSignals, string[]> = {
+    primaryOccasion: ['work-university', 'everyday-errands', 'going-out', 'mixed'],
+    style: ['minimal', 'classic', 'relaxed', 'streetwear'],
+    fit: ['slim', 'regular', 'relaxed', 'oversized'],
+    formality: ['casual', 'put-together', 'polished', 'formal'],
+    exploration: ['familiar', 'small-twist', 'mix-it-up', 'bold'],
+  };
+  if (Object.entries(valid).some(([key, options]) => !options.includes(record[key] as string))) return null;
+  return value as QuizSignals;
+}
+
 // ---------------------------------------------------------------------------
 // Scoring
 // ---------------------------------------------------------------------------
@@ -65,9 +113,8 @@ export type StyleDimension = (typeof STYLE_DIMENSIONS)[number];
  *
  * Algorithm:
  *   1. For each answered question find the selected option.
- *   2. Collect the option's weight map.
- *   3. For every style dimension, average the contributions across all
- *      answered questions (missing dimension in an option → 0 contribution).
+ *   2. Collect non-empty style weight maps.
+ *   3. Average each dimension over style-bearing answers, so other signals do not dilute style.
  *   4. Clamp to [0, 1], round to 2 dp.
  *
  * @returns A full StyleVector with every dimension present.
@@ -95,7 +142,7 @@ export function computeStyleVector(
     const option = question.options.find((o) => o.id === answer.optionId);
     if (!option) continue;
 
-    selectedWeights.push(option.weights);
+    if (Object.keys(option.weights).length > 0) selectedWeights.push(option.weights);
   }
 
   if (selectedWeights.length === 0) {

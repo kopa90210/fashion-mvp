@@ -20,7 +20,7 @@
 // Types
 // ---------------------------------------------------------------------------
 
-import type { StyleVector } from '@/src/lib/quiz/scoring';
+import type { QuizSignals, StyleVector } from '@/src/lib/quiz/scoring';
 
 /** The layer_role values stored on wardrobe_items. */
 export type LayerRole =
@@ -39,6 +39,8 @@ export interface WardrobeItem {
   layer_role: LayerRole;
   /** Partial style vector — only dimensions this item expresses. */
   style_tags: Partial<StyleVector>;
+  fit?: { weights?: Partial<Record<QuizSignals['fit'], number>> } | null;
+  formality_score?: number | null;
 }
 
 /** A valid outfit and its score. */
@@ -160,12 +162,38 @@ export function scoreItemCompiled(item: WardrobeItem, compiled: CompiledStyleVec
  * Score an outfit as the arithmetic mean of its constituent item scores.
  * Returns a value in [0, 1], rounded to 4 decimal places.
  */
-export function scoreOutfit(items: WardrobeItem[], dna: StyleVector): number {
+/** Missing item attributes get neutral weight; legacy users keep their old score. */
+export function scoreItemForSignals(item: WardrobeItem, compiled: CompiledStyleVector, signals: QuizSignals | null): number {
+  const base = scoreItemCompiled(item, compiled)
+  if (!signals) return base
+  const tags = item.style_tags ?? {}
+  const hasStyleTags = Object.values(tags).some((value) => typeof value === 'number' && Number.isFinite(value) && value > 0)
+  const style = hasStyleTags ? Math.max(0, Math.min(1, Number(tags[signals.style]) || 0)) : 0.5
+  const fitValue = item.fit?.weights?.[signals.fit]
+  const fit = typeof fitValue === 'number' && Number.isFinite(fitValue) && fitValue >= 0 && fitValue <= 1 ? fitValue : 0.5
+  const formalityTarget = { casual: 0.15, 'put-together': 0.4, polished: 0.65, formal: 0.9 }[signals.formality]
+  const formality = typeof item.formality_score === 'number' && Number.isFinite(item.formality_score)
+    && item.formality_score >= 0 && item.formality_score <= 1
+    ? 1 - Math.abs(item.formality_score - formalityTarget) : 0.5
+  // Formality is an occasion proxy until items have explicit occasion tags.
+  const occasionTarget = { 'work-university': 0.6, 'everyday-errands': 0.2, 'going-out': 0.8, mixed: null }[signals.primaryOccasion]
+  const occasion = occasionTarget === null || typeof item.formality_score !== 'number'
+    || !Number.isFinite(item.formality_score) || item.formality_score < 0 || item.formality_score > 1
+    ? 0.5 : 1 - Math.abs(item.formality_score - occasionTarget)
+  const otherStyle = hasStyleTags ? Math.max(0, ...Object.entries(tags)
+    .filter(([key]) => key !== signals.style)
+    .map(([, value]) => typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 0)) : 0.5
+  const explorationAmount = { familiar: 0, 'small-twist': 0.25, 'mix-it-up': 0.6, bold: 1 }[signals.exploration]
+  const exploration = (1 - explorationAmount) * style + explorationAmount * otherStyle
+  return 0.4 * base + 0.2 * style + 0.1 * fit + 0.1 * formality + 0.1 * occasion + 0.1 * exploration
+}
+
+export function scoreOutfit(items: WardrobeItem[], dna: StyleVector, signals: QuizSignals | null = null): number {
   if (items.length === 0) return 0;
   const compiled = compileStyleVector(dna);
   let sum = 0;
   for (let i = 0; i < items.length; i++) {
-    sum += scoreItemCompiled(items[i], compiled);
+    sum += signals ? scoreItemForSignals(items[i], compiled, signals) : scoreItemCompiled(items[i], compiled);
   }
   return Math.round((sum / items.length) * 10_000) / 10_000;
 }
@@ -210,6 +238,7 @@ export interface RecommendOutfitsOptions {
   topN?: number;
   /** Require this supplied wardrobe piece in every result. */
   anchorItemId?: string;
+  signals?: QuizSignals | null;
 }
 
 interface ScoredWardrobeItem {
@@ -258,7 +287,7 @@ export function recommendOutfits(
     const item = items[i];
     const role = item.layer_role as LayerRole;
     if (role in byRole) {
-      const score = scoreItemCompiled(item, compiledDna);
+      const score = opts.signals ? scoreItemForSignals(item, compiledDna, opts.signals) : scoreItemCompiled(item, compiledDna);
       byRole[role].push({ item, score });
     }
   }
@@ -347,4 +376,3 @@ export function recommendOutfits(
     .sort((a, b) => b.score - a.score || a.key.localeCompare(b.key))
     .map(({ items: candidateItems, score }) => ({ items: candidateItems, score }))
 }
-

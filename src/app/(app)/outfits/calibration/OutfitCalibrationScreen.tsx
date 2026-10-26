@@ -50,7 +50,7 @@ export default function OutfitCalibrationScreen({
     startTransition(async () => {
       try {
         await skipOutfitCalibration()
-        router.replace('/outfits')
+        router.replace('/quiz?done=true')
         router.refresh()
       } catch {
         setIsSkipping(false)
@@ -88,7 +88,7 @@ export default function OutfitCalibrationScreen({
         if (result.completed) {
           setIsFinishing(true)
           setVisible(false)
-          router.replace('/outfits')
+          router.replace('/outfits/calibration')
           router.refresh()
           return
         }
@@ -147,7 +147,7 @@ export default function OutfitCalibrationScreen({
                 disabled={isSkipping || isSubmitting || isFinishing}
                 className="rounded-sm text-xs text-[#7a6f62] underline-offset-4 transition-colors hover:text-[#1d1b18] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1d1b18] focus-visible:ring-offset-4 disabled:opacity-50"
               >
-                Skip for now
+                Back to pieces
               </button>
               <span
                 role="progressbar"
@@ -233,7 +233,7 @@ export default function OutfitCalibrationScreen({
                     Your taste profile is ready.
                   </h2>
                   <p className="mt-3 text-sm leading-6 text-[#6d6257]">
-                    Your reactions are saved. Preparing Today from what StyleGraph has learned.
+                    Your reactions are saved. Review your selected pieces to finish.
                   </p>
                 </div>
               </motion.div>

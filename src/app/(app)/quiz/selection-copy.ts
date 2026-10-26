@@ -1,14 +1,10 @@
 export const STYLE_SELECTION_COPY = {
-  referenceNote:
-    "Pick pieces you'd genuinely wear. These are style references — they won't be added to your wardrobe.",
-  optionalHint:
-    "Optional — choose anything you'd actually wear, or skip.",
-  finalEligibilityHint:
-    'Choose either tops + bottoms, or at least 2 dresses/one-piece looks, plus footwear.',
-  eligibilityError:
-    'Choose either 2 tops + 2 bottoms, or at least 2 dresses/one-piece looks, plus 2 footwear options.',
-  submitTitle: 'Learning your style...',
-  submitBody:
-    'Turning your picks into three quick looks so we can learn what feels like you.',
-  finalCta: 'Start style check',
+  title: 'What’s already in your wardrobe?',
+  description: 'Choose pieces similar to clothes you own. They don’t need to match exactly.',
+  selectedCardLabel: 'I own something similar',
+  continueWithCount: (count: number) => `Continue with ${count} pieces`,
+  emptySelection: 'None of these',
+  eligibilityError: 'Please try saving your selection again.',
+  submitTitle: 'Preparing your style check...',
+  submitBody: 'Your selected pieces will be added to your wardrobe after calibration.',
 } as const

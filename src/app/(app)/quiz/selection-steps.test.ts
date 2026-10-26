@@ -10,8 +10,8 @@ describe('calibration selection eligibility', () => {
     expect(isCalibrationSelectionEligible({ top: 2, bottom: 2, footwear: 2 })).toBe(true)
   })
 
-  it('rejects tops and footwear without bottoms or one-pieces', () => {
-    expect(isCalibrationSelectionEligible({ top: 2, footwear: 2 })).toBe(false)
+  it('does not force ownership to satisfy calibration composition', () => {
+    expect(SELECTION_STEPS.every((step) => !step.required)).toBe(true)
   })
 
   it('includes a dedicated one-piece selection step', () => {

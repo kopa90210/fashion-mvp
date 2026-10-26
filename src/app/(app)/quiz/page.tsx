@@ -2,6 +2,7 @@ import { createClient } from '@/src/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import StyleQuiz from './StyleQuiz'
 import PieceSelectionScreen from './PieceSelectionScreen'
+import { getPendingOwnedSelection } from '@/src/app/actions/wardrobe'
 
 export const metadata = {
   title: 'Style Quiz — AutoFashion',
@@ -24,7 +25,9 @@ export default async function QuizPage({
   const isDone = params?.done === 'true'
 
   if (isDone) {
-    return <PieceSelectionScreen />
+    const pending = await getPendingOwnedSelection()
+    if (pending.committed) redirect('/outfits')
+    return <PieceSelectionScreen pending={pending} />
   }
 
   return <StyleQuiz />
