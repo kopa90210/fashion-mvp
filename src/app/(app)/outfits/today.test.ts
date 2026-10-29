@@ -21,6 +21,7 @@ vi.mock('@/src/app/actions/outfit-interactions', () => ({ recordOutfitWorn: mock
 vi.mock('@/src/app/actions/outfit-swaps', () => ({ getSwapCandidates: mocks.swapCandidates, createSwappedOutfit: mocks.createSwap }))
 vi.mock('@/src/app/actions/wardrobe', () => ({ getUserWardrobeItems: mocks.owned }))
 vi.mock('@/src/app/actions/fashion-dna', () => ({ getFashionDnaSummary: mocks.dna }))
+vi.mock('@/src/app/actions/profile', () => ({ isOutfitSaved: vi.fn(), saveOutfitLook: vi.fn(), unsaveOutfitLook: vi.fn() }))
 vi.mock('next/navigation', () => ({ redirect: mocks.redirect, usePathname: () => '/outfits' }))
 vi.mock('next/link', () => ({ default: ({ children, ...props }: React.ComponentProps<'a'>) => React.createElement('a', props, children) }))
 vi.mock('next/image', () => ({ default: ({ src, alt, className, unoptimized }: React.ComponentProps<'img'> & { unoptimized?: boolean }) => React.createElement('img', { src, alt, className, 'data-private-preview': unoptimized }) }))

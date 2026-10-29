@@ -167,4 +167,61 @@ describe('OutfitCanvas', () => {
       expect(html).toContain('data-density="full"')
     }
   })
+
+  it('renders a compact thumbnail variant without identity text or why-this explainer', () => {
+    const html = renderToStaticMarkup(
+      React.createElement(OutfitCanvas, {
+        items,
+        identity: 'Thumbnail look',
+        description: 'Should not appear in thumbnail',
+        reasons: ['Reason should not show'],
+        variant: 'thumbnail',
+      }),
+    )
+
+    expect(html).toContain('data-variant="thumbnail"')
+    expect(html).toContain('aspect-4/5')
+    expect(html).toContain('size-full')
+    expect(html).not.toContain('sm:aspect-video')
+    expect(html).not.toContain('Thumbnail look')
+    expect(html).not.toContain('Should not appear in thumbnail')
+    expect(html).not.toContain('Reason should not show')
+  })
+
+  it('produces nonzero dimension boxes and garment nodes for jumpsuit + footwear thumbnail', () => {
+    const jumpsuitLook: WardrobeItem[] = [
+      { id: 'jumpsuit', display_name: 'Black Jumpsuit', image_url: '/jumpsuit.png', layer_role: 'one_piece', style_tags: {} },
+      { id: 'pumps', display_name: 'Black Pumps', image_url: '/pumps.png', layer_role: 'footwear', style_tags: {} },
+    ]
+
+    const html = renderToStaticMarkup(
+      React.createElement(OutfitCanvas, {
+        items: jumpsuitLook,
+        variant: 'thumbnail',
+      }),
+    )
+
+    expect(html).toContain('data-slot="one_piece"')
+    expect(html).toContain('data-slot="footwear"')
+    expect(html).toContain('alt="Black Jumpsuit"')
+    expect(html).toContain('alt="Black Pumps"')
+    // Nonzero coordinate styles
+    expect(html).toContain('--flatlay-width')
+    expect(html).toContain('--flatlay-height')
+    expect(html).not.toContain('--flatlay-width:0%')
+    expect(html).not.toContain('--flatlay-height:0%')
+    expect(html).not.toContain('NaN')
+  })
+
+  it('renders an accessible empty placeholder when outfit has no items', () => {
+    const html = renderToStaticMarkup(
+      React.createElement(OutfitCanvas, {
+        items: [],
+        variant: 'thumbnail',
+      }),
+    )
+
+    expect(html).toContain('data-image-state="empty"')
+    expect(html).toContain('aria-label="No garments in outfit"')
+  })
 })

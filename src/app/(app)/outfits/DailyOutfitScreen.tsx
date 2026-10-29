@@ -2,11 +2,12 @@
 
 import { useMemo, useRef, useState, useTransition } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Check, Heart, ThumbsDown } from 'lucide-react'
+import { Bookmark, Check, Heart, ThumbsDown } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import type { DailyOutfit } from '@/src/app/actions/outfit'
 import { submitOutfitFeedback, getDailyOutfit } from '@/src/app/actions/outfit'
 import { recordOutfitNotToday, recordOutfitWorn } from '@/src/app/actions/outfit-interactions'
+import { saveOutfitLook, unsaveOutfitLook } from '@/src/app/actions/profile'
 import { getChangedTags, getOptimisticVector } from '@/src/lib/outfit/feedback-helpers'
 import { vectorToSignals } from '@/src/lib/fashion-dna/labels'
 import type { DnaSignal } from '@/src/lib/fashion-dna/types'
@@ -35,6 +36,8 @@ export default function DailyOutfitScreen({
   const [pendingInteraction, setPendingInteraction] = useState<{ outfitId: string; event: 'worn' | 'not_today' } | null>(null)
   const [completedInteraction, setCompletedInteraction] = useState<{ outfitId: string; event: 'worn' | 'not_today' } | null>(null)
   const [interactionError, setInteractionError] = useState<{ outfitId: string; message: string } | null>(null)
+  const [isSaved, setIsSaved] = useState(false)
+  const [isSavePending, setIsSavePending] = useState(false)
   const interactionLock = useRef(false)
   const [, startTransition] = useTransition()
 
@@ -67,6 +70,24 @@ export default function DailyOutfitScreen({
       } finally {
         interactionLock.current = false
         setPendingInteraction((current) => current?.outfitId === outfitId ? null : current)
+      }
+    })
+  }
+
+  function handleToggleSave() {
+    if (isSavePending) return
+    setIsSavePending(true)
+    const nextSaved = !isSaved
+    setIsSaved(nextSaved)
+
+    startTransition(async () => {
+      try {
+        if (nextSaved) await saveOutfitLook(currentOutfit.id)
+        else await unsaveOutfitLook(currentOutfit.id)
+      } catch {
+        setIsSaved(!nextSaved)
+      } finally {
+        setIsSavePending(false)
       }
     })
   }
@@ -147,6 +168,19 @@ export default function DailyOutfitScreen({
                       setCurrentOutfit(derivedOutfit)
                       setSwapOwnedIds((ids) => [...new Set([...ids, ...derivedOutfit.items.map((item) => item.id)])])
                     }} />
+                    <div className="mt-3 flex justify-center">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={handleToggleSave}
+                        disabled={isSavePending}
+                        className="h-9 gap-1.5 rounded-full text-xs text-[#6d6257] hover:text-[#1d1b18]"
+                      >
+                        <Bookmark className={`size-3.5 ${isSaved ? 'fill-[#596c5e] text-[#596c5e]' : ''}`} />
+                        {isSaved ? 'Saved to Lookbook' : 'Save this look'}
+                      </Button>
+                    </div>
                     {currentInteraction === 'not_today' && <p role="status" className="mt-3 text-center text-sm leading-6 text-[#6d6257]">Got it — we&apos;ll treat this as a today decision, not a style dislike.</p>}
                     {interactionError?.outfitId === currentOutfit.id && <p role="alert" className="mt-3 text-center text-sm text-red-700">{interactionError.message}</p>}
                   </section>

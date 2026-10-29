@@ -16,6 +16,14 @@ export const TAG_LABELS: Record<string, string> = {
   bohemian: 'Bohemian',
   edgy: 'Edgy',
   earth_tones: 'Earth tones',
+  casual: 'Casual',
+  smart_casual: 'Smart casual',
+  classic: 'Classic',
+  old_money: 'Old money',
+  sporty: 'Sporty',
+  relaxed: 'Relaxed',
+  vintage: 'Vintage',
+  trend_forward: 'Trend forward',
 }
 
 /**
