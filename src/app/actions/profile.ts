@@ -258,7 +258,9 @@ export async function isOutfitSaved(outfitId: string): Promise<boolean> {
     .eq('outfit_id', outfitId)
     .maybeSingle()
 
-  if (error) return false
+  if (error) {
+    throw new Error(error.message || 'Could not check saved status')
+  }
   return Boolean(data)
 }
 

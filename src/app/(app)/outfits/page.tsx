@@ -4,6 +4,7 @@ import { createClient } from '@/src/lib/supabase/server'
 import { getDailyOutfit, shouldShowOutfitCalibration } from '@/src/app/actions/outfit'
 import { getFashionDnaSummary } from '@/src/app/actions/fashion-dna'
 import { getUserWardrobeItems } from '@/src/app/actions/wardrobe'
+import { isOutfitSaved } from '@/src/app/actions/profile'
 import DailyOutfitScreen from './DailyOutfitScreen'
 import { buttonVariants } from '@/components/ui/button'
 
@@ -41,12 +42,20 @@ export default async function OutfitsPage() {
     )
   }
 
+  let initialSaved: boolean | null = null
+  try {
+    initialSaved = await isOutfitSaved(outfit.id)
+  } catch {
+    initialSaved = null
+  }
+
   return (
     <DailyOutfitScreen
       outfit={outfit}
       initialSignals={dnaSummary.signals}
       feedbackCount={dnaSummary.feedbackCount}
       ownedItemIds={ownedItems.map((item) => item.id)}
+      initialSaved={initialSaved}
     />
   )
 }

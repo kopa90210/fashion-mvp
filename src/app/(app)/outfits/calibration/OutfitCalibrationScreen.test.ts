@@ -37,18 +37,16 @@ vi.mock('@/src/app/actions/outfit', () => ({
   skipOutfitCalibration: vi.fn(),
 }))
 
-vi.mock('@/src/components/fashion-dna/FashionDnaPanel', () => ({
-  default: () => React.createElement('aside', null, 'Fashion DNA'),
-}))
-
 vi.mock('@/src/components/outfit/OutfitCanvas', () => ({
   default: ({
     identity,
     description,
+    reasons,
     children,
   }: {
     identity?: string
     description?: string
+    reasons?: string[]
     children?: React.ReactNode
   }) =>
     React.createElement(
@@ -56,6 +54,7 @@ vi.mock('@/src/components/outfit/OutfitCanvas', () => ({
       { 'aria-label': 'Outfit canvas' },
       identity ? React.createElement('h2', null, identity) : null,
       description ? React.createElement('p', null, description) : null,
+      reasons?.map((reason, i) => React.createElement('p', { key: i }, reason)),
       children,
     ),
 }))
@@ -88,21 +87,27 @@ const outfit = {
 }
 
 describe('calibration UX semantics', () => {
-  it('shows a three-look style check with explicit preference choices', () => {
+  it('shows refined copy hierarchy with explicit feedback choices and warm presentation', () => {
     const html = renderToStaticMarkup(
       React.createElement(OutfitCalibrationScreen, {
         outfit,
         answeredCount: 0,
+        target: 3,
         feedbackCount: 0,
       }),
     )
 
-    expect(html).toContain('Style check')
-    expect(html).toContain('What feels like you?')
+    // Heading and prompt hierarchy
+    expect(html).toContain('Let’s tune your style.')
+    expect(html).toContain('Would you wear this?')
+    expect(html).toContain('This helps us learn your taste.')
+
+    // Progress badge
     expect(html).toContain('Look 1 of 3')
-    expect(html).toContain('Not my style')
-    expect(html).toContain('Love this')
-    expect(html).toContain('Three quick looks help us understand your taste.')
+
+    // Refined feedback actions
+    expect(html).toContain('Not for me')
+    expect(html).toContain('I’d wear this')
   })
 
   it('does not expose wear/not-today behavior inside calibration', () => {
@@ -110,6 +115,7 @@ describe('calibration UX semantics', () => {
       React.createElement(OutfitCalibrationScreen, {
         outfit,
         answeredCount: 1,
+        target: 3,
         feedbackCount: 3,
       }),
     )
@@ -121,35 +127,62 @@ describe('calibration UX semantics', () => {
   })
 
   it.each([
-    [0, 'Look 1 of 3'],
-    [1, 'Look 2 of 3'],
-    [2, 'Look 3 of 3'],
-  ])('announces progress for answered count %i', (answeredCount, label) => {
+    [0, 3, 'Look 1 of 3', 1],
+    [1, 3, 'Look 2 of 3', 2],
+    [2, 3, 'Look 3 of 3', 3],
+    [3, 3, 'Look 3 of 3', 3], // Clamped upon completion, never Look 4 of 3
+  ])('announces real progress for answered count %i with target %i as %s', (answeredCount, target, label, expectedNow) => {
     const html = renderToStaticMarkup(
       React.createElement(OutfitCalibrationScreen, {
         outfit,
         answeredCount,
+        target,
         feedbackCount: answeredCount,
       }),
     )
 
     expect(html).toContain(label)
-    expect(html).toContain(`aria-valuenow="${answeredCount + 1}"`)
+    expect(html).toContain(`aria-valuenow="${expectedNow}"`)
+    expect(html).toContain(`aria-valuemax="${target}"`)
+    expect(html).not.toContain(`Look ${target + 1} of ${target}`)
   })
 
-  it('keeps feedback primary, DNA secondary, and reserves a safe mobile action zone', () => {
+  it('derives progress dynamically when given a non-default target', () => {
+    const html = renderToStaticMarkup(
+      React.createElement(OutfitCalibrationScreen, {
+        outfit,
+        answeredCount: 1,
+        target: 5,
+        feedbackCount: 1,
+      }),
+    )
+
+    expect(html).toContain('Look 2 of 5')
+    expect(html).toContain('aria-valuemax="5"')
+    expect(html).toContain('aria-valuenow="2"')
+  })
+
+  it('hides distractions like Fashion DNA and Why this works, focusing on outfit and feedback', () => {
     const html = renderToStaticMarkup(
       React.createElement(OutfitCalibrationScreen, {
         outfit,
         answeredCount: 0,
+        target: 3,
         feedbackCount: 0,
       }),
     )
 
-    expect(html.indexOf('Love this')).toBeLessThan(html.indexOf('Fashion DNA'))
-    expect(html).toContain('bottom-[calc(5.75rem+env(safe-area-inset-bottom))]')
-    expect(html).toContain('max-w-5xl')
-    expect(html).toContain('lg:grid-cols-[minmax(0,7fr)_minmax(17rem,3fr)]')
+    // Distractions removed
+    expect(html).not.toContain('Fashion DNA')
+    expect(html).not.toContain('because you liked clean pieces')
+    expect(html).not.toContain('Why this works')
+
+    // Clean single-column layout without 2-column grid or bottom-nav spacer gap
+    expect(html).not.toContain('lg:grid-cols-[minmax(0,7fr)_minmax(17rem,3fr)]')
+    expect(html).not.toContain('5.75rem')
+    expect(html).toContain('max-w-lg')
+    expect(html).toContain('I’d wear this')
+    expect(html).toContain('Not for me')
   })
 })
 

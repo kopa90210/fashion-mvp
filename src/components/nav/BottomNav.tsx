@@ -13,7 +13,7 @@ const links = [
 
 export default function BottomNav() {
   const pathname = usePathname()
-  if (pathname.startsWith('/quiz')) return null
+  if (pathname.startsWith('/quiz') || pathname.startsWith('/outfits/calibration')) return null
 
   return (
     <nav aria-label="Primary navigation" className="stylegraph-bottom-nav pointer-events-none fixed inset-x-0 z-[100] flex items-center justify-center gap-2 px-3 lg:static lg:mt-6 lg:pb-8">

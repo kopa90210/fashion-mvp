@@ -1,11 +1,13 @@
 'use client'
 
 import { useState, useCallback, useTransition } from 'react'
-import { motion, AnimatePresence, Variants } from 'framer-motion'
+import { motion, AnimatePresence, useReducedMotion } from 'framer-motion'
+import type { Variants } from 'framer-motion'
+import { Sparkles } from 'lucide-react'
 import { QUIZ_QUESTIONS } from '@/src/lib/quiz/questions'
 import type { QuizAnswer } from '@/src/lib/quiz/scoring'
 import { getOptionImage } from '@/src/lib/quiz/imageSet'
-import type { ImageSet } from '@/src/lib/quiz/imageSet'
+import type { QuizImagePreference } from '@/src/lib/quiz/imageSet'
 import ImageSetIntroScreen from './ImageSetIntroScreen'
 import { submitStyleQuiz } from './actions'
 
@@ -22,9 +24,9 @@ const TOTAL_QUESTIONS = QUIZ_QUESTIONS.length
 
 const questionVariants: Variants = {
   enter: (direction: number) => ({
-    x: direction > 0 ? 300 : -300,
+    x: direction > 0 ? 240 : -240,
     opacity: 0,
-    scale: 0.95,
+    scale: 0.98,
   }),
   center: {
     x: 0,
@@ -32,26 +34,31 @@ const questionVariants: Variants = {
     scale: 1,
   },
   exit: (direction: number) => ({
-    x: direction > 0 ? -300 : 300,
+    x: direction > 0 ? -240 : 240,
     opacity: 0,
-    scale: 0.95,
+    scale: 0.98,
   }),
 }
 
+const reducedQuestionVariants: Variants = {
+  enter: { opacity: 0 },
+  center: { opacity: 1 },
+  exit: { opacity: 0 },
+}
+
 const cardVariants: Variants = {
-  hidden: { opacity: 0, y: 24, scale: 0.92 },
+  hidden: { opacity: 0, y: 16 },
   visible: (i: number) => ({
     opacity: 1,
     y: 0,
-    scale: 1,
     transition: {
-      delay: i * 0.08,
-      duration: 0.4,
+      delay: i * 0.05,
+      duration: 0.35,
       ease: [0.25, 0.46, 0.45, 0.94],
     },
   }),
   tap: {
-    scale: 0.96,
+    scale: 0.98,
     transition: { duration: 0.1 },
   },
 }
@@ -66,21 +73,22 @@ export default function StyleQuiz() {
   const [direction, setDirection] = useState(1) // 1 = forward, -1 = back
   const [isPending, startTransition] = useTransition()
   const [imgErrors, setImgErrors] = useState<Set<string>>(new Set())
+  const shouldReduceMotion = useReducedMotion()
 
-  // Display-only image-set preference
+  // Display-only image preference
   // Lives ONLY in component state for the quiz session duration.
   // Never included in QuizAnswer[] or submitStyleQuiz. Never persisted to Supabase,
-  // localStorage, or any analytics call.
-  const [imageSet, setImageSet] = useState<ImageSet>('neutral')
+  // localStorage, or any analytics call. Never infers user gender.
+  const [imageSet, setImageSet] = useState<QuizImagePreference>('feminine')
   const [showIntro, setShowIntro] = useState(true)
 
-  const handleIntroSelect = useCallback((selected: ImageSet) => {
+  const handleIntroSelect = useCallback((selected: QuizImagePreference) => {
     setImageSet(selected)
     setShowIntro(false)
   }, [])
 
   const question = QUIZ_QUESTIONS[currentStep]
-  const progress = (currentStep / TOTAL_QUESTIONS) * 100
+  const progress = ((currentStep + 1) / TOTAL_QUESTIONS) * 100
 
   const handleSelect = useCallback(
     (optionId: string) => {
@@ -111,31 +119,38 @@ export default function StyleQuiz() {
   }, [])
 
   return (
-    <div className="stylegraph-quiz-surface relative flex w-full flex-col items-center text-white selection:bg-white/20">
+    <div className="stylegraph-quiz-surface relative flex min-h-[100dvh] w-full flex-col items-center bg-[#141416] text-[#F5F1E9] selection:bg-[#E8C568]/20">
       {/* Progress bar */}
       {!showIntro && (
-        <div className="fixed top-0 left-0 z-50 h-1 w-full bg-white/5">
+        <div
+          className="fixed top-0 left-0 z-50 h-1 w-full bg-[#38383D]"
+          role="progressbar"
+          aria-valuenow={currentStep + 1}
+          aria-valuemin={1}
+          aria-valuemax={TOTAL_QUESTIONS}
+          aria-label={`Question ${currentStep + 1} of ${TOTAL_QUESTIONS}`}
+        >
           <motion.div
-            className="h-full bg-gradient-to-r from-white/60 to-white/90"
+            className="h-full bg-[#E8C568]"
             initial={{ width: 0 }}
             animate={{ width: `${progress}%` }}
-            transition={{ duration: 0.5, ease: 'easeInOut' }}
+            transition={{ duration: 0.35, ease: 'easeInOut' }}
           />
         </div>
       )}
 
       {/* Step counter */}
       {!showIntro && (
-        <div className="mt-14 mb-4 flex items-center gap-3">
+        <div className="mt-8 mb-3 flex items-center gap-2 sm:mt-10" aria-hidden="true">
           {Array.from({ length: TOTAL_QUESTIONS }).map((_, i) => (
             <div
               key={i}
-              className={`h-1.5 rounded-full transition-all duration-500 ${
-                i < currentStep
-                  ? 'w-8 bg-white/70'
-                  : i === currentStep
-                    ? 'w-8 bg-white'
-                    : 'w-4 bg-white/15'
+              className={`h-1.5 rounded-full transition-all duration-300 ${
+                i === currentStep
+                  ? 'w-7 bg-[#E8C568]'
+                  : i < currentStep
+                    ? 'w-5 bg-[#E8C568]/60'
+                    : 'w-3.5 bg-[#38383D]'
               }`}
             />
           ))}
@@ -147,10 +162,10 @@ export default function StyleQuiz() {
         <div className="flex w-full flex-1 flex-col items-center justify-center">
           {/* Brand wordmark while on intro */}
           <motion.p
-            initial={{ opacity: 0, y: -8 }}
+            initial={{ opacity: 0, y: -6 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5 }}
-            className="mt-14 mb-0 text-xs font-semibold tracking-[0.2em] uppercase text-white/30"
+            transition={{ duration: 0.4 }}
+            className="mt-8 mb-2 text-xs font-medium tracking-[0.16em] uppercase text-[#B5B0A8]/80"
           >
             StyleGraph Quiz
           </motion.p>
@@ -158,22 +173,22 @@ export default function StyleQuiz() {
         </div>
       ) : (
         /* Question area */
-        <div className="flex w-full max-w-lg flex-1 flex-col items-center px-5 pb-10">
+        <div className="flex w-full max-w-lg flex-1 flex-col items-center px-4 sm:px-6 pb-12">
           <AnimatePresence mode="wait" custom={direction}>
             <motion.div
               key={question.id}
               custom={direction}
-              variants={questionVariants}
+              variants={shouldReduceMotion ? reducedQuestionVariants : questionVariants}
               initial="enter"
               animate="center"
               exit="exit"
-              transition={{ duration: 0.4, ease: [0.25, 0.46, 0.45, 0.94] }}
+              transition={{ duration: 0.35, ease: [0.25, 0.46, 0.45, 0.94] }}
               className="flex w-full flex-col items-center"
             >
-              {/* Prompt */}
-              <h2 className="mt-4 mb-8 text-center text-2xl font-semibold tracking-tight sm:text-3xl">
+              {/* Prompt - Clear h1 with Wardrobe typography */}
+              <h1 className="mt-2 mb-6 text-center text-2xl font-medium tracking-tight text-[#F5F1E9] sm:text-3xl sm:mb-8">
                 {question.prompt}
-              </h2>
+              </h1>
 
               {/* Four answer cards in a two-column grid. */}
               <div className="grid w-full grid-cols-2 gap-3 sm:gap-4">
@@ -182,11 +197,7 @@ export default function StyleQuiz() {
                   const hasError = imgErrors.has(imageKey)
                   // Resolve the image URL via the display-only imageSet preference.
                   // getOptionImage is a pure function — it never stores imageSet anywhere.
-                  const resolvedSrc = option.imageUrl
-                    ? getOptionImage({ imageUrl: option.imageUrl }, imageSet, currentStep)
-                    : option.images
-                      ? getOptionImage({ images: option.images }, imageSet, currentStep + i)
-                      : null
+                  const resolvedSrc = getOptionImage(option, imageSet, currentStep)
                   return (
                     <motion.button
                       key={option.id}
@@ -197,39 +208,39 @@ export default function StyleQuiz() {
                       whileTap="tap"
                       onClick={() => handleSelect(option.id)}
                       disabled={isPending}
-                      className="group relative flex aspect-[4/5] cursor-pointer flex-col overflow-hidden rounded-2xl border border-white/[0.06] bg-white/[0.03] shadow-lg outline-none transition-all duration-300 hover:border-white/20 hover:shadow-white/5 focus-visible:ring-2 focus-visible:ring-white/40 disabled:pointer-events-none disabled:opacity-40"
+                      className="group relative flex w-full cursor-pointer flex-col overflow-hidden rounded-2xl border border-[#38383D] bg-[#1E1E21] p-2 text-left shadow-xs outline-none transition-all duration-200 hover:border-[#E8C568] hover:shadow-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#E8C568] disabled:pointer-events-none disabled:opacity-40 sm:p-2.5"
                       aria-label={option.label}
                       id={`quiz-option-${option.id}`}
                     >
-                      {/* Image or gradient fallback */}
-                      <div className="absolute inset-0">
+                      {/* Dedicated 4:5 image area */}
+                      <div className="relative aspect-[4/5] w-full overflow-hidden rounded-xl bg-[#141416]">
                         {resolvedSrc && !hasError ? (
                           // eslint-disable-next-line @next/next/no-img-element
                           <img
                             src={resolvedSrc}
                             alt={option.label}
-                            className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+                            className="h-full w-full object-contain p-1.5 transition-transform duration-300 motion-safe:group-hover:scale-[1.03] sm:p-2"
                             loading={i < 2 ? 'eager' : 'lazy'}
                             onError={() => handleImageError(imageKey)}
                           />
                         ) : (
                           <div
-                            className="h-full w-full transition-transform duration-500 group-hover:scale-105"
-                            style={{ background: option.gradient }}
-                          />
+                            className="flex h-full w-full flex-col items-center justify-center p-3 text-center"
+                            aria-hidden="true"
+                          >
+                            <div className="flex size-10 items-center justify-center rounded-full border border-[#38383D] bg-[#1E1E21] text-[#B5B0A8] shadow-2xs">
+                              <Sparkles className="size-5" strokeWidth={1.5} />
+                            </div>
+                          </div>
                         )}
                       </div>
 
-                      {/* Bottom gradient overlay for text */}
-                      <div className="absolute inset-x-0 bottom-0 h-1/3 bg-gradient-to-t from-black/80 via-black/40 to-transparent" />
-
-                      {/* Label */}
-                      <span className="relative z-10 mt-auto px-3 pb-3 text-left text-sm font-medium tracking-wide text-white drop-shadow-lg sm:text-base">
-                        {option.label}
-                      </span>
-
-                      {/* Hover ring */}
-                      <div className="pointer-events-none absolute inset-0 rounded-2xl ring-0 ring-white/0 transition-all duration-300 group-hover:ring-2 group-hover:ring-white/30" />
+                      {/* Separate label area below the image */}
+                      <div className="flex min-h-[2.5rem] w-full items-center px-1 pt-2 pb-0.5 sm:pt-2.5">
+                        <span className="line-clamp-2 text-xs font-medium leading-snug text-[#F5F1E9] sm:text-sm">
+                          {option.label}
+                        </span>
+                      </div>
                     </motion.button>
                   )
                 })}
@@ -237,16 +248,25 @@ export default function StyleQuiz() {
             </motion.div>
           </AnimatePresence>
 
-          <p className="mt-5 text-sm text-white/60" aria-live="polite">Question {currentStep + 1} of {TOTAL_QUESTIONS}</p>
+          {/* Question counter */}
+          <p
+            className="mt-6 text-xs font-medium tracking-wider uppercase text-[#B5B0A8] sm:text-sm"
+            aria-live="polite"
+          >
+            Question {currentStep + 1} of {TOTAL_QUESTIONS}
+          </p>
+
           {/* Submitting state */}
           {isPending && (
             <motion.div
-              initial={{ opacity: 0, y: 10 }}
+              initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
-              className="mt-8 flex items-center gap-3 text-sm text-white/60"
+              className="mt-6 flex items-center gap-2.5 rounded-full border border-[#38383D] bg-[#1E1E21] px-4 py-2 text-xs font-medium text-[#F5F1E9] shadow-xs sm:text-sm"
+              role="status"
+              aria-live="polite"
             >
-              <div className="h-4 w-4 animate-spin rounded-full border-2 border-white/20 border-t-white/70" />
-              Crafting your style DNA…
+              <div className="size-3.5 animate-spin rounded-full border-2 border-[#38383D] border-t-[#E8C568]" />
+              <span>Crafting your style DNA…</span>
             </motion.div>
           )}
         </div>

@@ -7,12 +7,23 @@ import type { WardrobeItem } from '@/src/lib/outfit/engine'
 import type { OutfitCanvasVariant } from '@/src/components/outfit/OutfitCanvas'
 import { shouldBypassWardrobeImageOptimization } from '@/src/lib/media/image-policy'
 import { composeOutfit } from '@/src/lib/outfit/composition'
+import { resolveCalibrationPilotImageUrl } from '@/src/lib/media/calibration-pilot'
 
-function FlatLayGarment({ item, isThumbnail }: { item: WardrobeItem; isThumbnail?: boolean }) {
+function FlatLayGarment({
+  item,
+  isThumbnail,
+  calibration,
+}: {
+  item: WardrobeItem
+  isThumbnail?: boolean
+  calibration?: boolean
+}) {
   const [failedUrl, setFailedUrl] = useState<string | null>(null)
-  const isFailed = Boolean(failedUrl && failedUrl === item.image_url)
+  const rawUrl = item.image_url
+  const imageUrl = calibration ? resolveCalibrationPilotImageUrl(rawUrl) : rawUrl
+  const isFailed = Boolean(failedUrl && (failedUrl === imageUrl || failedUrl === rawUrl))
 
-  if (isFailed || !item.image_url) {
+  if (isFailed || !imageUrl) {
     return (
       <div
         role="img"
@@ -24,8 +35,6 @@ function FlatLayGarment({ item, isThumbnail }: { item: WardrobeItem; isThumbnail
       </div>
     )
   }
-
-  const imageUrl = item.image_url
 
   return (
     <Image
@@ -43,33 +52,63 @@ function FlatLayGarment({ item, isThumbnail }: { item: WardrobeItem; isThumbnail
 export default function FlatLay({
   items,
   variant,
+  calibration = false,
 }: {
   items: WardrobeItem[]
   editorial?: boolean
   variant?: OutfitCanvasVariant
+  calibration?: boolean
 }) {
   const isThumbnail = variant === 'thumbnail'
+  const isOnePiece = items.some((item) => item.layer_role === 'one_piece')
+  const hasOuterwear = items.some((item) => item.layer_role === 'outerwear')
+  const hasAccessory = items.some((item) => item.layer_role === 'accessory')
+  const isMinimalOnePiece = isOnePiece && !hasOuterwear && !hasAccessory
   const itemCount = Math.min(5, Math.max(2, items.length))
   const thumbnailRatio = 4 / 5
+
   const mobileRatio = isThumbnail
     ? thumbnailRatio
-    : itemCount === 2
-      ? 1
-      : itemCount === 3
-        ? 6 / 5
-        : 4 / 3
-  const desktopRatio = itemCount <= 3 ? 16 / 9 : 5 / 3
-  const mobile = composeOutfit(items, mobileRatio)
-  const desktopById = isThumbnail
+    : calibration
+      ? isOnePiece
+        ? 4 / 5
+        : hasOuterwear
+          ? 4 / 5
+          : 1
+      : itemCount === 2
+        ? 1
+        : itemCount === 3
+          ? 6 / 5
+          : 4 / 3
+
+  const desktopRatio = isThumbnail
+    ? thumbnailRatio
+    : calibration
+      ? mobileRatio
+      : itemCount <= 3
+        ? 16 / 9
+        : 5 / 3
+
+  const mobile = composeOutfit(items, mobileRatio, { calibration })
+  const desktopById = isThumbnail || calibration
     ? new Map(mobile.boxes.map((box) => [box.itemId, box]))
     : new Map(composeOutfit(items, desktopRatio).boxes.map((box) => [box.itemId, box]))
+
   const stageClass = isThumbnail
     ? 'aspect-4/5 size-full max-h-full max-w-full rounded-2xl'
-    : itemCount === 2
-      ? 'max-w-[40rem] aspect-square sm:aspect-video rounded-[2rem]'
-      : itemCount === 3
-        ? 'max-w-[42rem] aspect-[6/5] sm:aspect-video rounded-[2rem]'
-        : 'max-w-[44rem] aspect-[4/3] sm:aspect-[5/3] rounded-[2rem]'
+    : calibration
+      ? isMinimalOnePiece
+        ? 'max-w-[21rem] sm:max-w-[23rem] aspect-[4/5] rounded-[2rem]'
+        : isOnePiece
+          ? 'max-w-[24rem] sm:max-w-[26rem] aspect-[4/5] rounded-[2rem]'
+          : hasOuterwear
+            ? 'max-w-[25rem] sm:max-w-[27rem] aspect-[4/5] rounded-[2rem]'
+            : 'max-w-[24rem] sm:max-w-[26rem] aspect-square rounded-[2rem]'
+      : itemCount === 2
+        ? 'max-w-[40rem] aspect-square sm:aspect-video rounded-[2rem]'
+        : itemCount === 3
+          ? 'max-w-[42rem] aspect-[6/5] sm:aspect-video rounded-[2rem]'
+          : 'max-w-[44rem] aspect-[4/3] sm:aspect-[5/3] rounded-[2rem]'
 
   if (items.length === 0) {
     return (
@@ -123,7 +162,7 @@ export default function FlatLay({
             }`}
             style={style}
           >
-            <FlatLayGarment item={item} isThumbnail={isThumbnail} />
+            <FlatLayGarment item={item} isThumbnail={isThumbnail} calibration={calibration} />
           </div>
         )
       })}

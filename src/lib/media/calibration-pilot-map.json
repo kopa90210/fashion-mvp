@@ -1,0 +1,200 @@
+{
+  "1791293834": {
+    "source_relative_path": "feminine/accessories/1791293834.png",
+    "source_sha256": "dae617b26e8d51690e75300cf982391c1a0cf3af4ee481cde44296eef9bd4ddc",
+    "normalized_url": "/pilot-normalized/feminine/accessories/1791293834.png",
+    "normalized_sha256": "6d56e95715efa86fd29a6eeead516f8fc1968a78a4398a9b779413a5b3665a22",
+    "status": "transparent_normalized",
+    "original_size": [
+      1664,
+      928
+    ],
+    "normalized_size": [
+      615,
+      776
+    ],
+    "crop_box": [
+      520,
+      79,
+      1135,
+      855
+    ],
+    "safety_margin_px": 8
+  },
+  "1791293912": {
+    "source_relative_path": "feminine/accessories/1791293912.png",
+    "source_sha256": "fcc9ff44240a5161b0a8edd8780a1c390165be6e787af0d13d61d17938476464",
+    "normalized_url": "/pilot-normalized/feminine/accessories/1791293912.png",
+    "normalized_sha256": "affda8926cf6154e905afca0ab0c086f87467b84ab9b2c930126ecd9ef6a9c3e",
+    "status": "transparent_normalized",
+    "original_size": [
+      1664,
+      928
+    ],
+    "normalized_size": [
+      760,
+      674
+    ],
+    "crop_box": [
+      441,
+      155,
+      1201,
+      829
+    ],
+    "safety_margin_px": 8
+  },
+  "1791293965": {
+    "source_relative_path": "feminine/accessories/1791293965.png",
+    "source_sha256": "6d36edd6c29814128c6b406c8c995a27702da0c10f337f655d222938bce0e4c6",
+    "normalized_url": "/pilot-normalized/feminine/accessories/1791293965.png",
+    "normalized_sha256": "913a1133ef4430867aaa5db646296373d29eb5441001d7ddcaca76cdc68f717f",
+    "status": "transparent_normalized",
+    "original_size": [
+      1664,
+      928
+    ],
+    "normalized_size": [
+      1335,
+      450
+    ],
+    "crop_box": [
+      164,
+      293,
+      1499,
+      743
+    ],
+    "safety_margin_px": 8
+  },
+  "1791293422": {
+    "source_relative_path": "feminine/bottoms/1791293422.png",
+    "source_sha256": "37c13b463fb63ca3811e1d17eb86a9eae1db503f7aaac981178df422bf23263d",
+    "normalized_url": "/pilot-normalized/feminine/bottoms/1791293422.png",
+    "normalized_sha256": "7506d43a121b5fe968a89498d95431dba27af4ae22df84a477f1f8257d234d9c",
+    "status": "transparent_normalized",
+    "original_size": [
+      1664,
+      928
+    ],
+    "normalized_size": [
+      559,
+      828
+    ],
+    "crop_box": [
+      554,
+      51,
+      1113,
+      879
+    ],
+    "safety_margin_px": 8
+  },
+  "1791293593": {
+    "source_relative_path": "feminine/footwear/1791293593.png",
+    "source_sha256": "773912c3e00df3b774bda94f612c023155d579d0b9f5a2b213f04e634120e4d0",
+    "normalized_url": "/pilot-normalized/feminine/footwear/1791293593.png",
+    "normalized_sha256": "597a8e1bd4c174ce662b7e553505a91f2788328973d98f12fe38c26cd4ad957a",
+    "status": "transparent_normalized",
+    "original_size": [
+      1664,
+      928
+    ],
+    "normalized_size": [
+      980,
+      725
+    ],
+    "crop_box": [
+      292,
+      102,
+      1272,
+      827
+    ],
+    "safety_margin_px": 8
+  },
+  "1791293642": {
+    "source_relative_path": "feminine/footwear/1791293642.png",
+    "source_sha256": "aa3152c29e9e235751d47147536b0129891a92034dab27e18f4423da26e2ee49",
+    "normalized_url": "/pilot-normalized/feminine/footwear/1791293642.png",
+    "normalized_sha256": "06dadec510ebe861086b6f3ac9600f6afb22b22dc8bf676aa35b4e3df8d67ee7",
+    "status": "transparent_normalized",
+    "original_size": [
+      1664,
+      928
+    ],
+    "normalized_size": [
+      1240,
+      623
+    ],
+    "crop_box": [
+      233,
+      191,
+      1473,
+      814
+    ],
+    "safety_margin_px": 8
+  },
+  "1791293301": {
+    "source_relative_path": "feminine/one_piece/1791293301.png",
+    "source_sha256": "87d744186404b25d130cec95f8c1b071dd2155c1374a4fa6b621aab977984ab7",
+    "normalized_url": "/pilot-normalized/feminine/one_piece/1791293301.png",
+    "normalized_sha256": "ffa0b2d9bedf180c30781ea8676ede3cb9f009cd147fa06c65ceb4638c450a12",
+    "status": "transparent_normalized",
+    "original_size": [
+      1664,
+      928
+    ],
+    "normalized_size": [
+      455,
+      844
+    ],
+    "crop_box": [
+      605,
+      47,
+      1060,
+      891
+    ],
+    "safety_margin_px": 8
+  },
+  "1791293379": {
+    "source_relative_path": "feminine/one_piece/1791293379.png",
+    "source_sha256": "db87433141c04b5bf6ecb3b3de7e79631c780320803ebd327b3febeee3a2e57b",
+    "normalized_url": "/pilot-normalized/feminine/one_piece/1791293379.png",
+    "normalized_sha256": "d6ca37eba132f34e11688c81ac4dc1e650331f16ca706ab22b29fa333be98e46",
+    "status": "transparent_normalized",
+    "original_size": [
+      1664,
+      928
+    ],
+    "normalized_size": [
+      350,
+      857
+    ],
+    "crop_box": [
+      657,
+      46,
+      1007,
+      903
+    ],
+    "safety_margin_px": 8
+  },
+  "1791293511": {
+    "source_relative_path": "feminine/tops/1791293511.png",
+    "source_sha256": "f2d2ad0a5cb3bc81451dcebb0256c41240393a9fd0884c808b35d288bedae498",
+    "normalized_url": "/pilot-normalized/feminine/tops/1791293511.png",
+    "normalized_sha256": "38b98acfb4309cf2b53527950e77b12e68e8ef654bc574f1e7fe68d63ad4b136",
+    "status": "transparent_normalized",
+    "original_size": [
+      1664,
+      928
+    ],
+    "normalized_size": [
+      893,
+      779
+    ],
+    "crop_box": [
+      379,
+      75,
+      1272,
+      854
+    ],
+    "safety_margin_px": 8
+  }
+}

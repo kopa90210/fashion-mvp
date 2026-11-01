@@ -5,30 +5,31 @@ import type { DailyOutfit } from '@/src/app/actions/outfit'
 
 const mocks = vi.hoisted(() => ({
   getUser: vi.fn(),
-  feedback: vi.fn(), daily: vi.fn(), calibration: vi.fn(), owned: vi.fn(), dna: vi.fn(),
+  feedback: vi.fn(), daily: vi.fn(), calibration: vi.fn(), owned: vi.fn(), dna: vi.fn(), save: vi.fn(), unsave: vi.fn(), isSaved: vi.fn(),
   worn: vi.fn(), notToday: vi.fn(),
   swapCandidates: vi.fn(), createSwap: vi.fn(),
-  clicks: new Map<string, () => void>(), tasks: [] as Promise<void>[],
+  clicks: new Map<string, () => void>(), tasks: [] as Promise<void>[], effects: [] as (() => void | (() => void))[],
   redirect: vi.fn((path: string) => { throw new Error('REDIRECT:' + path) }),
 }))
 vi.mock('@/src/lib/supabase/server', () => ({ createClient: async () => ({ auth: { getUser: mocks.getUser } }) }))
 vi.mock('react', async (importOriginal) => {
   const original = await importOriginal<typeof import('react')>()
-  return { ...original, useTransition: () => [false, (callback: () => Promise<void>) => { mocks.tasks.push(callback()) }] }
+  return { ...original, useTransition: () => [false, (callback: () => Promise<void>) => { mocks.tasks.push(callback()) }], useEffect: (fn: () => void | (() => void)) => { mocks.effects.push(fn) } }
 })
 vi.mock('@/src/app/actions/outfit', () => ({ getDailyOutfit: mocks.daily, submitOutfitFeedback: mocks.feedback, shouldShowOutfitCalibration: mocks.calibration }))
 vi.mock('@/src/app/actions/outfit-interactions', () => ({ recordOutfitWorn: mocks.worn, recordOutfitNotToday: mocks.notToday }))
 vi.mock('@/src/app/actions/outfit-swaps', () => ({ getSwapCandidates: mocks.swapCandidates, createSwappedOutfit: mocks.createSwap }))
 vi.mock('@/src/app/actions/wardrobe', () => ({ getUserWardrobeItems: mocks.owned }))
 vi.mock('@/src/app/actions/fashion-dna', () => ({ getFashionDnaSummary: mocks.dna }))
-vi.mock('@/src/app/actions/profile', () => ({ isOutfitSaved: vi.fn(), saveOutfitLook: vi.fn(), unsaveOutfitLook: vi.fn() }))
+vi.mock('@/src/app/actions/profile', () => ({ isOutfitSaved: mocks.isSaved, saveOutfitLook: mocks.save, unsaveOutfitLook: mocks.unsave }))
 vi.mock('next/navigation', () => ({ redirect: mocks.redirect, usePathname: () => '/outfits' }))
 vi.mock('next/link', () => ({ default: ({ children, ...props }: React.ComponentProps<'a'>) => React.createElement('a', props, children) }))
 vi.mock('next/image', () => ({ default: ({ src, alt, className, unoptimized }: React.ComponentProps<'img'> & { unoptimized?: boolean }) => React.createElement('img', { src, alt, className, 'data-private-preview': unoptimized }) }))
 vi.mock('@/components/ui/button', () => ({
   buttonVariants: () => 'button',
   Button: ({ children, onClick, variant, ...props }: React.ComponentProps<'button'> & { variant?: string }) => {
-    const label = React.Children.toArray(children).filter((child) => typeof child === 'string').join('')
+    const textLabel = React.Children.toArray(children).filter((child) => typeof child === 'string').join('')
+    const label = textLabel || (props['aria-label'] as string) || ''
     if (onClick) mocks.clicks.set(label, () => onClick({} as React.MouseEvent<HTMLButtonElement>))
     return React.createElement('button', { ...props, 'data-variant': variant }, children)
   },
@@ -57,7 +58,7 @@ const render = (ownedItemIds = ownedIds) => renderToStaticMarkup(React.createEle
 
 beforeEach(() => {
   mocks.getUser.mockResolvedValue({ data: { user: { id: 'test-user' } }, error: null })
-  vi.clearAllMocks(); mocks.clicks.clear(); mocks.tasks.length = 0
+  vi.clearAllMocks(); mocks.clicks.clear(); mocks.tasks.length = 0; mocks.effects.length = 0
   mocks.calibration.mockResolvedValue(false)
   mocks.daily.mockResolvedValue(outfit)
   mocks.owned.mockResolvedValue(ownedIds.map((id) => ({ id })))
@@ -67,23 +68,29 @@ beforeEach(() => {
   mocks.notToday.mockResolvedValue({ interactionId: 'not-today-interaction' })
   mocks.swapCandidates.mockResolvedValue([])
   mocks.createSwap.mockResolvedValue({ outfitId: 'swapped-outfit' })
+  mocks.save.mockResolvedValue({ success: true, savedAt: '2026-11-01' })
+  mocks.unsave.mockResolvedValue({ success: true })
+  mocks.isSaved.mockResolvedValue(false)
 })
 
 describe('Today presentation', () => {
-  it('puts the outfit, identity, reasons and feedback before secondary DNA', () => {
+  it('simplifies visual hierarchy with Wear this, Save, Swap, and collapsed recommendation feedback', () => {
     const html = render()
     expect(html).toContain('Today')
     expect(html).toContain('From your wardrobe')
     expect(html).toContain('Linen shirt · Straight trousers · Sneakers')
     expect(html.indexOf('Outfit pieces')).toBeLessThan(html.indexOf('<h2'))
-    expect(html.indexOf('<h2')).toBeLessThan(html.indexOf("I&#x27;m wearing this"))
-    expect(html.indexOf("I&#x27;m wearing this")).toBeLessThan(html.indexOf('Why this works'))
-    expect(html.indexOf('Why this works')).toBeLessThan(html.indexOf('Do you like this style?'))
-    expect(html.indexOf('Do you like this style?')).toBeLessThan(html.indexOf('Not my style'))
-    expect(html.indexOf('Love this')).toBeLessThan(html.indexOf('Your style preferences'))
-    expect(html).toMatch(/<details class="[^"]*">\s*<summary[^>]*>Your style preferences/)
-    expect(html).toContain('Not today')
-    expect(html).toContain('Swap something')
+    expect(html.indexOf('<h2')).toBeLessThan(html.indexOf('Wear this'))
+    expect(html.indexOf('Wear this')).toBeLessThan(html.indexOf('Swap a piece'))
+    expect(html.indexOf('Swap a piece')).toBeLessThan(html.indexOf('Not today'))
+    expect(html.indexOf('Not today')).toBeLessThan(html.indexOf('Why this works'))
+    expect(html.indexOf('Why this works')).toBeLessThan(html.indexOf('Help improve your recommendations'))
+    expect(html.indexOf('Help improve your recommendations')).toBeLessThan(html.indexOf('Not my style'))
+    expect(html.indexOf('Not my style')).toBeLessThan(html.indexOf('Love this'))
+    expect(html).toMatch(/<details class="[^"]*">\s*<summary[^>]*>Help improve your recommendations/)
+    expect(html).toContain('aria-label="Save this look (status unconfirmed)"')
+    expect(html).not.toContain('Your style preferences')
+    expect(html).not.toContain('Fashion DNA')
     for (const text of ['weather', 'calendar', '1 per day']) expect(html).not.toContain(text)
   })
   it('includes one-piece clothing in the human-facing outfit identity', () => {
@@ -128,11 +135,11 @@ describe('Today presentation', () => {
     expect(html).toContain('These pieces are not all part of your confirmed wardrobe.')
     expect(html).not.toContain('From your wardrobe')
     expect(html).not.toContain('Not today')
-    expect(html).not.toContain("I&#x27;m wearing this")
-    expect(html).not.toContain('Swap something')
+    expect(html).not.toContain('Wear this')
+    expect(html).not.toContain('Swap a piece')
   })
   it('records wearing through the behavioral action only with a deterministic key', async () => {
-    render(); mocks.clicks.get("I'm wearing this")!()
+    render(); mocks.clicks.get("Wear this")!()
     await Promise.all(mocks.tasks)
     expect(mocks.worn).toHaveBeenCalledExactlyOnceWith(outfit.id, 'today:worn:daily-outfit')
     expect(mocks.notToday).not.toHaveBeenCalled()
@@ -157,7 +164,7 @@ describe('Today presentation', () => {
     expect(mocks.notToday).not.toHaveBeenCalled()
   })
   it.each([
-    ["I'm wearing this", mocks.worn],
+    ["Wear this", mocks.worn],
     ['Not today', mocks.notToday],
   ] as const)('protects %s from rapid double clicks', async (label, action) => {
     render()
@@ -167,7 +174,7 @@ describe('Today presentation', () => {
     expect(action).toHaveBeenCalledTimes(1)
   })
   it.each([
-    ["I'm wearing this", mocks.worn],
+    ["Wear this", mocks.worn],
     ['Not today', mocks.notToday],
   ] as const)('releases the %s lock after a failure so the user can retry', async (label, action) => {
     action.mockRejectedValueOnce(new Error('private backend error'))
@@ -203,6 +210,173 @@ describe('Today presentation', () => {
     expect(original).not.toContain('shadow-md')
     expect(render()).toContain('object-contain')
   })
+  it('initializes saved state from persisted data and handles save/unsave toggle with rollback', async () => {
+    // 1. Initialized as saved
+    const savedHtml = renderToStaticMarkup(
+      React.createElement(DailyOutfitScreen, {
+        outfit,
+        initialSignals: [],
+        feedbackCount: 0,
+        ownedItemIds: ownedIds,
+        initialSaved: true,
+      })
+    )
+    expect(savedHtml).toContain('aria-label="Remove from saved looks"')
+    expect(savedHtml).toContain('aria-pressed="true"')
+
+    // 2. Initialized as unsaved
+    const unsavedHtml = renderToStaticMarkup(
+      React.createElement(DailyOutfitScreen, {
+        outfit,
+        initialSignals: [],
+        feedbackCount: 0,
+        ownedItemIds: ownedIds,
+        initialSaved: false,
+      })
+    )
+    expect(unsavedHtml).toContain('aria-label="Save this look"')
+    expect(unsavedHtml).toContain('aria-pressed="false"')
+
+    // 3. Status unconfirmed (lookup failure does not present as confirmed unsaved)
+    const unknownHtml = renderToStaticMarkup(
+      React.createElement(DailyOutfitScreen, {
+        outfit,
+        initialSignals: [],
+        feedbackCount: 0,
+        ownedItemIds: ownedIds,
+        initialSaved: null,
+      })
+    )
+    expect(unknownHtml).toContain('Status unconfirmed · Click to save')
+    expect(unknownHtml).toContain('aria-label="Save this look (status unconfirmed)"')
+    expect(unknownHtml).toContain('data-saved-status="unknown"')
+
+    // 4. Click save executes mutation
+    render()
+    const saveClick = mocks.clicks.get('Save this look (status unconfirmed)') || mocks.clicks.get('Save this look')!
+    expect(saveClick).toBeDefined()
+    saveClick()
+    await Promise.all(mocks.tasks)
+    expect(mocks.save).toHaveBeenCalledExactlyOnceWith(outfit.id)
+    expect(mocks.unsave).not.toHaveBeenCalled()
+  })
+
+  it('keeps the outfit actionable after Love this positive feedback and shows confirmation', async () => {
+    render()
+    const loveClick = mocks.clicks.get('Love this')!
+    loveClick()
+    await Promise.all(mocks.tasks)
+
+    // Positive feedback persisted with existing contract
+    expect(mocks.feedback).toHaveBeenCalledExactlyOnceWith(outfit.id, true, 'outfit-feedback:daily-outfit')
+    // Does NOT advance outfit or trigger wear/save automatically
+    expect(mocks.daily).not.toHaveBeenCalled()
+    expect(mocks.worn).not.toHaveBeenCalled()
+    expect(mocks.save).not.toHaveBeenCalled()
+
+    // Wear this remains available and actionable
+    const wearClick = mocks.clicks.get('Wear this')!
+    wearClick()
+    await Promise.all(mocks.tasks)
+    expect(mocks.worn).toHaveBeenCalledExactlyOnceWith(outfit.id, 'today:worn:daily-outfit')
+  })
+
+  it('recovers from feedback failures and allows the user to retry', async () => {
+    mocks.feedback.mockRejectedValueOnce(new Error('Network failure'))
+    render()
+    const loveClick = mocks.clicks.get('Love this')!
+    loveClick()
+    await Promise.all(mocks.tasks)
+
+    // Failed feedback does not advance or lock out
+    expect(mocks.feedback).toHaveBeenCalledTimes(1)
+    expect(mocks.daily).not.toHaveBeenCalled()
+
+    // User can retry
+    loveClick()
+    await Promise.all(mocks.tasks)
+    expect(mocks.feedback).toHaveBeenCalledTimes(2)
+  })
+
+
+  it('guarantees an older deferred saved-status lookup cannot overwrite a newer Save action for the same outfit', async () => {
+    let resolveLookup!: (value: boolean) => void
+    const lookupPromise = new Promise<boolean>((resolve) => {
+      resolveLookup = resolve
+    })
+    mocks.isSaved.mockReturnValueOnce(lookupPromise)
+
+    let reportedStatus = ''
+    renderToStaticMarkup(
+      React.createElement(DailyOutfitScreen, {
+        outfit,
+        initialSignals: [],
+        feedbackCount: 0,
+        ownedItemIds: ownedIds,
+        initialSaved: null,
+        onSavedStatusChange: (status) => {
+          reportedStatus = status
+        },
+      })
+    )
+
+    // Trigger all mounted effects (including DailyOutfitScreen's saved status effect)
+    mocks.effects.forEach((fn) => fn())
+    expect(mocks.isSaved).toHaveBeenCalledWith(outfit.id)
+
+    // User saves before lookup completes
+    const saveClick = mocks.clicks.get('Save this look (status unconfirmed)') || mocks.clicks.get('Save this look')!
+    expect(saveClick).toBeDefined()
+    saveClick()
+    await Promise.all(mocks.tasks)
+    expect(mocks.save).toHaveBeenCalledWith(outfit.id)
+    expect(reportedStatus).toBe('saved')
+
+    // Now resolve the older lookup with the opposite status (false / unsaved)
+    resolveLookup(false)
+    await Promise.resolve()
+    await Promise.resolve()
+
+    // Confirm newer Save remains authoritative: revision guard prevented older lookup from reverting status to unsaved
+    expect(reportedStatus).toBe('saved')
+  })
+
+  it('avoids an unnecessary client lookup when valid server initial state exists', () => {
+    renderToStaticMarkup(
+      React.createElement(DailyOutfitScreen, {
+        outfit,
+        initialSignals: [],
+        feedbackCount: 0,
+        ownedItemIds: ownedIds,
+        initialSaved: true,
+      })
+    )
+
+    mocks.effects.forEach((fn) => fn())
+    expect(mocks.isSaved).not.toHaveBeenCalled()
+  })
+
+  it('exposes status unconfirmed accessibly beyond a hover-only title', () => {
+    const html = renderToStaticMarkup(
+      React.createElement(DailyOutfitScreen, {
+        outfit,
+        initialSignals: [],
+        feedbackCount: 0,
+        ownedItemIds: ownedIds,
+        initialSaved: null,
+      })
+    )
+
+    // 1. Screen reader accessible label
+    expect(html).toContain('aria-label="Save this look (status unconfirmed)"')
+    // 2. Screen reader accessible embedded element
+    expect(html).toContain('<span class="sr-only">(status unconfirmed)</span>')
+    // 3. Machine-readable data attribute
+    expect(html).toContain('data-saved-status="unknown"')
+    // 4. Subtle visual hint
+    expect(html).toContain('border-dashed')
+  })
+
   it('shows Today and Wardrobe visibly without adding Plan', () => {
     const html = renderToStaticMarkup(React.createElement(BottomNav))
     expect(html).toContain('>Today</span>')
@@ -230,11 +404,21 @@ describe('Today server orchestration remains unchanged', () => {
     expect(mocks.daily).not.toHaveBeenCalled()
     expect(mocks.owned).not.toHaveBeenCalled()
   })
-  it('passes confirmed owned IDs for presentation without replacing the selected outfit', async () => {
+  it('passes confirmed owned IDs and persisted saved state without replacing the selected outfit', async () => {
+    mocks.isSaved.mockResolvedValueOnce(true)
     const page = await OutfitsPage()
     expect(page.props.outfit).toBe(outfit)
     expect(page.props.ownedItemIds).toEqual(ownedIds)
+    expect(page.props.initialSaved).toBe(true)
+    expect(mocks.isSaved).toHaveBeenCalledWith(outfit.id)
     expect(mocks.daily).toHaveBeenCalledTimes(1)
+  })
+
+  it('falls back to null initialSaved if saved state lookup fails on the server', async () => {
+    mocks.isSaved.mockRejectedValueOnce(new Error('lookup error'))
+    const page = await OutfitsPage()
+    expect(page.props.outfit).toBe(outfit)
+    expect(page.props.initialSaved).toBeNull()
   })
   it('hands a calibrated user with no owned clothes into real-outfit upload', async () => {
     mocks.daily.mockResolvedValue(null)

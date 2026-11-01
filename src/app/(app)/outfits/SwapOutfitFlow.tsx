@@ -130,9 +130,14 @@ export function SwapPanel({ state, outfit, headingRef, onSelect, onRetry, onPrev
   </div>
 }
 
-export default function SwapOutfitFlow({ outfit, onApplied }: {
+export default function SwapOutfitFlow({
+  outfit,
+  onApplied,
+  triggerText = 'Swap a piece',
+}: {
   outfit: DailyOutfit
   onApplied: (outfit: DailyOutfit) => void
+  triggerText?: string
 }) {
   const [state, dispatch] = useReducer(swapReducer, initialSwapState)
   const dialog = useRef<HTMLDialogElement>(null)
@@ -187,7 +192,7 @@ export default function SwapOutfitFlow({ outfit, onApplied }: {
   }
 
   return <>
-    <Button ref={trigger} type="button" variant="outline" onClick={() => dispatch({ type: 'open' })} className="mt-3 h-11 w-full rounded-full border-[#D8CEC2] bg-[#FFFDFA]">Swap something</Button>
+    <Button ref={trigger} type="button" variant="outline" onClick={() => dispatch({ type: 'open' })} className="mt-3 h-11 w-full rounded-full border-[#D8CEC2] bg-[#FFFDFA]">{triggerText}</Button>
     <dialog ref={dialog} onCancel={(event) => { if (state.saving) event.preventDefault(); else close() }} onClose={close} aria-labelledby="swap-title" className="fixed inset-x-0 bottom-0 top-auto m-0 max-h-[92dvh] w-full max-w-none overflow-y-auto rounded-t-3xl bg-[#FFFDFA] p-6 text-[#1D1B18] backdrop:bg-black/35 sm:inset-0 sm:m-auto sm:max-w-2xl sm:rounded-3xl sm:p-8">
       <button type="button" onClick={close} disabled={state.saving} aria-label="Close swap" className="absolute right-4 top-4 z-10 flex size-11 items-center justify-center rounded-full bg-[#FFFDFA] outline-none focus-visible:ring-2 focus-visible:ring-[#6D6257]"><X aria-hidden="true" className="size-5" /></button>
       <div className="pr-10"><SwapPanel state={state} outfit={outfit} headingRef={heading} onSelect={(item) => { void load(item) }} onRetry={() => { if (state.selected) void load(state.selected, true) }} onPreview={(candidate) => dispatch({ type: 'preview', candidate })} onChooseAnother={() => dispatch(state.stage === 'preview' ? { type: 'choose_another' } : { type: 'open' })} onConfirm={() => { void confirm() }} /></div>

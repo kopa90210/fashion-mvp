@@ -115,6 +115,17 @@ describe('Gate 1 Profile Style Studio — Saved Looks Actions', () => {
     expect(saved).toBe(true)
     expect(mocks.from).toHaveBeenCalledWith('saved_outfits')
   })
+
+  it('throws on query error rather than returning false so failures are not masked as unsaved', async () => {
+    const chain = {
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      maybeSingle: vi.fn().mockResolvedValue({ data: null, error: { message: 'Database connection failed' } }),
+    }
+    mocks.from.mockReturnValue(chain)
+
+    await expect(isOutfitSaved(validOutfitId)).rejects.toThrow('Database connection failed')
+  })
 })
 
 describe('Gate 1 Profile Style Studio — Canonical Worn History Actions', () => {

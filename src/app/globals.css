@@ -108,9 +108,14 @@
   background: #f7f4ef;
 }
 
+.stylegraph-app-shell:has(.stylegraph-quiz-surface) {
+  background: #141416;
+}
+
 .stylegraph-quiz-surface {
   min-height: 100dvh;
-  background: #0a0a0a;
+  background: #141416;
+  color: #F5F1E9;
 }
 
 .stylegraph-bottom-nav {
@@ -124,6 +129,6 @@
 
   .stylegraph-app-shell:has(.stylegraph-quiz-surface) {
     padding-bottom: 0;
-    background: #0a0a0a;
+    background: #141416;
   }
 }

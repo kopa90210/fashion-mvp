@@ -11,6 +11,7 @@ export interface OutfitCanvasProps {
   description?: string
   reasons?: string[]
   variant?: OutfitCanvasVariant
+  calibration?: boolean
   reasonsDefaultOpen?: boolean
   children?: ReactNode
   className?: string
@@ -29,6 +30,7 @@ export default function OutfitCanvas({
   description,
   reasons,
   variant = 'editorial',
+  calibration = false,
   reasonsDefaultOpen = false,
   children,
   className = '',
@@ -64,7 +66,7 @@ export default function OutfitCanvas({
         className,
       ].filter(Boolean).join(' ')}
     >
-      <FlatLay items={items} variant={variant} />
+      <FlatLay items={items} variant={variant} calibration={calibration} />
 
       {identityBlock}
 

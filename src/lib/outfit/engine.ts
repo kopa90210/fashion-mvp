@@ -41,6 +41,8 @@ export interface WardrobeItem {
   style_tags: Partial<StyleVector>;
   fit?: { weights?: Partial<Record<QuizSignals['fit'], number>> } | null;
   formality_score?: number | null;
+  category?: string | null;
+  subcategory?: string | null;
 }
 
 /** A valid outfit and its score. */
