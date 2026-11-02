@@ -12,6 +12,14 @@ vi.mock('next/image', () => ({ default: ({ src, alt }: { src: string; alt: strin
 vi.mock('next/link', () => ({ default: ({ children, ...props }: React.ComponentProps<'a'>) => React.createElement('a', props, children) }))
 vi.mock('@/components/ui/button', () => ({ Button: ({ children, variant, ...props }: React.ComponentProps<'button'> & { variant?: string }) => React.createElement('button', { ...props, 'data-variant': variant }, children) }))
 import ReviewOutfitScreen from './ReviewOutfitScreen'
+import BottomNav from '@/src/components/nav/BottomNav'
+
+const mocks = vi.hoisted(() => ({
+  pathname: '/wardrobe/add/review/test-photo-id',
+}))
+vi.mock('next/navigation', () => ({
+  usePathname: () => mocks.pathname,
+}))
 
 const garment = (id: string, category: string | null): ReviewGarment => ({
   id, category, subcategory: null, displayName: id, brand: null, color: 'Blue',
@@ -85,7 +93,7 @@ describe('focused outfit review', () => {
   it.each([
     [{ status: 'failed' as const, jobStatus: 'running' }, 'source failure'],
     [{ status: 'detecting' as const, jobStatus: 'dead_letter' }, 'terminal job'],
-  ])('shows safe retry language for %s', ({ status, jobStatus }, _caseName) => {
+  ])('shows safe retry language for %s', ({ status, jobStatus }, _label) => {
     expect(processingFailed(status, jobStatus)).toBe(true)
     const html = render({ ...initial, status, jobStatus })
     expect(html).toContain('We couldn’t prepare this photo')
@@ -94,9 +102,9 @@ describe('focused outfit review', () => {
     expect(html).toContain('Back to wardrobe')
     expect(html).not.toContain('dead_letter')
   })
-  it('shows one main garment, progress and a plain details sheet', () => {
+  it('shows one main garment, compact progress, accessible action row, and collapsed mobile reference', () => {
     const html = render(initial)
-    expect(html).toContain('1 of 5')
+    expect(html).toContain('Piece 1 of 5')
     expect(html).toContain('/shirt.png')
     expect(html).not.toContain('/coat.png')
     expect(html).not.toContain('/bag.png')
@@ -107,7 +115,22 @@ describe('focused outfit review', () => {
     expect(html).toContain('Subcategory')
     expect(html).toContain('Brand (optional)')
     expect(html).not.toContain('Unknown Brand')
+    // Action row: Skip and Add to wardrobe before Edit details
+    expect(html.indexOf('Skip')).toBeLessThan(html.indexOf('Add to wardrobe'))
     expect(html.indexOf('Add to wardrobe')).toBeLessThan(html.indexOf('Edit details'))
+    // Source outfit reference: desktop aside and mobile collapsible details
+    expect(html).toContain('Your outfit reference')
+    expect(html).toContain('View original outfit photo')
+    expect(html).toContain('stylegraph-review-surface')
+  })
+  it('hides BottomNav on outfit-photo review routes and displays it elsewhere', () => {
+    mocks.pathname = '/wardrobe/add/review/test-photo-id'
+    expect(renderToStaticMarkup(React.createElement(BottomNav))).toBe('')
+
+    mocks.pathname = '/wardrobe'
+    const wardrobeNav = renderToStaticMarkup(React.createElement(BottomNav))
+    expect(wardrobeNav).toContain('stylegraph-bottom-nav')
+    expect(wardrobeNav).toContain('Add wardrobe item')
   })
   it('requires an explicit decision before reviewing accessories', () => {
     const html = render({ ...initial, detectedCount: 2, garments: [garment('bag', 'accessory'), garment('belt', 'accessory')] })

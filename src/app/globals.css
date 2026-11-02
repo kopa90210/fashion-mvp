@@ -112,6 +112,10 @@
   background: #141416;
 }
 
+.stylegraph-app-shell:has(.stylegraph-review-surface) {
+  background: #f7f4ef;
+}
+
 .stylegraph-quiz-surface {
   min-height: 100dvh;
   background: #141416;
@@ -130,5 +134,10 @@
   .stylegraph-app-shell:has(.stylegraph-quiz-surface) {
     padding-bottom: 0;
     background: #141416;
+  }
+
+  .stylegraph-app-shell:has(.stylegraph-review-surface) {
+    padding-bottom: 0;
+    background: #f7f4ef;
   }
 }
