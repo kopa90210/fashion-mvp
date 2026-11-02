@@ -37,20 +37,17 @@ beforeEach(() => {
 })
 
 describe('unified wardrobe upload', () => {
-  it('shows clear editorial header and photo guidelines', () => {
+  it('shows immediate photo-first header copy and back navigation', () => {
     const html = renderToStaticMarkup(React.createElement(UploadScreen))
 
     expect(html).toContain('Add to closet')
-    expect(html).toContain('Turn a photo into wardrobe pieces.')
-    expect(html).toContain('Upload an outfit photo, then choose which pieces to keep.')
-    expect(html).toContain('For best results')
-    expect(html).toContain('Use a clear, well-lit photo.')
-    expect(html).toContain('Keep the clothing you want visible.')
-    expect(html).toContain('Avoid overlapping people where possible.')
+    expect(html).toContain('Add your look')
+    expect(html).toContain('One photo. Discover your wardrobe pieces.')
+    expect(html).toContain('Go back')
     expect(mocks.submitLabel).toBe('Find my pieces')
+    expect(html).not.toContain('Turn a photo into wardrobe pieces.')
     expect(html).not.toContain('Full outfit')
     expect(html).not.toContain('Single piece')
-    expect(html).not.toContain('Separate garments')
   })
 
   it('queues the outfit photo and routes to its review screen', async () => {

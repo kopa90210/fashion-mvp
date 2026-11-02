@@ -86,7 +86,7 @@ describe('validateClientFile', () => {
 })
 
 describe('PhotoUploadForm', () => {
-  it('renders initial empty selection state with primary and mobile camera options', () => {
+  it('renders photo-first selection state with Take a photo and Choose from gallery actions', () => {
     const html = renderToStaticMarkup(
       React.createElement(PhotoUploadForm, {
         onUpload: mocks.onUpload,
@@ -94,12 +94,15 @@ describe('PhotoUploadForm', () => {
       }),
     )
 
-    expect(html).toContain('Select your outfit photo')
-    expect(html).toContain('Drag and drop your image here, or choose from your device')
+    expect(html).toContain('Snap or pick your outfit')
+    expect(html).toContain('Drag and drop an image here, snap a photo, or choose from your device gallery.')
     expect(html).toContain('Supports JPG, PNG, or WebP up to 10 MB')
-    expect(html).toContain('Choose a photo')
     expect(html).toContain('Take a photo')
-    // Inputs: one standard library picker, one camera hint
+    expect(html).toContain('Choose from gallery')
+    // Collapsible Photo tips
+    expect(html).toContain('Photo tips')
+    expect(html).toContain('Use a clear, well-lit photo where garments stand out.')
+    // Separate file inputs
     expect(html).toContain('type="file"')
     expect(html).toContain('capture="environment"')
     expect(html).toContain('accept="image/jpeg,image/png,image/webp"')

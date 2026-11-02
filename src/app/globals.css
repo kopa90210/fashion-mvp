@@ -112,7 +112,7 @@
   background: #141416;
 }
 
-.stylegraph-app-shell:has(.stylegraph-review-surface) {
+.stylegraph-app-shell:has(.stylegraph-upload-surface, .stylegraph-review-surface) {
   background: #f7f4ef;
 }
 
@@ -136,7 +136,7 @@
     background: #141416;
   }
 
-  .stylegraph-app-shell:has(.stylegraph-review-surface) {
+  .stylegraph-app-shell:has(.stylegraph-upload-surface, .stylegraph-review-surface) {
     padding-bottom: 0;
     background: #f7f4ef;
   }

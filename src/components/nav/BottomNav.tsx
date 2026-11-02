@@ -16,7 +16,7 @@ export default function BottomNav() {
   if (
     pathname.startsWith('/quiz') ||
     pathname.startsWith('/outfits/calibration') ||
-    pathname.startsWith('/wardrobe/add/review')
+    pathname.startsWith('/wardrobe/add')
   ) {
     return null
   }
