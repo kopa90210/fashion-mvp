@@ -2,11 +2,11 @@
 
 import Link from 'next/link'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ArrowLeft, ChevronDown, LoaderCircle, X } from 'lucide-react'
+import { ArrowLeft, ChevronDown, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { confirmOutfitPhotoDraft, discardDraftItem, getOutfitPhotoReview, updateWardrobeItemAttributes, type OutfitPhotoReview } from '@/src/app/actions/wardrobe'
 import { WARDROBE_CATEGORIES } from '@/src/lib/wardrobe/normalize'
-import { completionCopy, processingFailed, processingMessage, processingSupport, reviewComplete, reviewPieces, type ReviewGarment } from './review-flow'
+import { completionCopy, LONG_PROCESSING_SUPPORT, processingFailed, processingMessage, processingSupport, reviewComplete, reviewPieces, type ReviewGarment } from './review-flow'
 import GarmentImage from '@/src/components/wardrobe/GarmentImage'
 
 const field = 'mt-2 w-full rounded-xl border border-[#D8CEC2] bg-[#FFFDFA] px-3 py-3 text-base text-[#1D1B18]'
@@ -249,7 +249,7 @@ export default function ReviewOutfitScreen({ initial }: { initial: OutfitPhotoRe
   const currentPieceIndex = Math.max(1, total - remaining + 1)
 
   return (
-    <main className="stylegraph-review-surface min-h-dvh bg-[#F7F4EF] px-4 py-5 text-[#1D1B18] sm:px-8 sm:py-8">
+    <main className="stylegraph-review-surface min-h-dvh bg-[#F7F4EF] px-4 py-5 pb-[calc(1.5rem+env(safe-area-inset-bottom,0px))] text-[#1D1B18] sm:px-8 sm:py-8">
       <div className="mx-auto max-w-5xl">
         {/* Navigation header: Back button + compact Piece X of Y progress indicator */}
         <header className="mb-5 flex items-center justify-between gap-4 sm:mb-7">
@@ -284,32 +284,70 @@ export default function ReviewOutfitScreen({ initial }: { initial: OutfitPhotoRe
         </header>
 
         {waiting && (
-          <section aria-live="polite" aria-atomic="true" className="max-w-xl">
-            <p className="text-xs uppercase tracking-[0.2em] text-[#6D6257]">Preparing your wardrobe</p>
-            <h1 className="mt-3 text-3xl font-medium sm:text-4xl">{processingMessage(review.jobStatus)}</h1>
-            <p className="mt-4 text-sm leading-relaxed text-[#6D6257]">{processingSupport(review.startedAt)}</p>
+          <section aria-live="polite" aria-atomic="true" className="mx-auto flex max-w-md flex-col items-center text-center">
+            {/* Photo preview with subtle activity effect */}
+            <div className="relative w-full">
+              <div
+                aria-hidden="true"
+                className="pointer-events-none absolute -inset-1 rounded-[28px] border-2 border-[#8E9B82]/35 bg-gradient-to-b from-[#8E9B82]/15 via-transparent to-[#8E9B82]/15 animate-pulse motion-reduce:animate-none"
+              />
+              <div className="relative aspect-[4/5] max-h-[44vh] min-h-[240px] w-full overflow-hidden rounded-3xl border border-[#D8CEC2] bg-[#EBE3D8] sm:max-h-[460px]">
+                <GarmentImage
+                  src={review.sourceImageUrl}
+                  alt="Your uploaded outfit"
+                  label="Uploaded outfit"
+                  role="one_piece"
+                  sizes="(min-width: 640px) 440px, 100vw"
+                  className="object-contain p-4 sm:p-6"
+                />
+              </div>
+            </div>
+
+            {/* Real backend status indicator */}
+            <div className="mt-6 inline-flex items-center gap-2 rounded-full border border-[#D8CEC2] bg-[#FFFDFA] px-3.5 py-1.5 text-xs font-medium text-[#34312C]">
+              <span className="relative flex size-2">
+                <span className="absolute inline-flex size-full animate-ping rounded-full bg-[#8E9B82] opacity-75 motion-reduce:animate-none" />
+                <span className="relative inline-flex size-2 rounded-full bg-[#4A5D43]" />
+              </span>
+              <span>{processingMessage(review.jobStatus)}</span>
+            </div>
+
+            {/* Heading and supporting copy */}
+            <h1 className="mt-3 text-2xl font-medium tracking-tight text-[#1D1B18] sm:text-3xl">
+              Finding your pieces
+            </h1>
             <p className="mt-2 text-sm leading-relaxed text-[#6D6257]">
-              Your pieces will appear here automatically when they’re ready. You can return to this upload from your wardrobe.
+              You can leave this screen. Processing will continue.
             </p>
-            <ol className="mt-10 space-y-5 rounded-3xl border border-[#D8CEC2] bg-[#FFFDFA] p-6" aria-label="Photo processing progress">
-              <li className="flex items-center gap-3">
-                <span aria-hidden="true" className="flex size-6 items-center justify-center rounded-full bg-[#1D1B18] text-xs text-[#FFFDFA]">✓</span>
-                <span>Photo uploaded</span>
-                <span className="sr-only">Complete</span>
-              </li>
-              <li aria-current="step" className="flex items-center gap-3 font-medium">
-                <LoaderCircle aria-hidden="true" className="size-6 animate-spin text-[#6D6257] motion-reduce:animate-none" />
-                <span>Finding visible pieces</span>
-              </li>
-              <li className="flex items-center gap-3 text-[#6D6257]">
-                <span aria-hidden="true" className="ml-2 size-2 rounded-full border border-[#6D6257]" />
-                <span>Preparing pieces for review</span>
-              </li>
-            </ol>
-            {pollError && <p role="status" className="mt-4 text-sm text-[#6D6257]">Connection interrupted. We’ll keep checking for your pieces.</p>}
-            <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-              <Link href="/wardrobe" className="inline-flex min-h-12 items-center justify-center rounded-full bg-[#1D1B18] px-7 text-[#FFFDFA] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D1B18] focus-visible:ring-offset-2 focus-visible:ring-offset-[#F7F4EF]">Back to wardrobe</Link>
-              <Link href="/wardrobe/add" className="inline-flex min-h-12 items-center justify-center rounded-full border border-[#D8CEC2] bg-[#FFFDFA] px-7 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D1B18] focus-visible:ring-offset-2 focus-visible:ring-offset-[#F7F4EF]">Upload another photo</Link>
+
+            {/* Delayed processing notice */}
+            {processingSupport(review.startedAt) === LONG_PROCESSING_SUPPORT && (
+              <p className="mt-3 rounded-2xl border border-[#D8CEC2] bg-[#FFFDFA] px-4 py-2.5 text-xs leading-relaxed text-[#6D6257]">
+                {LONG_PROCESSING_SUPPORT}
+              </p>
+            )}
+
+            {/* Polling connection error notice */}
+            {pollError && (
+              <p role="status" className="mt-3 text-xs text-[#8C2C1D]">
+                Connection interrupted. We’ll keep checking for your pieces.
+              </p>
+            )}
+
+            {/* Actions */}
+            <div className="mt-8 flex w-full flex-col items-center gap-3">
+              <Link
+                href="/wardrobe"
+                className="inline-flex min-h-12 w-full items-center justify-center rounded-full bg-[#1D1B18] px-7 text-sm font-medium text-[#FFFDFA] transition-colors hover:bg-[#34312C] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D1B18] focus-visible:ring-offset-2 focus-visible:ring-offset-[#F7F4EF] sm:w-auto"
+              >
+                Back to wardrobe
+              </Link>
+              <Link
+                href="/wardrobe/add"
+                className="inline-flex min-h-11 items-center justify-center rounded-full px-4 text-xs font-medium text-[#6D6257] underline underline-offset-4 transition-colors hover:text-[#1D1B18] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D1B18]"
+              >
+                Upload another photo
+              </Link>
             </div>
           </section>
         )}

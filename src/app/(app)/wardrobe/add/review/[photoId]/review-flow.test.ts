@@ -62,18 +62,27 @@ describe('focused outfit review', () => {
   it.each([
     [null, 'Your photo is in line'], ['queued', 'Your photo is in line'],
     ['running', 'Finding your pieces'], ['retry_wait', 'Still working on your photo'],
-  ])('uses friendly %s processing copy without exposing garments early', (jobStatus, message) => {
+  ])('uses photo-first %s processing layout without exposing garments early', (jobStatus, message) => {
     expect(processingMessage(jobStatus)).toBe(message)
     const html = render({ ...initial, startedAt: new Date().toISOString(), status: 'detecting', jobStatus })
     expect(html).toContain(message)
-    expect(html).toContain('Preparing your wardrobe')
-    expect(html).toContain('Photo uploaded')
-    expect(html).toContain('Finding visible pieces')
-    expect(html).toContain('Preparing pieces for review')
-    expect(html).toContain('your photo will keep processing')
+    expect(html).toContain('Finding your pieces')
+    expect(html).toContain('You can leave this screen. Processing will continue.')
+    expect(html).toContain('/outfit.png')
+    expect(html).toContain('Back to wardrobe')
+    expect(html).toContain('Upload another photo')
     expect(html).toContain('href="/wardrobe"')
     expect(html).toContain('href="/wardrobe/add"')
+    expect(html).not.toContain('Photo uploaded')
+    expect(html).not.toContain('Finding visible pieces')
     expect(html).not.toContain('Add to wardrobe')
+  })
+  it('handles missing source photo gracefully during processing', () => {
+    const html = render({ ...initial, sourceImageUrl: '', status: 'detecting', jobStatus: 'running' })
+    expect(html).toContain('Finding your pieces')
+    expect(html).toContain('image unavailable')
+    expect(html).toContain('Back to wardrobe')
+    expect(html).toContain('Upload another photo')
   })
   it('uses calm long-running copy without treating processing as failed', () => {
     const startedAt = '2026-10-15T10:00:00.000Z'
@@ -86,14 +95,15 @@ describe('focused outfit review', () => {
   })
   it('does not show processing copy after completion', () => {
     const html = render(initial)
-    expect(html).not.toContain('Preparing your wardrobe')
+    expect(html).not.toContain('Finding your pieces')
     expect(html).not.toContain('Your photo is in line')
-    expect(html).not.toContain('your photo will keep processing')
+    expect(html).not.toContain('You can leave this screen. Processing will continue.')
   })
   it.each([
     [{ status: 'failed' as const, jobStatus: 'running' }, 'source failure'],
     [{ status: 'detecting' as const, jobStatus: 'dead_letter' }, 'terminal job'],
-  ])('shows safe retry language for %s', ({ status, jobStatus }, _label) => {
+  ])('shows safe retry language for %s (%s)', ({ status, jobStatus }, label) => {
+    expect(label).toBeTruthy()
     expect(processingFailed(status, jobStatus)).toBe(true)
     const html = render({ ...initial, status, jobStatus })
     expect(html).toContain('We couldn’t prepare this photo')
