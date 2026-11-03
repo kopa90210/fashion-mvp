@@ -12,14 +12,22 @@ import GarmentImage from '@/src/components/wardrobe/GarmentImage'
 const field = 'mt-2 w-full rounded-xl border border-[#D8CEC2] bg-[#FFFDFA] px-3 py-3 text-base text-[#1D1B18]'
 const categoryName = (category: string | null) => category ? category.charAt(0).toUpperCase() + category.slice(1) : 'Choose a category'
 
-function FocusedPiece({ item, onHandled, onEdited }: {
+function FocusedPiece({
+  item,
+  alternate,
+  onToggleAlternate,
+  onHandled,
+  onEdited,
+}: {
   item: ReviewGarment
+  alternate: boolean
+  onToggleAlternate: () => void
   onHandled: (id: string) => void
   onEdited: (item: ReviewGarment) => void
 }) {
-  const [alternate, setAlternate] = useState(false)
   const [editing, setEditing] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [successMessage, setSuccessMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [name, setName] = useState(item.displayName)
   const [category, setCategory] = useState(item.category ?? '')
@@ -27,6 +35,14 @@ function FocusedPiece({ item, onHandled, onEdited }: {
   const [color, setColor] = useState(item.color)
   const [brand, setBrand] = useState(item.brand ?? '')
   const dialog = useRef<HTMLDialogElement>(null)
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current)
+    }
+  }, [])
+
   useEffect(() => {
     if (editing) dialog.current?.showModal()
     else dialog.current?.close()
@@ -61,13 +77,20 @@ function FocusedPiece({ item, onHandled, onEdited }: {
     setBusy(true)
     setError(null)
     try {
-      if (add) await confirmOutfitPhotoDraft(item.id, alternate && !!item.reconstructedImageUrl)
-      else await discardDraftItem(item.id)
-      onHandled(item.id)
+      if (add) {
+        await confirmOutfitPhotoDraft(item.id, alternate && !!item.reconstructedImageUrl)
+        setSuccessMessage('Added to wardrobe')
+        timerRef.current = setTimeout(() => {
+          onHandled(item.id)
+        }, 600)
+      } else {
+        await discardDraftItem(item.id)
+        onHandled(item.id)
+      }
     } catch {
       setError(add ? 'Could not add this piece. Please try again.' : 'Could not skip this piece. Please try again.')
-    } finally {
       setBusy(false)
+      setSuccessMessage(null)
     }
   }
 
@@ -83,34 +106,39 @@ function FocusedPiece({ item, onHandled, onEdited }: {
 
   return (
     <article className="flex flex-col">
-      {/* Responsively bounded garment image preview container */}
-      <div className="relative aspect-[4/5] max-h-[38vh] min-h-[220px] w-full overflow-hidden rounded-3xl bg-[#EBE3D8] sm:max-h-[46vh] md:max-h-[500px]">
+      {/* Screen reader status announcement */}
+      <div className="sr-only" role="status" aria-live="polite">
+        {successMessage || error}
+      </div>
+
+      {/* Responsively bounded garment stage: single clean frame, object-contain, no nested boxes */}
+      <div className="relative aspect-[4/5] max-h-[36vh] min-h-[220px] w-full overflow-hidden rounded-3xl border border-[#D8CEC2]/80 bg-[#EBE3D8] sm:max-h-[44vh] md:max-h-[480px]">
         <GarmentImage
           src={alternate && item.reconstructedImageUrl ? item.reconstructedImageUrl : item.originalImageUrl}
           alt={item.displayName || 'Clothing piece'}
           label={item.displayName || 'Clothing piece'}
           role={item.category}
           sizes="(min-width: 768px) 520px, 100vw"
-          className="object-contain p-4 sm:p-8 md:p-10"
+          className="object-contain p-4 sm:p-6 md:p-8"
         />
       </div>
 
       {item.reconstructedImageUrl && (
         <button
           type="button"
-          disabled={busy}
+          disabled={busy || !!successMessage}
           aria-pressed={alternate}
-          onClick={() => setAlternate(!alternate)}
-          className="mt-2.5 self-start text-xs text-[#6D6257] underline underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D1B18] focus-visible:ring-offset-2 sm:text-sm"
+          onClick={onToggleAlternate}
+          className="mt-2.5 self-start text-xs text-[#6D6257] underline underline-offset-4 transition-colors hover:text-[#1D1B18] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D1B18] focus-visible:ring-offset-2 sm:text-sm"
         >
           {alternate ? 'Show original photo' : 'See alternate view'}
         </button>
       )}
 
-      {/* Piece details summary */}
-      <div className="mt-4 sm:mt-5">
+      {/* Piece details close below the stage */}
+      <div className="mt-3.5 sm:mt-4">
         <p className="text-xs uppercase tracking-[0.2em] text-[#6D6257]">Review piece</p>
-        <h1 className="mt-1.5 break-words text-xl font-medium tracking-tight text-[#1D1B18] sm:text-2xl md:text-3xl">
+        <h1 className="mt-1 break-words text-xl font-medium tracking-tight text-[#1D1B18] sm:text-2xl md:text-3xl">
           {item.displayName || 'Your piece'}
         </h1>
         <p className="mt-1 text-sm text-[#6D6257]">
@@ -119,45 +147,66 @@ function FocusedPiece({ item, onHandled, onEdited }: {
         <p className="mt-0.5 text-xs text-[#6D6257]">Suggested by StyleGraph</p>
       </div>
 
-      {/* Primary action row: Skip and Add to wardrobe */}
-      <div className="mt-5 flex items-center gap-3">
-        <Button
-          variant="outline"
-          disabled={busy}
-          onClick={() => void handle(false)}
-          className="h-12 flex-1 rounded-full border-[#D8CEC2] bg-[#FFFDFA] text-base font-medium text-[#1D1B18] hover:bg-[#F7F4EF] focus-visible:ring-2 focus-visible:ring-[#1D1B18] focus-visible:ring-offset-2"
-        >
-          Skip
-        </Button>
-        <Button
-          disabled={busy}
-          onClick={() => void handle(true)}
-          className="h-12 flex-[2] rounded-full bg-[#1D1B18] text-base font-medium text-[#FFFDFA] hover:bg-[#34312C] focus-visible:ring-2 focus-visible:ring-[#1D1B18] focus-visible:ring-offset-2"
-        >
-          {busy ? 'Saving…' : 'Add to wardrobe'}
-        </Button>
+      {/* Bottom action dock: Skip, Add piece, Edit details */}
+      <div className="mt-5 flex flex-col gap-3">
+        <div className="flex items-center gap-3">
+          <Button
+            variant="outline"
+            type="button"
+            disabled={busy || !!successMessage}
+            onClick={() => void handle(false)}
+            className="h-12 flex-1 rounded-full border-[#D8CEC2] bg-[#FFFDFA] text-base font-medium text-[#1D1B18] hover:bg-[#EBE3D8] focus-visible:ring-2 focus-visible:ring-[#1D1B18] focus-visible:ring-offset-2"
+          >
+            Skip
+          </Button>
+          <Button
+            type="button"
+            disabled={busy || !!successMessage}
+            onClick={() => void handle(true)}
+            className={`h-12 flex-[2] rounded-full text-base font-medium transition-all duration-200 motion-reduce:transition-none focus-visible:ring-2 focus-visible:ring-[#1D1B18] focus-visible:ring-offset-2 ${
+              successMessage
+                ? 'bg-[#4A5D43] text-[#FFFDFA]'
+                : 'bg-[#1D1B18] text-[#FFFDFA] hover:bg-[#34312C]'
+            }`}
+          >
+            {successMessage ? (
+              <span className="flex items-center justify-center gap-2">
+                <span aria-hidden="true">✓</span>
+                <span>Added!</span>
+              </span>
+            ) : busy ? (
+              'Saving…'
+            ) : (
+              'Add piece'
+            )}
+          </Button>
+        </div>
+
+        <div className="flex items-center justify-between px-1">
+          <button
+            type="button"
+            onClick={openEditor}
+            disabled={busy || !!successMessage}
+            className="inline-flex min-h-11 items-center text-sm font-medium text-[#6D6257] underline underline-offset-4 transition-colors hover:text-[#1D1B18] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D1B18] focus-visible:ring-offset-2"
+          >
+            Edit details
+          </button>
+          {successMessage && (
+            <span role="status" className="text-xs font-medium text-[#4A5D43]">
+              {successMessage}
+            </span>
+          )}
+        </div>
       </div>
 
-      {/* Edit details secondary trigger */}
-      <div className="mt-2.5 text-center sm:text-left">
-        <button
-          type="button"
-          onClick={openEditor}
-          disabled={busy}
-          className="inline-flex min-h-11 items-center text-sm font-medium text-[#6D6257] underline underline-offset-4 transition-colors hover:text-[#1D1B18] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D1B18] focus-visible:ring-offset-2"
-        >
-          Edit details
-        </button>
-      </div>
-
-      {/* Error alert */}
+      {/* Error alert with retry guidance */}
       {error && !editing && (
         <div role="alert" className="mt-3 rounded-2xl border border-red-200 bg-red-50/70 p-3.5 text-sm text-red-800">
           {error}
         </div>
       )}
 
-      {/* Edit details modal dialog */}
+      {/* Edit details dialog */}
       <dialog
         ref={dialog}
         onCancel={(event) => { if (busy) event.preventDefault(); else setEditing(false) }}
@@ -219,6 +268,9 @@ export default function ReviewOutfitScreen({ initial }: { initial: OutfitPhotoRe
   const [handled, setHandled] = useState<string[]>([])
   const [accessories, setAccessories] = useState(false)
   const [finished, setFinished] = useState(false)
+  const [activePieceId, setActivePieceId] = useState<string | null>(null)
+  const [imageChoices, setImageChoices] = useState<Record<string, boolean>>({})
+  const [announcement, setAnnouncement] = useState<string | null>(null)
   const active = useRef(false)
   const request = useRef(0)
   const failed = processingFailed(review.status, review.jobStatus)
@@ -239,19 +291,26 @@ export default function ReviewOutfitScreen({ initial }: { initial: OutfitPhotoRe
   }, [waiting, refresh])
 
   const pieces = reviewPieces(review.garments, handled)
-  const current = pieces.main[0] ?? (accessories ? pieces.accessories[0] : undefined)
+  const currentPieceList = accessories && !pieces.main.length ? pieces.accessories : pieces.main
+  const current = currentPieceList.find((p) => p.id === activePieceId) ?? currentPieceList[0]
   const total = Math.max(review.detectedCount, review.garments.length + handled.filter((id) => !review.garments.some((item) => item.id === id)).length)
   const remaining = pieces.main.length + pieces.accessories.length
   const complete = reviewComplete(finished, total, remaining)
   const completion = completionCopy(remaining)
   const ready = !failed && review.status === 'done'
 
-  const currentPieceIndex = Math.max(1, total - remaining + 1)
+  const pieceOffset = Math.max(0, current ? currentPieceList.findIndex((p) => p.id === current.id) : 0)
+  const currentPieceIndex = Math.min(total, total - remaining + 1 + pieceOffset)
 
   return (
     <main className="stylegraph-review-surface min-h-dvh bg-[#F7F4EF] px-4 py-5 pb-[calc(1.5rem+env(safe-area-inset-bottom,0px))] text-[#1D1B18] sm:px-8 sm:py-8">
+      {/* Screen reader status announcements */}
+      <div className="sr-only" role="status" aria-live="polite">
+        {announcement}
+      </div>
+
       <div className="mx-auto max-w-5xl">
-        {/* Navigation header: Back button + compact Piece X of Y progress indicator */}
+        {/* Navigation header: Back button + compact Piece X of Y with segmented progress */}
         <header className="mb-5 flex items-center justify-between gap-4 sm:mb-7">
           <Link
             href="/wardrobe"
@@ -272,12 +331,24 @@ export default function ReviewOutfitScreen({ initial }: { initial: OutfitPhotoRe
                 aria-valuemin={0}
                 aria-valuemax={total}
                 aria-valuenow={total - remaining}
-                className="h-1.5 w-20 overflow-hidden rounded-full bg-[#D8CEC2] sm:w-28"
+                className="flex h-1.5 w-24 items-center gap-1 sm:w-32"
               >
-                <div
-                  className="h-full bg-[#1D1B18] transition-all duration-300"
-                  style={{ width: `${total ? ((total - remaining) / total) * 100 : 0}%` }}
-                />
+                {Array.from({ length: Math.max(1, total) }).map((_, idx) => {
+                  const isReviewed = idx < total - remaining
+                  const isCurrent = idx === total - remaining
+                  return (
+                    <div
+                      key={idx}
+                      className={`h-full flex-1 rounded-full transition-all duration-300 motion-reduce:transition-none ${
+                        isReviewed
+                          ? 'bg-[#1D1B18]'
+                          : isCurrent
+                          ? 'bg-[#1D1B18]/60 ring-1 ring-[#1D1B18]/40'
+                          : 'bg-[#D8CEC2]'
+                      }`}
+                    />
+                  )
+                })}
               </div>
             </div>
           )}
@@ -380,41 +451,93 @@ export default function ReviewOutfitScreen({ initial }: { initial: OutfitPhotoRe
               </div>
             </aside>
 
-            {/* Mobile collapsible outfit reference */}
-            <details className="group rounded-2xl border border-[#D8CEC2] bg-[#FFFDFA] p-3 text-[#1D1B18] md:hidden">
-              <summary className="flex min-h-10 cursor-pointer list-none items-center justify-between text-sm font-medium text-[#6D6257] [&::-webkit-details-marker]:hidden">
-                <span>View original outfit photo</span>
-                <ChevronDown className="size-4 transition-transform duration-200 group-open:rotate-180" aria-hidden="true" />
-              </summary>
-              <div className="relative mt-3 aspect-[4/5] max-h-[300px] w-full overflow-hidden rounded-xl bg-[#EBE3D8]">
-                <GarmentImage
-                  src={review.sourceImageUrl}
-                  alt="Your uploaded outfit reference"
-                  role="one_piece"
-                  sizes="100vw"
-                  className="object-contain p-3"
-                />
-              </div>
-            </details>
+            {/* Review column */}
+            <div className="flex flex-col">
+              {/* Mobile collapsible outfit reference */}
+              <details className="group mb-4 rounded-2xl border border-[#D8CEC2] bg-[#FFFDFA] p-3 text-[#1D1B18] md:hidden">
+                <summary className="flex min-h-10 cursor-pointer list-none items-center justify-between text-sm font-medium text-[#6D6257] [&::-webkit-details-marker]:hidden">
+                  <span>View original outfit photo</span>
+                  <ChevronDown className="size-4 transition-transform duration-200 group-open:rotate-180" aria-hidden="true" />
+                </summary>
+                <div className="relative mt-3 aspect-[4/5] max-h-[300px] w-full overflow-hidden rounded-xl bg-[#EBE3D8]">
+                  <GarmentImage
+                    src={review.sourceImageUrl}
+                    alt="Your uploaded outfit reference"
+                    role="one_piece"
+                    sizes="100vw"
+                    className="object-contain p-3"
+                  />
+                </div>
+              </details>
 
-            {/* Active piece review section */}
-            <section aria-label={accessories && !pieces.main.length ? 'Accessory review' : 'Main-piece review'}>
-              <FocusedPiece
-                key={current.id}
-                item={current}
-                onHandled={(id) => {
-                  setHandled((ids) => [...ids, id])
-                  void refresh()
-                }}
-                onEdited={(item) => {
-                  ++request.current
-                  setReview((value) => ({
-                    ...value,
-                    garments: value.garments.map((garment) => garment.id === item.id ? item : garment),
-                  }))
-                }}
-              />
-            </section>
+              {/* Small horizontal thumbnail rail for remaining draft pieces */}
+              {currentPieceList.length > 1 && (
+                <nav aria-label="Remaining draft pieces" className="mb-4">
+                  <div className="flex items-center gap-2 overflow-x-auto pb-1 pt-1 no-scrollbar sm:gap-2.5">
+                    {currentPieceList.map((piece, index) => {
+                      const isActive = piece.id === current.id
+                      const useAlternate = !!imageChoices[piece.id]
+                      const thumbSrc = useAlternate && piece.reconstructedImageUrl ? piece.reconstructedImageUrl : piece.originalImageUrl
+                      const pieceName = piece.displayName || (piece.category ? categoryName(piece.category) : `Piece ${index + 1}`)
+
+                      return (
+                        <button
+                          key={piece.id}
+                          type="button"
+                          onClick={() => {
+                            setActivePieceId(piece.id)
+                            setAnnouncement(`Showing ${pieceName}`)
+                          }}
+                          aria-label={`Select ${pieceName}`}
+                          aria-pressed={isActive}
+                          className={`group relative size-14 flex-shrink-0 overflow-hidden rounded-2xl border transition-all duration-200 motion-reduce:transition-none sm:size-16 ${
+                            isActive
+                              ? 'border-[#1D1B18] ring-2 ring-[#1D1B18] ring-offset-2 ring-offset-[#F7F4EF] shadow-sm'
+                              : 'border-[#D8CEC2] bg-[#EBE3D8]/60 opacity-60 hover:opacity-100 hover:border-[#1D1B18]/50'
+                          }`}
+                        >
+                          <GarmentImage
+                            src={thumbSrc}
+                            alt=""
+                            role={piece.category}
+                            sizes="64px"
+                            className="object-contain p-1.5"
+                          />
+                        </button>
+                      )
+                    })}
+                  </div>
+                </nav>
+              )}
+
+              {/* Active piece review stage */}
+              <section aria-label={accessories && !pieces.main.length ? 'Accessory review' : 'Main-piece review'}>
+                <FocusedPiece
+                  key={current.id}
+                  item={current}
+                  alternate={!!imageChoices[current.id]}
+                  onToggleAlternate={() => {
+                    setImageChoices((prev) => ({
+                      ...prev,
+                      [current.id]: !prev[current.id],
+                    }))
+                  }}
+                  onHandled={(id) => {
+                    setHandled((ids) => [...ids, id])
+                    setAnnouncement('Piece saved to wardrobe')
+                    void refresh()
+                  }}
+                  onEdited={(item) => {
+                    ++request.current
+                    setReview((value) => ({
+                      ...value,
+                      garments: value.garments.map((garment) => garment.id === item.id ? item : garment),
+                    }))
+                    setAnnouncement(`Updated details for ${item.displayName || 'piece'}`)
+                  }}
+                />
+              </section>
+            </div>
           </div>
         )}
 
@@ -426,7 +549,10 @@ export default function ReviewOutfitScreen({ initial }: { initial: OutfitPhotoRe
             </p>
             <Button
               className="mt-8 h-12 w-full rounded-full bg-[#1D1B18] text-[#FFFDFA] focus-visible:ring-2 focus-visible:ring-[#1D1B18] focus-visible:ring-offset-2"
-              onClick={() => setAccessories(true)}
+              onClick={() => {
+                setAccessories(true)
+                setActivePieceId(null)
+              }}
             >
               Review accessories
             </Button>
@@ -444,6 +570,11 @@ export default function ReviewOutfitScreen({ initial }: { initial: OutfitPhotoRe
           <section className="mt-12 max-w-xl">
             <h1 className="text-3xl font-medium sm:text-4xl">{completion.title}</h1>
             <p className="mt-3 leading-relaxed text-[#6D6257]">{completion.supporting}</p>
+            {handled.length > 0 && (
+              <p className="mt-2 text-sm text-[#6D6257]">
+                {handled.length} {handled.length === 1 ? 'piece' : 'pieces'} reviewed from this photo.
+              </p>
+            )}
             <div className="mt-7 flex flex-wrap gap-3">
               <Link href="/outfits" className="inline-flex min-h-12 items-center rounded-full bg-[#1D1B18] px-7 text-[#FFFDFA] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D1B18] focus-visible:ring-offset-2 focus-visible:ring-offset-[#F7F4EF]">See today’s outfit</Link>
               <Link href="/wardrobe" className="inline-flex min-h-12 items-center rounded-full border border-[#D8CEC2] bg-[#FFFDFA] px-7 text-[#1D1B18] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D1B18] focus-visible:ring-offset-2 focus-visible:ring-offset-[#F7F4EF]">View wardrobe</Link>

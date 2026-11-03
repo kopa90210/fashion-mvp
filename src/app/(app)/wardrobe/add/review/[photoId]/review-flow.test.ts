@@ -75,7 +75,7 @@ describe('focused outfit review', () => {
     expect(html).toContain('href="/wardrobe/add"')
     expect(html).not.toContain('Photo uploaded')
     expect(html).not.toContain('Finding visible pieces')
-    expect(html).not.toContain('Add to wardrobe')
+    expect(html).not.toContain('Add piece')
   })
   it('handles missing source photo gracefully during processing', () => {
     const html = render({ ...initial, sourceImageUrl: '', status: 'detecting', jobStatus: 'running' })
@@ -116,8 +116,8 @@ describe('focused outfit review', () => {
     const html = render(initial)
     expect(html).toContain('Piece 1 of 5')
     expect(html).toContain('/shirt.png')
-    expect(html).not.toContain('/coat.png')
-    expect(html).not.toContain('/bag.png')
+    expect(html).toContain('/coat.png') // Present in thumbnail rail
+    expect(html).not.toContain('/bag.png') // Accessories not in main piece review
     expect(html).toContain('Review piece')
     expect(html).toContain('shirt</h1>')
     expect(html).toContain('Top · Blue')
@@ -125,13 +125,20 @@ describe('focused outfit review', () => {
     expect(html).toContain('Subcategory')
     expect(html).toContain('Brand (optional)')
     expect(html).not.toContain('Unknown Brand')
-    // Action row: Skip and Add to wardrobe before Edit details
-    expect(html.indexOf('Skip')).toBeLessThan(html.indexOf('Add to wardrobe'))
-    expect(html.indexOf('Add to wardrobe')).toBeLessThan(html.indexOf('Edit details'))
+    // Action dock: Skip and Add piece before Edit details
+    expect(html.indexOf('Skip')).toBeLessThan(html.indexOf('Add piece'))
+    expect(html.indexOf('Add piece')).toBeLessThan(html.indexOf('Edit details'))
     // Source outfit reference: desktop aside and mobile collapsible details
     expect(html).toContain('Your outfit reference')
     expect(html).toContain('View original outfit photo')
     expect(html).toContain('stylegraph-review-surface')
+    // Segmented progress bar
+    expect(html).toContain('aria-label="Pieces reviewed"')
+    expect(html).toContain('aria-valuenow="0"')
+    // Thumbnail rail for remaining drafts
+    expect(html).toContain('Remaining draft pieces')
+    expect(html).toContain('aria-label="Select shirt"')
+    expect(html).toContain('aria-pressed="true"')
   })
   it('hides BottomNav on outfit-photo review routes and displays it elsewhere', () => {
     mocks.pathname = '/wardrobe/add/review/test-photo-id'
@@ -148,7 +155,7 @@ describe('focused outfit review', () => {
     expect(html).toContain('We also found 2 accessories. Review them now or come back later.')
     expect(html).toContain('Review accessories')
     expect(html).toContain('Finish for now')
-    expect(html).not.toContain('Add to wardrobe')
+    expect(html).not.toContain('Add piece')
   })
   it('offers a recoverable empty state and hands completed review into Today', () => {
     expect(render({ ...initial, detectedCount: 0, garments: [] })).toContain('No clear pieces found')
@@ -177,5 +184,21 @@ describe('focused outfit review', () => {
     expect(html).toContain('See alternate view')
     expect(html).toContain('/shirt.png')
     expect(html).not.toContain('reconstructed')
+  })
+  it('renders thumbnail rail with draft pieces and maintains active pressed state', () => {
+    const html = render(initial)
+    expect(html).toContain('Remaining draft pieces')
+    // Active piece has aria-pressed="true"
+    expect(html).toContain('aria-label="Select shirt" aria-pressed="true"')
+    // Inactive pieces have aria-pressed="false"
+    expect(html).toContain('aria-label="Select trousers" aria-pressed="false"')
+    expect(html).toContain('aria-label="Select shoes" aria-pressed="false"')
+    expect(html).toContain('aria-label="Select coat" aria-pressed="false"')
+  })
+  it('displays accurate completion state with View wardrobe action', () => {
+    const completeHtml = render({ ...initial, garments: [] })
+    expect(completeHtml).toContain('Your wardrobe is updated')
+    expect(completeHtml).toContain('View wardrobe')
+    expect(completeHtml).toContain('href="/wardrobe"')
   })
 })
