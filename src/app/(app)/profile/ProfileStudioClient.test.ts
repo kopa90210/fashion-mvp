@@ -135,16 +135,94 @@ describe('ProfileStudioClient component', () => {
     expect(html).toContain('Unsave')
   })
 
-  it('renders clean empty states when no saved looks or worn history exist', () => {
+  it('renders warm segmented control with role=tablist and accessible tab attributes', () => {
+    const html = renderToStaticMarkup(
+      React.createElement(ProfileStudioClient, {
+        initialSaved: { items: [], nextCursor: null, hasMore: false },
+        initialWorn: { items: [], nextCursor: null, hasMore: false },
+        initialTab: 'saved',
+      }),
+    )
+
+    expect(html).toContain('role="tablist"')
+    expect(html).toContain('aria-label="Lookbook views"')
+    expect(html).toContain('id="tab-saved"')
+    expect(html).toContain('aria-selected="true"')
+    expect(html).toContain('tabindex="0"')
+    expect(html).toContain('aria-controls="panel-saved"')
+
+    expect(html).toContain('id="tab-worn"')
+    expect(html).toContain('aria-selected="false"')
+    expect(html).toContain('tabindex="-1"')
+    expect(html).toContain('aria-controls="panel-worn"')
+
+    expect(html).toContain('id="panel-saved"')
+    expect(html).toContain('role="tabpanel"')
+    expect(html).toContain('aria-labelledby="tab-saved"')
+  })
+
+  it('renders genuine empty Saved state with action linking to /outfits', () => {
     const emptySaved: PaginatedResult<SavedLookEntry> = { items: [], nextCursor: null, hasMore: false }
     const emptyWorn: PaginatedResult<WornLookEntry> = { items: [], nextCursor: null, hasMore: false }
 
     const html = renderToStaticMarkup(
-      React.createElement(ProfileStudioClient, { initialSaved: emptySaved, initialWorn: emptyWorn }),
+      React.createElement(ProfileStudioClient, { initialSaved: emptySaved, initialWorn: emptyWorn, initialTab: 'saved' }),
     )
 
-    expect(html).toContain('No saved looks yet')
-    expect(html).toContain('Save recommendations from Today or worn history')
+    expect(html).toContain('Keep your favorite looks')
+    expect(html).toContain('Save a look from Today to find it here.')
+    expect(html).toContain('Explore today’s outfit')
+    expect(html).toContain('href="/outfits"')
+  })
+
+  it('renders genuine empty Worn state with action linking to /outfits', () => {
+    const emptySaved: PaginatedResult<SavedLookEntry> = { items: [], nextCursor: null, hasMore: false }
+    const emptyWorn: PaginatedResult<WornLookEntry> = { items: [], nextCursor: null, hasMore: false }
+
+    const html = renderToStaticMarkup(
+      React.createElement(ProfileStudioClient, { initialSaved: emptySaved, initialWorn: emptyWorn, initialTab: 'worn' }),
+    )
+
+    expect(html).toContain('Your outfit history starts here')
+    expect(html).toContain('Choose ‘Wear this’ on Today to record a look.')
+    expect(html).toContain('Go to Today')
+    expect(html).toContain('href="/outfits"')
+  })
+
+  it('renders inline unavailable/retry state when saved query failed, never claiming empty collection', () => {
+    const html = renderToStaticMarkup(
+      React.createElement(ProfileStudioClient, {
+        initialSaved: { items: [], nextCursor: null, hasMore: false },
+        initialWorn: { items: [], nextCursor: null, hasMore: false },
+        initialSavedFailed: true,
+        initialTab: 'saved',
+      }),
+    )
+
+    expect(html).toContain('Saved looks temporarily unavailable')
+    expect(html).toContain('We couldn’t reach your saved looks right now')
+    expect(html).toContain('Try again')
+    // Must never describe a failed query as empty
+    expect(html).not.toContain('No saved looks yet')
+    expect(html).not.toContain('Keep your favorite looks')
+  })
+
+  it('renders inline unavailable/retry state when worn query failed, never claiming empty collection', () => {
+    const html = renderToStaticMarkup(
+      React.createElement(ProfileStudioClient, {
+        initialSaved: { items: [], nextCursor: null, hasMore: false },
+        initialWorn: { items: [], nextCursor: null, hasMore: false },
+        initialWornFailed: true,
+        initialTab: 'worn',
+      }),
+    )
+
+    expect(html).toContain('Wear history temporarily unavailable')
+    expect(html).toContain('We couldn’t reach your wear history right now')
+    expect(html).toContain('Try again')
+    // Must never describe a failed query as empty
+    expect(html).not.toContain('No wear history yet')
+    expect(html).not.toContain('Your outfit history starts here')
   })
 
   it('renders Load More button when savedHasMore is true', () => {

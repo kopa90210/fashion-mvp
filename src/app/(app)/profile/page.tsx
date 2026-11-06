@@ -26,11 +26,13 @@ export default async function ProfilePage() {
     initialSavedResult.status === 'fulfilled'
       ? initialSavedResult.value
       : { items: [], nextCursor: null, hasMore: false }
+  const initialSavedFailed = initialSavedResult.status === 'rejected'
 
   const initialWorn =
     initialWornResult.status === 'fulfilled'
       ? initialWornResult.value
       : { items: [], nextCursor: null, hasMore: false }
+  const initialWornFailed = initialWornResult.status === 'rejected'
 
   const summary =
     summaryResult.status === 'fulfilled'
@@ -63,6 +65,8 @@ export default async function ProfilePage() {
       passport={summary.passport}
       initialSaved={initialSaved}
       initialWorn={initialWorn}
+      initialSavedFailed={initialSavedFailed}
+      initialWornFailed={initialWornFailed}
     />
   )
 }

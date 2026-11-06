@@ -40,6 +40,8 @@ vi.mock('./ProfileStudioClient', () => ({
       'data-display-name': (props.account as { displayName?: string })?.displayName,
       'data-wardrobe-pieces': String((props.counts as { wardrobePieces?: number | null })?.wardrobePieces),
       'data-has-style-data': String((props.passport as { hasStyleData?: boolean })?.hasStyleData),
+      'data-saved-failed': String(props.initialSavedFailed),
+      'data-worn-failed': String(props.initialWornFailed),
     }),
 }))
 
@@ -79,6 +81,8 @@ describe('ProfilePage server component', () => {
     expect(html).toContain('data-display-name="Alex"')
     expect(html).toContain('data-wardrobe-pieces="15"')
     expect(html).toContain('data-has-style-data="true"')
+    expect(html).toContain('data-saved-failed="false"')
+    expect(html).toContain('data-worn-failed="false"')
   })
 
   it('provides safe fallbacks when getProfileSummary fails', async () => {
@@ -98,5 +102,29 @@ describe('ProfilePage server component', () => {
     expect(html).toContain('data-display-name="Member"')
     expect(html).toContain('data-wardrobe-pieces="null"')
     expect(html).toContain('data-has-style-data="false"')
+  })
+
+  it('flags initialSavedFailed when getSavedLooks rejects while preserving other summary data', async () => {
+    mocks.getUser.mockResolvedValueOnce({
+      data: { user: { id: 'auth-user-3', email: 'user3@example.com' } },
+      error: null,
+    })
+
+    mocks.getProfileSummary.mockResolvedValueOnce({
+      account: { id: 'auth-user-3', email: 'user3@example.com', displayName: 'Taylor', initials: 'T' },
+      counts: { wardrobePieces: 10, savedLooks: 0, timesWorn: 2 },
+      passport: { topStyles: [], quizSignals: null, hasStyleData: false, caption: 'Based on your style choices.' },
+    })
+
+    mocks.getSavedLooks.mockRejectedValueOnce(new Error('Saved looks database query timeout'))
+    mocks.getWornLooksHistory.mockResolvedValueOnce({ items: [], nextCursor: null, hasMore: false })
+
+    const element = await ProfilePage()
+    const html = renderToStaticMarkup(element)
+
+    expect(html).toContain('profile-studio-client')
+    expect(html).toContain('data-display-name="Taylor"')
+    expect(html).toContain('data-saved-failed="true"')
+    expect(html).toContain('data-worn-failed="false"')
   })
 })

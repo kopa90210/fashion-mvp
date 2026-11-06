@@ -1,7 +1,9 @@
 'use client'
 
 import { useEffect, useState, useTransition } from 'react'
+import Link from 'next/link'
 import {
+  AlertCircle,
   Bookmark,
   Calendar,
   Check,
@@ -44,6 +46,8 @@ import {
 interface ProfileStudioClientProps {
   initialSaved: PaginatedResult<SavedLookEntry>
   initialWorn: PaginatedResult<WornLookEntry>
+  initialSavedFailed?: boolean
+  initialWornFailed?: boolean
   account?: ProfileAccount
   counts?: ProfileCounts
   passport?: ProfileStylePassport
@@ -54,6 +58,8 @@ interface ProfileStudioClientProps {
 export default function ProfileStudioClient({
   initialSaved,
   initialWorn,
+  initialSavedFailed = false,
+  initialWornFailed = false,
   account,
   counts,
   passport,
@@ -97,12 +103,35 @@ export default function ProfileStudioClient({
   const [savedCursor, setSavedCursor] = useState<string | null>(initialSaved.nextCursor)
   const [savedHasMore, setSavedHasMore] = useState<boolean>(initialSaved.hasMore)
   const [isLoadingMoreSaved, setIsLoadingMoreSaved] = useState<boolean>(false)
+  const [savedFailed, setSavedFailed] = useState<boolean>(Boolean(initialSavedFailed))
+  const [isRetryingSaved, setIsRetryingSaved] = useState<boolean>(false)
 
   // Worn history state
   const [wornEntries, setWornEntries] = useState<WornLookEntry[]>(initialWorn.items)
   const [wornCursor, setWornCursor] = useState<string | null>(initialWorn.nextCursor)
   const [wornHasMore, setWornHasMore] = useState<boolean>(initialWorn.hasMore)
   const [isLoadingMoreWorn, setIsLoadingMoreWorn] = useState<boolean>(false)
+  const [wornFailed, setWornFailed] = useState<boolean>(Boolean(initialWornFailed))
+  const [isRetryingWorn, setIsRetryingWorn] = useState<boolean>(false)
+
+  // Segmented control keyboard navigation (W3C Tabs design pattern)
+  function handleTabKeyDown(e: React.KeyboardEvent<HTMLButtonElement>, current: 'saved' | 'worn') {
+    if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+      e.preventDefault()
+      const nextTab = current === 'saved' ? 'worn' : 'saved'
+      setActiveTab(nextTab)
+      const nextBtn = document.getElementById(`tab-${nextTab}`)
+      nextBtn?.focus()
+    } else if (e.key === 'Home') {
+      e.preventDefault()
+      setActiveTab('saved')
+      document.getElementById('tab-saved')?.focus()
+    } else if (e.key === 'End') {
+      e.preventDefault()
+      setActiveTab('worn')
+      document.getElementById('tab-worn')?.focus()
+    }
+  }
 
   // Inline date editing state
   const [editingWearRecordId, setEditingWearRecordId] = useState<string | null>(null)
@@ -169,6 +198,26 @@ export default function ProfileStudioClient({
       })
     } finally {
       setIsLoadingMoreSaved(false)
+    }
+  }
+
+  async function handleRetrySaved() {
+    setIsRetryingSaved(true)
+    try {
+      const res = await getSavedLooks(undefined, 8)
+      setSavedEntries(res.items)
+      setSavedCursor(res.nextCursor)
+      setSavedHasMore(res.hasMore)
+      setSavedFailed(false)
+    } catch (err) {
+      setSavedFailed(true)
+      setStatusNotice({
+        id: String(Date.now()),
+        type: 'error',
+        message: err instanceof Error ? err.message : 'Could not load saved looks',
+      })
+    } finally {
+      setIsRetryingSaved(false)
     }
   }
 
@@ -271,6 +320,26 @@ export default function ProfileStudioClient({
     }
   }
 
+  async function handleRetryWorn() {
+    setIsRetryingWorn(true)
+    try {
+      const res = await getWornLooksHistory(undefined, 8)
+      setWornEntries(res.items)
+      setWornCursor(res.nextCursor)
+      setWornHasMore(res.hasMore)
+      setWornFailed(false)
+    } catch (err) {
+      setWornFailed(true)
+      setStatusNotice({
+        id: String(Date.now()),
+        type: 'error',
+        message: err instanceof Error ? err.message : 'Could not load wear history',
+      })
+    } finally {
+      setIsRetryingWorn(false)
+    }
+  }
+
   const fallbackAccount: ProfileAccount = {
     id: 'user',
     email: null,
@@ -293,7 +362,7 @@ export default function ProfileStudioClient({
   }
 
   return (
-    <main className="px-4 py-7 text-[#1D1B18] sm:px-6 lg:px-8 lg:py-10">
+    <main className="px-4 py-7 pb-[calc(2rem+env(safe-area-inset-bottom,0px))] text-[#1D1B18] sm:px-6 lg:px-8 lg:py-10">
       <div className="mx-auto max-w-6xl">
         {/* 1. Profile Header matching Wardrobe layout with single account trigger */}
         <ProfileHeader
@@ -326,59 +395,110 @@ export default function ProfileStudioClient({
           </div>
         )}
 
-        {/* 3. Lookbook Section Heading & Tabs matching screenshot */}
-        <div id="lookbook-archive-section" className="mb-3">
-          <h2 className="text-xl font-semibold tracking-tight text-[#1D1B18]">
-            Your looks
-          </h2>
+        {/* 3. Lookbook Section Heading & Segmented Tab Navigation */}
+        <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div id="lookbook-archive-section">
+            <h2 className="text-xl font-semibold tracking-tight text-[#1D1B18]">
+              Your looks
+            </h2>
+          </div>
+
+          <div
+            role="tablist"
+            aria-label="Lookbook views"
+            className="inline-flex w-fit items-center rounded-full border border-[#D8CEC2] bg-[#EBE3D8]/60 p-1"
+          >
+            <button
+              type="button"
+              role="tab"
+              id="tab-saved"
+              tabIndex={activeTab === 'saved' ? 0 : -1}
+              aria-selected={activeTab === 'saved'}
+              aria-controls="panel-saved"
+              onClick={() => setActiveTab('saved')}
+              onKeyDown={(e) => handleTabKeyDown(e, 'saved')}
+              className={`rounded-full px-5 py-2 text-xs sm:text-sm font-medium transition-all motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D1B18] focus-visible:ring-offset-2 focus-visible:ring-offset-[#F7F4EF] ${
+                activeTab === 'saved'
+                  ? 'bg-[#FFFDFA] text-[#1D1B18] shadow-xs font-semibold'
+                  : 'text-[#6D6257] hover:text-[#1D1B18]'
+              }`}
+            >
+              Saved
+            </button>
+
+            <button
+              type="button"
+              role="tab"
+              id="tab-worn"
+              tabIndex={activeTab === 'worn' ? 0 : -1}
+              aria-selected={activeTab === 'worn'}
+              aria-controls="panel-worn"
+              onClick={() => setActiveTab('worn')}
+              onKeyDown={(e) => handleTabKeyDown(e, 'worn')}
+              className={`rounded-full px-5 py-2 text-xs sm:text-sm font-medium transition-all motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D1B18] focus-visible:ring-offset-2 focus-visible:ring-offset-[#F7F4EF] ${
+                activeTab === 'worn'
+                  ? 'bg-[#FFFDFA] text-[#1D1B18] shadow-xs font-semibold'
+                  : 'text-[#6D6257] hover:text-[#1D1B18]'
+              }`}
+            >
+              Worn
+            </button>
+          </div>
         </div>
-
-        <nav aria-label="Profile views" className="mb-6 flex gap-6 border-b border-[#EBE3D8] text-sm">
-          <button
-            type="button"
-            role="tab"
-            id="tab-saved"
-            aria-selected={activeTab === 'saved'}
-            aria-controls="panel-saved"
-            onClick={() => setActiveTab('saved')}
-            className={`pb-2.5 text-sm font-medium transition-colors ${
-              activeTab === 'saved'
-                ? 'border-b-2 border-[#1D1B18] text-[#1D1B18]'
-                : 'border-b-2 border-transparent text-[#6D6257] hover:text-[#1D1B18]'
-            }`}
-          >
-            Saved
-          </button>
-
-          <button
-            type="button"
-            role="tab"
-            id="tab-worn"
-            aria-selected={activeTab === 'worn'}
-            aria-controls="panel-worn"
-            onClick={() => setActiveTab('worn')}
-            className={`pb-2.5 text-sm font-medium transition-colors ${
-              activeTab === 'worn'
-                ? 'border-b-2 border-[#1D1B18] text-[#1D1B18]'
-                : 'border-b-2 border-transparent text-[#6D6257] hover:text-[#1D1B18]'
-            }`}
-          >
-            Worn
-          </button>
-        </nav>
 
         {/* 4. Tab Panels */}
         {activeTab === 'saved' ? (
-          <section id="panel-saved" role="tabpanel" aria-labelledby="tab-saved">
-            {savedEntries.length === 0 ? (
-              <div className="rounded-3xl border border-dashed border-[#D8CEC2] bg-[#EBE3D8]/30 py-16 px-4 text-center">
-                <Bookmark className="mx-auto size-7 text-[#6D6257] opacity-60" />
-                <h3 className="mt-3 text-base font-medium text-[#1D1B18]">
-                  No saved looks yet
+          <section
+            id="panel-saved"
+            role="tabpanel"
+            aria-labelledby="tab-saved"
+            tabIndex={0}
+            className="focus-visible:outline-none"
+          >
+            {savedFailed ? (
+              <div className="rounded-3xl border border-dashed border-[#D8CEC2] bg-[#EBE3D8]/30 px-6 py-12 text-center sm:py-16">
+                <AlertCircle className="mx-auto size-7 text-[#8A352E]/80" />
+                <h3 className="mt-3 text-base font-semibold text-[#1D1B18]">
+                  Saved looks temporarily unavailable
                 </h3>
-                <p className="mt-1.5 text-xs max-w-sm mx-auto text-[#6D6257]">
-                  Save recommendations from Today or worn history to keep your favorite combinations at hand.
+                <p className="mx-auto mt-1.5 max-w-sm text-xs leading-relaxed text-[#6D6257]">
+                  We couldn’t reach your saved looks right now. Your wardrobe and other profile details are safe.
                 </p>
+                <div className="mt-6 flex justify-center">
+                  <Button
+                    variant="outline"
+                    disabled={isRetryingSaved}
+                    onClick={handleRetrySaved}
+                    className="min-h-11 rounded-full border-[#D8CEC2] bg-[#FFFDFA] px-6 text-xs font-medium text-[#1D1B18] hover:bg-[#EBE3D8]/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D1B18] focus-visible:ring-offset-2 sm:text-sm"
+                  >
+                    {isRetryingSaved ? (
+                      <>
+                        <Loader2 className="size-3.5 animate-spin motion-reduce:animate-none" />
+                        <span>Trying again…</span>
+                      </>
+                    ) : (
+                      <span>Try again</span>
+                    )}
+                  </Button>
+                </div>
+              </div>
+            ) : savedEntries.length === 0 ? (
+              <div className="rounded-3xl border border-dashed border-[#D8CEC2] bg-[#EBE3D8]/30 px-6 py-12 text-center sm:py-16">
+                <Bookmark className="mx-auto size-7 text-[#6D6257] opacity-60" />
+                <h3 className="mt-3 text-base font-semibold text-[#1D1B18]">
+                  Keep your favorite looks
+                </h3>
+                <p className="mx-auto mt-1.5 max-w-sm text-xs leading-relaxed text-[#6D6257]">
+                  Save a look from Today to find it here.
+                </p>
+                <div className="mt-6 flex justify-center">
+                  <Link
+                    href="/outfits"
+                    className="inline-flex min-h-11 items-center justify-center rounded-full bg-[#1D1B18] px-6 text-xs font-medium text-[#FFFDFA] transition-colors hover:bg-[#34312C] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D1B18] focus-visible:ring-offset-2 focus-visible:ring-offset-[#F7F4EF] sm:text-sm"
+                  >
+                    Explore today’s outfit
+                  </Link>
+                </div>
               </div>
             ) : (
               <div className="space-y-6">
@@ -498,16 +618,57 @@ export default function ProfileStudioClient({
             )}
           </section>
         ) : (
-          <section id="panel-worn" role="tabpanel" aria-labelledby="tab-worn">
-            {wornEntries.length === 0 ? (
-              <div className="rounded-3xl border border-dashed border-[#D8CEC2] bg-[#EBE3D8]/30 py-16 px-4 text-center">
-                <Calendar className="mx-auto size-7 text-[#6D6257] opacity-60" />
-                <h3 className="mt-3 text-base font-medium text-[#1D1B18]">
-                  No wear history yet
+          <section
+            id="panel-worn"
+            role="tabpanel"
+            aria-labelledby="tab-worn"
+            tabIndex={0}
+            className="focus-visible:outline-none"
+          >
+            {wornFailed ? (
+              <div className="rounded-3xl border border-dashed border-[#D8CEC2] bg-[#EBE3D8]/30 px-6 py-12 text-center sm:py-16">
+                <AlertCircle className="mx-auto size-7 text-[#8A352E]/80" />
+                <h3 className="mt-3 text-base font-semibold text-[#1D1B18]">
+                  Wear history temporarily unavailable
                 </h3>
-                <p className="mt-1.5 text-xs max-w-sm mx-auto text-[#6D6257]">
-                  Wear decisions logged from your daily recommendation or lookbook will appear here in chronological order.
+                <p className="mx-auto mt-1.5 max-w-sm text-xs leading-relaxed text-[#6D6257]">
+                  We couldn’t reach your wear history right now. Your wardrobe and other profile details are safe.
                 </p>
+                <div className="mt-6 flex justify-center">
+                  <Button
+                    variant="outline"
+                    disabled={isRetryingWorn}
+                    onClick={handleRetryWorn}
+                    className="min-h-11 rounded-full border-[#D8CEC2] bg-[#FFFDFA] px-6 text-xs font-medium text-[#1D1B18] hover:bg-[#EBE3D8]/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D1B18] focus-visible:ring-offset-2 sm:text-sm"
+                  >
+                    {isRetryingWorn ? (
+                      <>
+                        <Loader2 className="size-3.5 animate-spin motion-reduce:animate-none" />
+                        <span>Trying again…</span>
+                      </>
+                    ) : (
+                      <span>Try again</span>
+                    )}
+                  </Button>
+                </div>
+              </div>
+            ) : wornEntries.length === 0 ? (
+              <div className="rounded-3xl border border-dashed border-[#D8CEC2] bg-[#EBE3D8]/30 px-6 py-12 text-center sm:py-16">
+                <Calendar className="mx-auto size-7 text-[#6D6257] opacity-60" />
+                <h3 className="mt-3 text-base font-semibold text-[#1D1B18]">
+                  Your outfit history starts here
+                </h3>
+                <p className="mx-auto mt-1.5 max-w-sm text-xs leading-relaxed text-[#6D6257]">
+                  {"Choose ‘Wear this’ on Today to record a look."}
+                </p>
+                <div className="mt-6 flex justify-center">
+                  <Link
+                    href="/outfits"
+                    className="inline-flex min-h-11 items-center justify-center rounded-full bg-[#1D1B18] px-6 text-xs font-medium text-[#FFFDFA] transition-colors hover:bg-[#34312C] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D1B18] focus-visible:ring-offset-2 focus-visible:ring-offset-[#F7F4EF] sm:text-sm"
+                  >
+                    Go to Today
+                  </Link>
+                </div>
               </div>
             ) : (
               <div className="space-y-6">
