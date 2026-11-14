@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 
 export default async function SignupPage(props: {
-  searchParams: Promise<{ error: string }>
+  searchParams: Promise<{ error?: string; status?: string }>
 }) {
   const searchParams = await props.searchParams;
   return (
@@ -12,14 +12,16 @@ export default async function SignupPage(props: {
       <div className="mx-auto flex w-full flex-col justify-center space-y-6 sm:w-[350px]">
         <div className="flex flex-col space-y-2 text-center">
           <h1 className="text-2xl font-semibold tracking-tight">
-            Create an account
+            {searchParams.status === 'check-email' ? 'Check your email' : 'Create an account'}
           </h1>
           <p className="text-sm text-muted-foreground">
-            Enter your email below to create your account
+            {searchParams.status === 'check-email'
+              ? 'Open the confirmation link in your inbox to finish signing up. Check your spam folder too.'
+              : 'Enter your email below to create your account'}
           </p>
         </div>
         <div className="grid gap-6">
-          <form action={signup}>
+          {searchParams.status !== 'check-email' && <form action={signup}>
             <div className="grid gap-2">
               <div className="grid gap-1">
                 <label className="sr-only" htmlFor="email">
@@ -52,11 +54,11 @@ export default async function SignupPage(props: {
               </Button>
             </div>
             {searchParams?.error && (
-              <p className="mt-4 p-4 bg-red-500/10 text-red-500 text-center text-sm rounded-md">
+              <p role="alert" className="mt-4 p-4 bg-red-500/10 text-red-500 text-center text-sm rounded-md">
                 {searchParams.error}
               </p>
             )}
-          </form>
+          </form>}
           <div className="mt-4 text-center text-sm">
             Already have an account?{' '}
             <Link href="/login" className="underline">
