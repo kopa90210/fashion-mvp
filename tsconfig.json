@@ -38,6 +38,8 @@
   ],
   "exclude": [
     "node_modules",
-    ".next"
+    ".next",
+    "c5_5_review_bundle",
+    ".worktrees"
   ]
 }

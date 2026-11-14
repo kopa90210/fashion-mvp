@@ -1,0 +1,22 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "fashion-mvp",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2026-11-13",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "keep_vars": true,
+  "build": { "command": "npm run build:worker" },
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  "services": [
+    { "binding": "WORKER_SELF_REFERENCE", "service": "fashion-mvp" }
+  ],
+  "images": { "binding": "IMAGES" },
+  "previews": {
+    // A preview service binding would call the live Worker.
+    "images": { "binding": "IMAGES" }
+  },
+  "observability": { "enabled": true }
+}

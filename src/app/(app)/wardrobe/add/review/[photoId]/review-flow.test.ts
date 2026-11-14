@@ -12,6 +12,14 @@ vi.mock('next/image', () => ({ default: ({ src, alt }: { src: string; alt: strin
 vi.mock('next/link', () => ({ default: ({ children, ...props }: React.ComponentProps<'a'>) => React.createElement('a', props, children) }))
 vi.mock('@/components/ui/button', () => ({ Button: ({ children, variant, ...props }: React.ComponentProps<'button'> & { variant?: string }) => React.createElement('button', { ...props, 'data-variant': variant }, children) }))
 import ReviewOutfitScreen from './ReviewOutfitScreen'
+import BottomNav from '@/src/components/nav/BottomNav'
+
+const mocks = vi.hoisted(() => ({
+  pathname: '/wardrobe/add/review/test-photo-id',
+}))
+vi.mock('next/navigation', () => ({
+  usePathname: () => mocks.pathname,
+}))
 
 const garment = (id: string, category: string | null): ReviewGarment => ({
   id, category, subcategory: null, displayName: id, brand: null, color: 'Blue',
@@ -54,18 +62,27 @@ describe('focused outfit review', () => {
   it.each([
     [null, 'Your photo is in line'], ['queued', 'Your photo is in line'],
     ['running', 'Finding your pieces'], ['retry_wait', 'Still working on your photo'],
-  ])('uses friendly %s processing copy without exposing garments early', (jobStatus, message) => {
+  ])('uses photo-first %s processing layout without exposing garments early', (jobStatus, message) => {
     expect(processingMessage(jobStatus)).toBe(message)
     const html = render({ ...initial, startedAt: new Date().toISOString(), status: 'detecting', jobStatus })
     expect(html).toContain(message)
-    expect(html).toContain('Preparing your wardrobe')
-    expect(html).toContain('Photo uploaded')
-    expect(html).toContain('Finding visible pieces')
-    expect(html).toContain('Preparing pieces for review')
-    expect(html).toContain('your photo will keep processing')
+    expect(html).toContain('Finding your pieces')
+    expect(html).toContain('You can leave this screen. Processing will continue.')
+    expect(html).toContain('/outfit.png')
+    expect(html).toContain('Back to wardrobe')
+    expect(html).toContain('Upload another photo')
     expect(html).toContain('href="/wardrobe"')
     expect(html).toContain('href="/wardrobe/add"')
-    expect(html).not.toContain('Add to wardrobe')
+    expect(html).not.toContain('Photo uploaded')
+    expect(html).not.toContain('Finding visible pieces')
+    expect(html).not.toContain('Add piece')
+  })
+  it('handles missing source photo gracefully during processing', () => {
+    const html = render({ ...initial, sourceImageUrl: '', status: 'detecting', jobStatus: 'running' })
+    expect(html).toContain('Finding your pieces')
+    expect(html).toContain('image unavailable')
+    expect(html).toContain('Back to wardrobe')
+    expect(html).toContain('Upload another photo')
   })
   it('uses calm long-running copy without treating processing as failed', () => {
     const startedAt = '2026-10-15T10:00:00.000Z'
@@ -78,14 +95,15 @@ describe('focused outfit review', () => {
   })
   it('does not show processing copy after completion', () => {
     const html = render(initial)
-    expect(html).not.toContain('Preparing your wardrobe')
+    expect(html).not.toContain('Finding your pieces')
     expect(html).not.toContain('Your photo is in line')
-    expect(html).not.toContain('your photo will keep processing')
+    expect(html).not.toContain('You can leave this screen. Processing will continue.')
   })
   it.each([
     [{ status: 'failed' as const, jobStatus: 'running' }, 'source failure'],
     [{ status: 'detecting' as const, jobStatus: 'dead_letter' }, 'terminal job'],
-  ])('shows safe retry language for %s', ({ status, jobStatus }, _caseName) => {
+  ])('shows safe retry language for %s (%s)', ({ status, jobStatus }, label) => {
+    expect(label).toBeTruthy()
     expect(processingFailed(status, jobStatus)).toBe(true)
     const html = render({ ...initial, status, jobStatus })
     expect(html).toContain('We couldn’t prepare this photo')
@@ -94,12 +112,12 @@ describe('focused outfit review', () => {
     expect(html).toContain('Back to wardrobe')
     expect(html).not.toContain('dead_letter')
   })
-  it('shows one main garment, progress and a plain details sheet', () => {
+  it('shows one main garment, compact progress, accessible action row, and collapsed mobile reference', () => {
     const html = render(initial)
-    expect(html).toContain('1 of 5')
+    expect(html).toContain('Piece 1 of 5')
     expect(html).toContain('/shirt.png')
-    expect(html).not.toContain('/coat.png')
-    expect(html).not.toContain('/bag.png')
+    expect(html).toContain('/coat.png') // Present in thumbnail rail
+    expect(html).not.toContain('/bag.png') // Accessories not in main piece review
     expect(html).toContain('Review piece')
     expect(html).toContain('shirt</h1>')
     expect(html).toContain('Top · Blue')
@@ -107,7 +125,29 @@ describe('focused outfit review', () => {
     expect(html).toContain('Subcategory')
     expect(html).toContain('Brand (optional)')
     expect(html).not.toContain('Unknown Brand')
-    expect(html.indexOf('Add to wardrobe')).toBeLessThan(html.indexOf('Edit details'))
+    // Action dock: Skip and Add piece before Edit details
+    expect(html.indexOf('Skip')).toBeLessThan(html.indexOf('Add piece'))
+    expect(html.indexOf('Add piece')).toBeLessThan(html.indexOf('Edit details'))
+    // Source outfit reference: desktop aside and mobile collapsible details
+    expect(html).toContain('Your outfit reference')
+    expect(html).toContain('View original outfit photo')
+    expect(html).toContain('stylegraph-review-surface')
+    // Segmented progress bar
+    expect(html).toContain('aria-label="Pieces reviewed"')
+    expect(html).toContain('aria-valuenow="0"')
+    // Thumbnail rail for remaining drafts
+    expect(html).toContain('Remaining draft pieces')
+    expect(html).toContain('aria-label="Select shirt"')
+    expect(html).toContain('aria-pressed="true"')
+  })
+  it('hides BottomNav on outfit-photo review routes and displays it elsewhere', () => {
+    mocks.pathname = '/wardrobe/add/review/test-photo-id'
+    expect(renderToStaticMarkup(React.createElement(BottomNav))).toBe('')
+
+    mocks.pathname = '/wardrobe'
+    const wardrobeNav = renderToStaticMarkup(React.createElement(BottomNav))
+    expect(wardrobeNav).toContain('stylegraph-bottom-nav')
+    expect(wardrobeNav).toContain('Add wardrobe item')
   })
   it('requires an explicit decision before reviewing accessories', () => {
     const html = render({ ...initial, detectedCount: 2, garments: [garment('bag', 'accessory'), garment('belt', 'accessory')] })
@@ -115,7 +155,7 @@ describe('focused outfit review', () => {
     expect(html).toContain('We also found 2 accessories. Review them now or come back later.')
     expect(html).toContain('Review accessories')
     expect(html).toContain('Finish for now')
-    expect(html).not.toContain('Add to wardrobe')
+    expect(html).not.toContain('Add piece')
   })
   it('offers a recoverable empty state and hands completed review into Today', () => {
     expect(render({ ...initial, detectedCount: 0, garments: [] })).toContain('No clear pieces found')
@@ -144,5 +184,21 @@ describe('focused outfit review', () => {
     expect(html).toContain('See alternate view')
     expect(html).toContain('/shirt.png')
     expect(html).not.toContain('reconstructed')
+  })
+  it('renders thumbnail rail with draft pieces and maintains active pressed state', () => {
+    const html = render(initial)
+    expect(html).toContain('Remaining draft pieces')
+    // Active piece has aria-pressed="true"
+    expect(html).toContain('aria-label="Select shirt" aria-pressed="true"')
+    // Inactive pieces have aria-pressed="false"
+    expect(html).toContain('aria-label="Select trousers" aria-pressed="false"')
+    expect(html).toContain('aria-label="Select shoes" aria-pressed="false"')
+    expect(html).toContain('aria-label="Select coat" aria-pressed="false"')
+  })
+  it('displays accurate completion state with View wardrobe action', () => {
+    const completeHtml = render({ ...initial, garments: [] })
+    expect(completeHtml).toContain('Your wardrobe is updated')
+    expect(completeHtml).toContain('View wardrobe')
+    expect(completeHtml).toContain('href="/wardrobe"')
   })
 })

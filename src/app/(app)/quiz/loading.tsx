@@ -1,30 +1,37 @@
-import { Skeleton } from '@/components/ui/skeleton'
-
 export default function LoadingQuiz() {
   return (
-    <div className="stylegraph-quiz-surface pb-32 pt-12 text-white px-4 sm:px-6 md:px-8">
-      <div className="mx-auto max-w-4xl space-y-12">
-        <div className="text-center space-y-3 flex flex-col items-center">
-          <Skeleton className="h-9 w-80 bg-white/10" />
-          <Skeleton className="h-4 w-96 bg-white/10" />
+    <div className="stylegraph-quiz-surface relative flex min-h-[100dvh] w-full flex-col items-center bg-[#141416] px-4 pt-8 pb-16 text-[#F5F1E9] sm:px-6">
+      <div className="flex w-full max-w-lg flex-col items-center">
+        {/* Step indicator skeleton */}
+        <div className="mt-8 mb-4 flex items-center gap-2 sm:mt-10" aria-hidden="true">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <div
+              key={i}
+              className={`h-1.5 rounded-full ${i === 0 ? 'w-7 bg-[#E8C568]' : 'w-3.5 bg-[#38383D]'}`}
+            />
+          ))}
         </div>
 
-        {Array.from({ length: 3 }).map((_, catIdx) => (
-          <div key={catIdx} className="space-y-4">
-            <div className="flex items-center justify-between border-b border-white/10 pb-3">
-              <Skeleton className="h-6 w-32 bg-white/10" />
-              <Skeleton className="h-5 w-24 rounded-full bg-white/10" />
+        {/* Heading skeleton */}
+        <div className="mt-2 mb-6 h-8 w-64 rounded-lg bg-[#1E1E21] sm:mb-8 sm:h-9 sm:w-80" />
+
+        {/* 2x2 grid skeleton */}
+        <div className="grid w-full grid-cols-2 gap-3 sm:gap-4">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div
+              key={i}
+              className="flex w-full flex-col rounded-2xl border border-[#38383D] bg-[#1E1E21] p-2 shadow-xs sm:p-2.5"
+            >
+              <div className="aspect-[4/5] w-full animate-pulse rounded-xl bg-[#141416]" />
+              <div className="flex min-h-[2.5rem] w-full items-center px-1 pt-2 pb-0.5 sm:pt-2.5">
+                <div className="h-3.5 w-3/4 rounded bg-[#38383D]" />
+              </div>
             </div>
-            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-5">
-              {Array.from({ length: 5 }).map((_, i) => (
-                <div key={i} className="overflow-hidden rounded-xl border border-white/10 bg-white/5 p-3 space-y-3">
-                  <Skeleton className="aspect-square w-full rounded-lg bg-white/10" />
-                  <Skeleton className="h-4 w-3/4 bg-white/10" />
-                </div>
-              ))}
-            </div>
-          </div>
-        ))}
+          ))}
+        </div>
+
+        {/* Counter skeleton */}
+        <div className="mt-6 h-4 w-28 rounded bg-[#38383D]" />
       </div>
     </div>
   )

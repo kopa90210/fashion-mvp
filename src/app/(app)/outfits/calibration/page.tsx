@@ -47,6 +47,7 @@ export default async function OutfitCalibrationPage() {
     <OutfitCalibrationScreen
       outfit={state.outfit}
       answeredCount={state.answeredCount}
+      target={state.target}
       feedbackCount={feedbackCount}
     />
   )

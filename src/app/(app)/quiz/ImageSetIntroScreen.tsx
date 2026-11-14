@@ -1,8 +1,10 @@
 'use client'
 
-import { motion } from 'framer-motion'
+import { useState, useCallback } from 'react'
+import { motion, useReducedMotion } from 'framer-motion'
 import type { Variants } from 'framer-motion'
-import type { ImageSet } from '@/src/lib/quiz/imageSet'
+import { Sparkles } from 'lucide-react'
+import type { QuizImagePreference } from '@/src/lib/quiz/imageSet'
 
 // ---------------------------------------------------------------------------
 // Animation variants
@@ -12,55 +14,47 @@ const containerVariants = {
   hidden: { opacity: 0 },
   visible: {
     opacity: 1,
-    transition: { staggerChildren: 0.1, delayChildren: 0.15 },
+    transition: { staggerChildren: 0.08, delayChildren: 0.1 },
   },
 }
 
 const itemVariants: Variants = {
-  hidden: { opacity: 0, y: 20 },
+  hidden: { opacity: 0, y: 16 },
   visible: {
     opacity: 1,
     y: 0,
     transition: {
-      duration: 0.45,
+      duration: 0.35,
       ease: [0.25, 0.46, 0.45, 0.94] as [number, number, number, number],
     },
   },
 }
 
-// ---------------------------------------------------------------------------
-// Card data
-// ---------------------------------------------------------------------------
-
-interface CardDef {
-  imageSet: ImageSet
-  label: string
-  sublabel: string
-  icon: string
-  accent: string
+const reducedItemVariants: Variants = {
+  hidden: { opacity: 0 },
+  visible: { opacity: 1, transition: { duration: 0.2 } },
 }
 
-const CARDS: CardDef[] = [
+// ---------------------------------------------------------------------------
+// Card definitions
+// ---------------------------------------------------------------------------
+
+interface IntroChoice {
+  key: QuizImagePreference
+  label: string
+  imageSrc: string
+}
+
+const CHOICES: IntroChoice[] = [
   {
-    imageSet: 'masculine',
-    label: 'Menswear-leaning',
-    sublabel: 'Show menswear photography',
-    icon: '◈',
-    accent: 'from-slate-700/60 to-slate-800/60 hover:from-slate-600/70 hover:to-slate-700/70',
+    key: 'feminine',
+    label: "Women’s looks",
+    imageSrc: '/quiz/q1-classic-f.jpg',
   },
   {
-    imageSet: 'feminine',
-    label: 'Womenswear-leaning',
-    sublabel: 'Show womenswear photography',
-    icon: '◇',
-    accent: 'from-rose-900/50 to-slate-800/60 hover:from-rose-800/60 hover:to-slate-700/70',
-  },
-  {
-    imageSet: 'neutral',
-    label: 'Show me both',
-    sublabel: 'Alternate between the two',
-    icon: '◉',
-    accent: 'from-violet-900/50 to-slate-800/60 hover:from-violet-800/60 hover:to-slate-700/70',
+    key: 'masculine',
+    label: "Men’s looks",
+    imageSrc: '/quiz/q1-classic-m.jpg',
   },
 ]
 
@@ -69,8 +63,8 @@ const CARDS: CardDef[] = [
 // ---------------------------------------------------------------------------
 
 interface ImageSetIntroScreenProps {
-  /** Called when the user picks a card or clicks Skip. */
-  onSelect: (imageSet: ImageSet) => void
+  /** Called when the user picks Women’s looks or Men’s looks */
+  onSelect: (preference: QuizImagePreference) => void
 }
 
 // ---------------------------------------------------------------------------
@@ -78,87 +72,103 @@ interface ImageSetIntroScreenProps {
 // ---------------------------------------------------------------------------
 
 /**
- * Lead-in screen shown before Q1.
+ * Lead-in screen shown before Question 1.
  *
- * - Selecting a card or tapping Skip sets imageSet and advances to Q1.
- * - The imageSet value never leaves StyleQuiz component state.
- * - This screen is NOT counted in the "N / 12" progress indicator.
+ * - Presents two photographic cards: "Women’s looks" and "Men’s looks".
+ * - Selecting a card sets display-only image preference and advances to Q1.
+ * - Display-only: never submitted to backend, never infers user gender,
+ *   and never alters style scoring or recommendation vectors.
  */
 export default function ImageSetIntroScreen({ onSelect }: ImageSetIntroScreenProps) {
+  const shouldReduceMotion = useReducedMotion()
+  const [imgErrors, setImgErrors] = useState<Set<QuizImagePreference>>(new Set())
+
+  const handleImageError = useCallback((key: QuizImagePreference) => {
+    setImgErrors((prev) => new Set(prev).add(key))
+  }, [])
+
+  const activeItemVariants = shouldReduceMotion ? reducedItemVariants : itemVariants
+
   return (
     <motion.div
-      className="flex w-full max-w-lg flex-col items-center px-5 pb-10"
-      variants={containerVariants}
+      className="flex w-full max-w-lg flex-col items-center px-4 pb-12 sm:px-6"
+      variants={shouldReduceMotion ? undefined : containerVariants}
       initial="hidden"
       animate="visible"
     >
       {/* Heading */}
-      <motion.div variants={itemVariants} className="mb-2 mt-6 text-center">
-        <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">
-          Which imagery fits you best?
-        </h2>
+      <motion.div variants={activeItemVariants} className="mt-2 mb-2 text-center">
+        <h1 className="text-2xl font-medium tracking-tight text-[#F5F1E9] sm:text-3xl">
+          Which looks would you like to see?
+        </h1>
       </motion.div>
 
-      {/* Sub-text */}
+      {/* Supporting text */}
       <motion.p
-        variants={itemVariants}
-        className="mb-8 text-center text-sm text-white/45 leading-relaxed max-w-xs"
+        variants={activeItemVariants}
+        className="mb-8 max-w-sm text-center text-sm leading-relaxed text-[#B5B0A8]"
       >
-        This only affects the photos shown during the quiz — it doesn&apos;t
-        change your results or get stored anywhere.
+        Choose the photos you prefer. Your answers shape your recommendations.
       </motion.p>
 
-      {/* Cards */}
-      <motion.div variants={itemVariants} className="flex w-full flex-col gap-3">
-        {CARDS.map((card) => (
-          <motion.button
-            key={card.imageSet}
-            onClick={() => onSelect(card.imageSet)}
-            whileTap={{ scale: 0.97 }}
-            className={`
-              group relative flex items-center gap-4 rounded-2xl border border-white/[0.07]
-              bg-gradient-to-r ${card.accent}
-              px-5 py-4 text-left outline-none
-              transition-all duration-250
-              focus-visible:ring-2 focus-visible:ring-white/40
-              hover:border-white/20
-            `}
-            id={`intro-card-${card.imageSet}`}
-            aria-label={card.label}
-          >
-            {/* Icon */}
-            <span className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-white/[0.08] text-xl text-white/70 transition-colors duration-250 group-hover:bg-white/[0.13] group-hover:text-white/90">
-              {card.icon}
-            </span>
+      {/* Two photographic cards */}
+      <motion.div
+        variants={activeItemVariants}
+        className="grid w-full grid-cols-2 gap-3.5 sm:gap-4"
+        role="group"
+        aria-label="Image preference choices"
+      >
+        {CHOICES.map((choice) => {
+          const hasError = imgErrors.has(choice.key)
 
-            {/* Text */}
-            <div className="flex flex-col">
-              <span className="text-sm font-semibold tracking-wide text-white">
-                {card.label}
-              </span>
-              <span className="text-xs text-white/40 group-hover:text-white/55 transition-colors duration-250">
-                {card.sublabel}
-              </span>
-            </div>
+          return (
+            <motion.button
+              key={choice.key}
+              type="button"
+              onClick={() => onSelect(choice.key)}
+              whileTap={shouldReduceMotion ? undefined : { scale: 0.98 }}
+              className="group relative flex w-full cursor-pointer flex-col overflow-hidden rounded-2xl border border-[#38383D] bg-[#1E1E21] p-2 text-left shadow-xs outline-none transition-all duration-200 hover:border-[#E8C568] hover:shadow-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#E8C568] sm:p-2.5"
+              id={`intro-card-${choice.key}`}
+              aria-label={choice.label}
+            >
+              {/* Dedicated 4:5 image area */}
+              <div className="relative aspect-[4/5] w-full overflow-hidden rounded-xl bg-[#141416]">
+                {!hasError ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={choice.imageSrc}
+                    alt={choice.label}
+                    className="h-full w-full object-contain p-1.5 transition-transform duration-300 motion-safe:group-hover:scale-[1.03] sm:p-2"
+                    loading="eager"
+                    onError={() => handleImageError(choice.key)}
+                  />
+                ) : (
+                  <div
+                    className="flex h-full w-full flex-col items-center justify-center p-3 text-center"
+                    aria-hidden="true"
+                  >
+                    <div className="flex size-10 items-center justify-center rounded-full border border-[#38383D] bg-[#1E1E21] text-[#B5B0A8] shadow-2xs">
+                      <Sparkles className="size-5" strokeWidth={1.5} />
+                    </div>
+                  </div>
+                )}
+              </div>
 
-            {/* Chevron */}
-            <span className="ml-auto text-white/25 transition-all duration-250 group-hover:translate-x-0.5 group-hover:text-white/50">
-              →
-            </span>
-          </motion.button>
-        ))}
-      </motion.div>
-
-      {/* Skip link */}
-      <motion.div variants={itemVariants} className="mt-6">
-        <button
-          onClick={() => onSelect('neutral')}
-          className="text-sm text-white/35 underline-offset-4 transition-colors duration-200 hover:text-white/60 focus-visible:text-white/60 focus-visible:outline-none"
-          id="intro-skip"
-          aria-label="Skip imagery preference, use alternating images"
-        >
-          Skip
-        </button>
+              {/* Dedicated label area below the image */}
+              <div className="flex min-h-[2.5rem] w-full items-center justify-between px-1 pt-2 pb-0.5 sm:pt-2.5">
+                <span className="line-clamp-1 text-xs font-medium leading-snug text-[#F5F1E9] sm:text-sm">
+                  {choice.label}
+                </span>
+                <span
+                  className="text-sm text-[#B5B0A8] transition-transform duration-200 group-hover:translate-x-0.5 group-hover:text-[#E8C568]"
+                  aria-hidden="true"
+                >
+                  →
+                </span>
+              </div>
+            </motion.button>
+          )
+        })}
       </motion.div>
     </motion.div>
   )

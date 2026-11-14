@@ -13,42 +13,63 @@
 // ---------------------------------------------------------------------------
 
 /**
- * Which imagery variant the user prefers for outfit-photography questions.
- *
- * - 'masculine'  → always show the menswear-leaning photo.
- * - 'feminine'   → always show the womenswear-leaning photo.
- * - 'neutral'    → alternate deterministically by question index
- *                  (even index → masculine, odd index → feminine).
+ * Active quiz image preference chosen by the user in the intro screen.
+ * Strictly binary: 'feminine' ("Women’s looks") or 'masculine' ("Men’s looks").
  */
-export type ImageSet = 'masculine' | 'feminine' | 'neutral';
+export type QuizImagePreference = 'masculine' | 'feminine';
+
+/**
+ * Which imagery variant the user prefers for outfit-photography questions.
+ * 'neutral' is retained strictly for backwards compatibility with legacy tests/callers.
+ */
+export type ImageSet = QuizImagePreference | 'neutral';
 
 /**
  * A quiz option that carries a single image URL.
- * Used by the 6 gender-neutral questions (colour swatches, icon illustrations,
- * close-up garment details).
+ * Used for backwards compatibility or single-image assets.
  */
 export interface SingleImageOption {
-  imageUrl: string;
-  [key: string]: unknown;
+  imageUrl?: string | null;
+  id?: string;
+  label?: string;
 }
 
-/**
- * A quiz option that carries two image variants.
- * Used by the 5 outfit-photography questions.
- */
 export interface GenderedImageOption {
-  images: { masculine: string; feminine: string };
-  [key: string]: unknown;
+  images: {
+    masculine: string | null;
+    feminine: string | null;
+  };
+  id?: string;
+  label?: string;
 }
 
+export type QuizOptionWithImages = SingleImageOption | GenderedImageOption;
+
 // ---------------------------------------------------------------------------
-// Type guard
+// Type guards
 // ---------------------------------------------------------------------------
+
+export function isGenderedImageOption(
+  option: unknown,
+): option is GenderedImageOption {
+  return (
+    typeof option === 'object' &&
+    option !== null &&
+    'images' in option &&
+    typeof (option as GenderedImageOption).images === 'object' &&
+    (option as GenderedImageOption).images !== null
+  );
+}
 
 export function isSingleImageOption(
-  option: SingleImageOption | GenderedImageOption,
+  option: unknown,
 ): option is SingleImageOption {
-  return 'imageUrl' in option && typeof (option as SingleImageOption).imageUrl === 'string';
+  return (
+    typeof option === 'object' &&
+    option !== null &&
+    'imageUrl' in option &&
+    typeof (option as SingleImageOption).imageUrl === 'string'
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -60,12 +81,13 @@ export function isSingleImageOption(
  * and the (0-based) index of the question in the full question list.
  *
  * Rules:
- *   - SingleImageOption   → always returns `imageUrl`, regardless of imageSet.
- *   - GenderedImageOption + 'masculine' → `images.masculine`.
- *   - GenderedImageOption + 'feminine'  → `images.feminine`.
+ *   - GenderedImageOption + 'masculine' → images.masculine (or null if missing).
+ *   - GenderedImageOption + 'feminine'  → images.feminine (or null if missing).
  *   - GenderedImageOption + 'neutral'   → deterministic alternation:
- *       even questionIndex → images.masculine
- *       odd  questionIndex → images.feminine
+ *       even questionIndex → images.masculine (or null)
+ *       odd  questionIndex → images.feminine (or null)
+ *   - Never substitute an image from the opposite set when preferred is null.
+ *   - SingleImageOption   → returns `imageUrl ?? null`.
  *
  * Pure function — no side effects, no hooks.
  * The neutral alternation depends only on `questionIndex` (no randomness)
@@ -74,23 +96,33 @@ export function isSingleImageOption(
  * @param option        - The quiz option to resolve an image for.
  * @param imageSet      - The user's display preference.
  * @param questionIndex - 0-based index of the question in the quiz sequence.
- * @returns             The resolved image URL string.
+ * @returns             The resolved image URL string, or null if unconfigured/missing.
  */
 export function getOptionImage(
   option: SingleImageOption | GenderedImageOption,
   imageSet: ImageSet,
   questionIndex: number,
-): string {
-  if (isSingleImageOption(option)) {
-    return option.imageUrl;
+): string | null {
+  if (isGenderedImageOption(option)) {
+    const { masculine, feminine } = option.images;
+
+    if (imageSet === 'masculine') {
+      return masculine ?? null;
+    }
+
+    if (imageSet === 'feminine') {
+      return feminine ?? null;
+    }
+
+    // 'neutral' — deterministic alternation by question index
+    // Never substitute from the opposite set if the chosen slot is null.
+    const chosen = questionIndex % 2 === 0 ? masculine : feminine;
+    return chosen ?? null;
   }
 
-  // GenderedImageOption
-  const { masculine, feminine } = option.images;
+  if (isSingleImageOption(option)) {
+    return option.imageUrl ?? null;
+  }
 
-  if (imageSet === 'masculine') return masculine;
-  if (imageSet === 'feminine') return feminine;
-
-  // 'neutral' — deterministic alternation by question index
-  return questionIndex % 2 === 0 ? masculine : feminine;
+  return null;
 }

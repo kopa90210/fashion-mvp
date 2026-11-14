@@ -1,5 +1,26 @@
 # Curated catalog ingestion
 
+## Hosted importer authentication and preflight
+
+`scripts/hosted_curated_import.py` reads only the process environment, never `.env`
+files. Set `STYLEGRAPH_HOSTED_SUPABASE_URL` to the exact hosted project URL and
+`STYLEGRAPH_HOSTED_SUPABASE_SERVICE_KEY` to its secret key in the launching
+PowerShell session. New `sb_secret_` keys are sent in `apikey` only; legacy
+service-role JWTs retain Bearer authentication. Publishable keys are rejected.
+
+Run a read-only hosted check from that session:
+
+```powershell
+python scripts/hosted_curated_import.py --preflight --target-project-ref wwmumdmpruqwralxniwk
+```
+
+Preflight validates the dataset, project URL, public bucket, existing rows, and
+storage duplicates. Storage listing uses a read-only POST endpoint. It never
+uploads, inserts, or creates a rollback manifest. Default dry-run remains local
+and makes no requests. `--apply` retains its separate project/phrase confirmations
+and rollback-manifest requirement. HTTP failures report a fixed operation label
+and status, without credentials, headers, or upstream response bodies.
+
 Curated catalog ingestion has two independent phases. The laptop owns source files, hashing, validation, cache artifacts, duplicate checks, and all local Supabase writes. The remote Colab service receives one image and two non-sensitive hints. It performs background removal and fashion metadata inference only.
 
 ## Dataset layout
