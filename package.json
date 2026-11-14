@@ -9,7 +9,7 @@
     "lint": "eslint",
     "test": "vitest run",
     "test:ai": "vitest run --config vitest.ai.config.mts",
-    "build:worker": "opennextjs-cloudflare build"
+    "build:worker": "opennextjs-cloudflare build --openNextConfigPath open-next.worker.config.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
