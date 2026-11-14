@@ -8,6 +8,7 @@ In the Cloudflare dashboard for `fashion-mvp`, under **Settings → Build**:
 
 - Keep Node 22. Leave the build command empty to avoid building twice.
 - For Workers Preview Builds, use `npx wrangler preview` as the preview command. Check the Preview settings for required bindings and runtime variables, then verify the build from a branch other than the Worker’s production branch.
+  The preview config keeps the `IMAGES` binding and deliberately omits `WORKER_SELF_REFERENCE`: a Preview service binding calls the live Worker. OpenNext features that depend on self-calls are not covered by this Preview.
 - For a future production rollout, use `npx wrangler deploy --config wrangler.jsonc` as the deploy command. Select the intended production branch before enabling automatic production builds.
 
 Set deployment values in the Cloudflare environment. Next.js public variables are needed at build time; configure runtime variables and secrets separately as required. Keep local `.dev.vars` files out of Git. The Python photo extraction worker is a separate service.

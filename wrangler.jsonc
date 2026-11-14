@@ -14,5 +14,9 @@
     { "binding": "WORKER_SELF_REFERENCE", "service": "fashion-mvp" }
   ],
   "images": { "binding": "IMAGES" },
+  "previews": {
+    // A preview service binding would call the live Worker.
+    "images": { "binding": "IMAGES" }
+  },
   "observability": { "enabled": true }
 }
