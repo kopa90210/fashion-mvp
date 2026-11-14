@@ -61,3 +61,8 @@ next-env.d.ts
 .windsurf
 .insforge.worker.env
 .worktrees/
+
+# Cloudflare local output and secrets
+/.open-next/
+/.wrangler/
+.dev.vars*
