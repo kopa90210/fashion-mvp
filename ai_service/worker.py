@@ -40,6 +40,8 @@ from ai_service.providers.outfit import (
     build_outfit_provider,
 )
 
+from ai_service.worker_health import serve_worker_health
+
 logger = logging.getLogger(__name__)
 DAILY_PROMPT_VERSION = "daily-outfit-v1"
 DAILY_SCHEMA_VERSION = "outfit-response-v1"
@@ -460,6 +462,13 @@ def main() -> None:
         parser.error("--poll-seconds must be between 1 and 60")
     if not 30 <= args.heartbeat_seconds <= 300:
         parser.error("--heartbeat-seconds must be between 30 and 300")
+    configured_port = os.getenv("WORKER_HEALTH_PORT")
+    if configured_port is not None and (
+        not configured_port.isascii() or not configured_port.isdecimal()
+        or len(configured_port) > 5 or not 1 <= int(configured_port) <= 65535
+    ):
+        parser.error("WORKER_HEALTH_PORT must be a TCP port from 1 to 65535")
+    health_port = int(configured_port) if configured_port is not None else None
     configure_worker_logging()
 
     settings = get_settings()
@@ -503,12 +512,15 @@ def main() -> None:
         )
 
     try:
-        run_worker_loop(
-            process_next, shutdown, health,
-            poll_seconds=args.poll_seconds,
-            heartbeat_seconds=args.heartbeat_seconds,
-            once=args.once,
-        )
+        with serve_worker_health(health_port) as port:
+            if port is not None:
+                log_worker_event("WORKER_HEALTH_LISTENING", port=port)
+            run_worker_loop(
+                process_next, shutdown, health,
+                poll_seconds=args.poll_seconds,
+                heartbeat_seconds=args.heartbeat_seconds,
+                once=args.once,
+            )
     finally:
         db.close()
         log_worker_event("WORKER_STOPPED", worker_id=worker_id)
