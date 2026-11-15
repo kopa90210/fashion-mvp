@@ -1,7 +1,7 @@
 import 'server-only'
 import { createClient as createSupabaseClient, type SupabaseClient } from '@supabase/supabase-js'
 import crypto from 'node:crypto'
-import sharp, { type Metadata } from 'sharp'
+import type { Metadata } from 'sharp'
 
 const BUCKET = 'private-wardrobe-media'
 const MAX_BYTES = 10 * 1024 * 1024
@@ -57,6 +57,13 @@ export async function validatePrivateImage(file: File): Promise<ValidatedPrivate
   const bytes = Buffer.from(await file.arrayBuffer())
   if (bytes.length === 0) throw new Error('Image file is empty')
   if (bytes.length > MAX_BYTES) throw new Error('Image exceeds the 10 MB limit')
+  // Read-only routes share this module and must load without a native image decoder.
+  let sharp: typeof import('sharp')['default']
+  try {
+    ;({ default: sharp } = await import('sharp'))
+  } catch {
+    throw new Error('Image validation is unavailable on this deployment')
+  }
   let metadata: Metadata
   try { metadata = await sharp(bytes, { failOn: 'error' }).metadata() } catch { throw new Error('Image content is corrupt or unsupported') }
   const format = metadata.format && FORMATS.get(metadata.format)
