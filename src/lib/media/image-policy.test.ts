@@ -48,7 +48,7 @@ describe('wardrobe image policy', () => {
     ])
   })
 
-  it('bypasses optimization for signed private previews but not curated public media', () => {
+  it('bypasses optimization for signed private previews and preserves local public optimization', () => {
     expect(
       shouldBypassWardrobeImageOptimization(
         'https://project.supabase.co/storage/v1/object/sign/private-wardrobe-media/item.png?token=secret',
@@ -60,4 +60,13 @@ describe('wardrobe image policy', () => {
       ),
     ).toBe(false)
   })
+  it('requests the known hosted public catalog directly without bypassing other hosts or buckets', () => {
+    const origin = 'https://wwmumdmpruqwralxniwk.supabase.co'
+    const path = '/storage/v1/object/public/wardrobe-images/curated/item.png'
+
+    expect(shouldBypassWardrobeImageOptimization(origin + path)).toBe(true)
+    expect(shouldBypassWardrobeImageOptimization(origin + '.example.com' + path)).toBe(false)
+    expect(shouldBypassWardrobeImageOptimization(origin + path.replace('wardrobe-images', 'other'))).toBe(false)
+  })
+
 })

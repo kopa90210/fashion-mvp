@@ -13,6 +13,8 @@ export type WardrobeImageConfig = {
 }
 
 const DEFAULT_SUPABASE_URL = 'https://svbkadgcpbpnbfzaqvsf.supabase.co'
+const HOSTED_CATALOG_ORIGIN = 'https://wwmumdmpruqwralxniwk.supabase.co'
+const PUBLIC_CURATED_PATH = '/storage/v1/object/public/wardrobe-images/curated/'
 const LOCAL_IMAGE_HOSTS = new Set(['127.0.0.1', 'localhost'])
 
 function parseSupabaseUrl(value?: string): URL {
@@ -55,9 +57,16 @@ export function shouldBypassWardrobeImageOptimization(src: string): boolean {
   if (src.startsWith('data:') || src.startsWith('blob:')) return true
 
   try {
-    return new URL(src, 'https://stylegraph.local').pathname.includes(
-      '/storage/v1/object/sign/private-wardrobe-media/',
-    )
+    const url = new URL(src, 'https://stylegraph.local')
+    if (url.pathname.includes('/storage/v1/object/sign/private-wardrobe-media/')) {
+      return true
+    }
+
+    // The hosted catalog already serves prepared public images from its CDN.
+    return url.origin === HOSTED_CATALOG_ORIGIN
+      && !url.username && !url.password
+      && url.pathname.startsWith(PUBLIC_CURATED_PATH)
+      && url.pathname.length > PUBLIC_CURATED_PATH.length
   } catch {
     return false
   }
