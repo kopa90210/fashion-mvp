@@ -1,7 +1,6 @@
 import 'server-only'
 import { createClient as createSupabaseClient, type SupabaseClient } from '@supabase/supabase-js'
 import crypto from 'node:crypto'
-import type { Metadata } from 'sharp'
 
 const BUCKET = 'private-wardrobe-media'
 const MAX_BYTES = 10 * 1024 * 1024
@@ -53,10 +52,21 @@ async function authenticatedStorage(
   }).storage.from(BUCKET)
 }
 
-export async function validatePrivateImage(file: File): Promise<ValidatedPrivateImage> {
-  const bytes = Buffer.from(await file.arrayBuffer())
-  if (bytes.length === 0) throw new Error('Image file is empty')
-  if (bytes.length > MAX_BYTES) throw new Error('Image exceeds the 10 MB limit')
+type ImageMetadata = { format?: string; width?: number; height?: number }
+
+async function readImageMetadata(file: File, bytes: Buffer): Promise<ImageMetadata> {
+  if (globalThis.navigator?.userAgent === 'Cloudflare-Workers') {
+    const { getCloudflareContext } = await import('@opennextjs/cloudflare')
+    const images = getCloudflareContext().env.IMAGES
+    if (!images) throw new Error('Image validation is unavailable on this deployment')
+    try {
+      const info: ImageMetadata = await images.info(file.stream())
+      return { ...info, format: info.format?.replace(/^image\//, '') }
+    } catch {
+      throw new Error('Image content is corrupt or unsupported')
+    }
+  }
+
   // Read-only routes share this module and must load without a native image decoder.
   let sharp: typeof import('sharp')['default']
   try {
@@ -64,13 +74,27 @@ export async function validatePrivateImage(file: File): Promise<ValidatedPrivate
   } catch {
     throw new Error('Image validation is unavailable on this deployment')
   }
-  let metadata: Metadata
-  try { metadata = await sharp(bytes, { failOn: 'error' }).metadata() } catch { throw new Error('Image content is corrupt or unsupported') }
+  try {
+    return await sharp(bytes, { failOn: 'error' }).metadata()
+  } catch {
+    throw new Error('Image content is corrupt or unsupported')
+  }
+}
+
+export async function validatePrivateImage(file: File): Promise<ValidatedPrivateImage> {
+  const bytes = Buffer.from(await file.arrayBuffer())
+  if (bytes.length === 0) throw new Error('Image file is empty')
+  if (bytes.length > MAX_BYTES) throw new Error('Image exceeds the 10 MB limit')
+  const metadata = await readImageMetadata(file, bytes)
   const format = metadata.format && FORMATS.get(metadata.format)
-  if (!format || !metadata.width || !metadata.height) throw new Error('Only JPEG, PNG, and WebP images are supported')
-  if (metadata.width * metadata.height > MAX_PIXELS) throw new Error('Image exceeds the 20 megapixel limit')
+  const { width, height } = metadata
+  if (!format || !width || !height || !Number.isSafeInteger(width)
+    || !Number.isSafeInteger(height) || width < 1 || height < 1) {
+    throw new Error('Only JPEG, PNG, and WebP images are supported')
+  }
+  if (width * height > MAX_PIXELS) throw new Error('Image exceeds the 20 megapixel limit')
   if (file.type && file.type !== format.mime) throw new Error('Image MIME type does not match its content')
-  return { bytes, mimeType: format.mime, extension: format.ext, sha256: crypto.createHash('sha256').update(bytes).digest('hex'), width: metadata.width, height: metadata.height }
+  return { bytes, mimeType: format.mime, extension: format.ext, sha256: crypto.createHash('sha256').update(bytes).digest('hex'), width, height }
 }
 
 export async function uploadValidatedPrivateImage(
