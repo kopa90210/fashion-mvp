@@ -10,10 +10,11 @@ Run this script from within the StyleGraph repo as scripts/hosted_curated_import
 from __future__ import annotations
 
 import argparse
+from collections import Counter, defaultdict
 from datetime import datetime, timezone
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import sys
 from urllib.parse import urlparse
@@ -32,6 +33,46 @@ from scripts.bootstrap_curated_catalog import (  # noqa: E402
 
 EXPECTED_BUCKET = "wardrobe-images"
 PROJECT_REF_RE = re.compile(r"^[a-z0-9]{20}$")
+
+
+COLLECTION_ALIASES = {
+    "men": "masculine", "masculine": "masculine", "musculine": "masculine", "muscline": "masculine",
+    "women": "feminine", "feminine": "feminine", "femine": "feminine",
+    "shared": "shared", "unisex": "shared", "neutral": "shared",
+}
+
+
+def hosted_collection(candidate, root_name=""):
+    folders = (root_name, *PurePosixPath(candidate.source_relative_path.replace(chr(92), "/")).parts[:-1])
+    labels = {COLLECTION_ALIASES[part.lower()] for part in folders if part.lower() in COLLECTION_ALIASES}
+    profile = candidate.presentation_profile.strip().lower()
+    # Old manifests used neutral if the source folder wasn't recognized.
+    if profile in COLLECTION_ALIASES and profile != "neutral":
+        labels.add(COLLECTION_ALIASES[profile])
+    if len(labels) != 1:
+        raise BootstrapError(f"missing or conflicting collection: {candidate.source_relative_path}")
+    return labels.pop()
+
+
+def catalog_batch(root, min_confidence):
+    roots = [root] if (root / "manifests").is_dir() else sorted(
+        child for child in root.iterdir()
+        if child.is_dir() and not child.is_symlink() and child.name.lower() in COLLECTION_ALIASES
+    )
+    if not roots:
+        raise BootstrapError("no manifests directory found in the input or collection subdirectories")
+    entries = {}
+    for dataset in roots:
+        inventory = inventory_dataset(dataset, min_confidence)
+        if inventory.rejected:
+            raise BootstrapError(f"{len(inventory.rejected)} rejected manifests; first: {inventory.rejected[0].reason}")
+        for candidate in inventory.valid:
+            if candidate.item_id in entries:
+                raise BootstrapError(f"duplicate source image: {candidate.source_relative_path}")
+            entries[candidate.item_id] = (candidate, hosted_collection(candidate, dataset.name))
+    if not entries:
+        raise BootstrapError("no valid curated candidates")
+    return [entries[item_id] for item_id in sorted(entries)]
 
 
 class HostedRequestError(BootstrapError):
@@ -120,7 +161,7 @@ def require_project_url(project_ref: str) -> tuple[str, str]:
 
 def exact_existing_rows(supabase, candidate):
     result = (supabase.table("wardrobe_items")
-              .select("id,source,status,image_url")
+              .select("id,source,status,image_url,catalog_collection")
               .eq("id", candidate.item_id).limit(1).execute())
     return result.data or []
 
@@ -161,18 +202,13 @@ def main() -> int:
         if ref and not PROJECT_REF_RE.fullmatch(ref):
             raise BootstrapError("target project ref must be 20 lowercase letters/digits")
 
-        inventory = inventory_dataset(args.dataset_root.resolve(), args.min_confidence)
-        if inventory.rejected:
-            raise BootstrapError(f"refusing import: {len(inventory.rejected)} rejected manifests")
-        if not inventory.valid:
-            raise BootstrapError("no valid curated candidates")
-        ids = [x.item_id for x in inventory.valid]
-        if len(ids) != len(set(ids)):
-            raise BootstrapError("duplicate deterministic IDs within the dataset")
-
-        candidates = sorted(inventory.valid, key=lambda x: x.item_id)
-        from collections import Counter
+        batch = catalog_batch(args.dataset_root.resolve(), args.min_confidence)
+        candidates = [candidate for candidate, _ in batch]
+        collections = {candidate.item_id: collection for candidate, collection in batch}
         counts = dict(sorted(Counter(x.attributes["category"] for x in candidates).items()))
+        counts_by_collection = defaultdict(Counter)
+        for candidate, collection in batch:
+            counts_by_collection[collection][candidate.attributes["category"]] += 1
 
         # Verify physical images exist and compute missing image count
         missing_images = [
@@ -192,14 +228,15 @@ def main() -> int:
             "target_project_ref": ref or None,
             "dataset_root": str(args.dataset_root.resolve()),
             "valid": len(candidates),
-            "rejected": len(inventory.rejected),
+            "rejected": 0,
             "missing_images": len(missing_images),
             "missing_image_paths": missing_images,
             "category_counts": counts,
+            "collection_category_counts": counts_by_collection,
             "coverage": onboarding_coverage(counts),
             "intended_writes": intended_writes,
             "items": [{"id": x.item_id, "category": x.attributes["category"], "display_name": x.attributes["display_name"],
-                       "source": x.source_relative_path, "object_path": f"curated/{x.item_id}.png"} for x in candidates],
+                       "source": x.source_relative_path, "catalog_collection": collections[x.item_id], "object_path": f"curated/{x.item_id}.png"} for x in candidates],
         }
         if args.plan_output:
             save_json_exclusive(args.plan_output.resolve(), plan)
@@ -236,6 +273,7 @@ def main() -> int:
 
         # Check every item and its storage object BEFORE the first write.
         actions = []
+        unlabeled = []
         for candidate in candidates:
             path = f"curated/{candidate.item_id}.png"
             operation = "wardrobe row lookup"
@@ -249,6 +287,11 @@ def main() -> int:
                     raise BootstrapError(f"ID collision: {candidate.item_id}")
                 if not exists or not str(row.get("image_url", "")).endswith(path):
                     raise BootstrapError(f"existing row/storage mismatch: {candidate.item_id}")
+                existing = row.get("catalog_collection")
+                if existing is None:
+                    unlabeled.append(candidate.item_id)
+                elif existing != collections[candidate.item_id]:
+                    raise BootstrapError(f"existing collection conflicts with manifest: {candidate.item_id}")
                 action = "skip"
             else:
                 if exists:
@@ -256,6 +299,9 @@ def main() -> int:
                 action = "insert"
             actions.append((candidate, path, action))
 
+        if unlabeled:
+            raise BootstrapError(f"{len(unlabeled)} existing rows need a manifest-backed label update "
+                                 "before import; no writes made.")
         if args.preflight:
             print(f"PREFLIGHT PASSED: {len(actions)} candidates; "
                   f"{sum(action == 'skip' for _, _, action in actions)} existing; "
@@ -292,7 +338,9 @@ def main() -> int:
             entry["state"] = "insert_intent"
             save_json_atomic(manifest_path, record)
             operation = "wardrobe row insert"
-            supabase.table("wardrobe_items").insert(_catalog_row(candidate, image_url)).execute()
+            row = _catalog_row(candidate, image_url)
+            row["catalog_collection"] = collections[candidate.item_id]
+            supabase.table("wardrobe_items").insert(row).execute()
             entry["state"] = "inserted"
             save_json_atomic(manifest_path, record)
             print(f"Inserted {candidate.item_id}")
@@ -302,7 +350,7 @@ def main() -> int:
         return 0
     except Exception as exc:
         # Report error only: never display API keys, exception representations, or full response bodies.
-        detail = str(exc) if isinstance(exc, HostedRequestError) else f"{operation} failed; HTTP status unavailable"
+        detail = str(exc) if isinstance(exc, BootstrapError) else f"{operation} failed; HTTP status unavailable"
         print(f"IMPORT STOPPED: {detail}; check rollback manifest if created.", file=sys.stderr)
         return 1
     finally:

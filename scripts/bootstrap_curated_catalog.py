@@ -8,7 +8,7 @@ from dataclasses import dataclass
 import json
 import math
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import sys
 from typing import Any
 from urllib.parse import urlparse
@@ -171,6 +171,32 @@ def onboarding_coverage(category_counts: dict[str, int]) -> dict[str, bool]:
     }
 
 
+COLLECTION_ALIASES = {
+    "masculine": "masculine", "men": "masculine", "mens": "masculine",
+    "musculine": "masculine",  # Historical curated dataset folder spelling.
+    "muscline": "masculine",
+    "feminine": "feminine", "women": "feminine", "womens": "feminine",
+    "femine": "feminine",
+    "neutral": "shared", "unisex": "shared", "shared": "shared",
+}
+
+
+def catalog_collection(source: str, profile: str = "") -> str:
+    folders = PurePosixPath(source.replace(chr(92), "/")).parts[:-1]
+    hints = {COLLECTION_ALIASES[folder.lower()] for folder in folders
+             if folder.lower() in COLLECTION_ALIASES}
+    explicit = COLLECTION_ALIASES.get(profile.strip().lower())
+    # The pipeline uses neutral as its fallback when no profile folder exists.
+    # Only an explicit shared folder or a deliberate shared/unisex label opts in.
+    if profile.strip().lower() == "neutral" and hints != {"shared"}:
+        explicit = None
+    if explicit:
+        hints.add(explicit)
+    if len(hints) != 1:
+        raise BootstrapError("use one unambiguous men, women, or shared catalog collection")
+    return hints.pop()
+
+
 def _validate_manifest(layout: DatasetLayout, manifest_path: Path, min_confidence: float) -> CatalogCandidate:
     try:
         raw_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -207,6 +233,7 @@ def _validate_manifest(layout: DatasetLayout, manifest_path: Path, min_confidenc
     photo_sha256 = manifest.get("photo_sha256")
     source_identity = deterministic_source_identity(str(photo_sha256 or ""))
     profile = str(manifest.get("presentation_profile") or "unspecified").strip().lower()
+    catalog_collection(source_relative_path, profile)
     return CatalogCandidate(
         item_id=deterministic_item_id(str(photo_sha256)),
         source_identity=source_identity,
@@ -274,6 +301,7 @@ def _catalog_row(candidate: CatalogCandidate, image_url: str) -> dict[str, Any]:
         "id": candidate.item_id,
         "image_url": image_url,
         "source": "curated",
+        "catalog_collection": catalog_collection(candidate.source_relative_path, candidate.presentation_profile),
         "status": "confirmed",
         "category": attributes["category"],
         "subcategory": attributes["subcategory"],

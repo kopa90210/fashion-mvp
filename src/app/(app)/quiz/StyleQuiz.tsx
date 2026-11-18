@@ -76,9 +76,8 @@ export default function StyleQuiz() {
   const shouldReduceMotion = useReducedMotion()
 
   // Display-only image preference
-  // Lives ONLY in component state for the quiz session duration.
-  // Never included in QuizAnswer[] or submitStyleQuiz. Never persisted to Supabase,
-  // localStorage, or any analytics call. Never infers user gender.
+  // Also selects the next screen’s catalog. It does not affect scoring
+  // and is not stored as a profile attribute.
   const [imageSet, setImageSet] = useState<QuizImagePreference>('feminine')
   const [showIntro, setShowIntro] = useState(true)
 
@@ -107,11 +106,11 @@ export default function StyleQuiz() {
       } else {
         // Last question: submit answer IDs for server-side scoring.
         startTransition(async () => {
-          await submitStyleQuiz(newAnswers)
+          await submitStyleQuiz(newAnswers, imageSet)
         })
       }
     },
-    [answers, currentStep, isPending, question.id],
+    [answers, currentStep, imageSet, isPending, question.id],
   )
 
   const handleImageError = useCallback((imageKey: string) => {

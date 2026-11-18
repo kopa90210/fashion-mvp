@@ -14,6 +14,7 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     ".worktrees/**",
     "c5_5_review_bundle/**",
+    ".tmp/**",
   ]),
 ]);
 

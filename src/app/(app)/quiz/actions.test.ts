@@ -1,4 +1,5 @@
-﻿import { beforeEach, describe, expect, it, vi } from 'vitest'
+﻿import { redirect } from 'next/navigation'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { QUIZ_QUESTIONS, QUIZ_QUESTIONS_FOR_SCORING } from '@/src/lib/quiz/questions'
 import { computeStyleVector, type QuizAnswer } from '@/src/lib/quiz/scoring'
 
@@ -38,6 +39,17 @@ describe('submitStyleQuiz', () => {
         primaryOccasion: 'work-university', style: 'minimal', fit: 'slim', formality: 'casual', exploration: 'familiar',
       },
     })
+  })
+
+  it.each(['masculine', 'feminine'] as const)('carries the %s catalog choice without putting it in scoring', async (collection) => {
+    await submitStyleQuiz(answers, collection)
+    expect(redirect).toHaveBeenCalledWith(`/quiz?done=true&collection=${collection}`)
+    expect(state.rpc.mock.calls[0][1]).not.toHaveProperty('collection')
+  })
+
+  it('does not accept an arbitrary collection or redirect target', async () => {
+    await submitStyleQuiz(answers, 'https://example.com')
+    expect(redirect).toHaveBeenCalledWith('/quiz?done=true')
   })
 
   it.each([

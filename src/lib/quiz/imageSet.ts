@@ -4,8 +4,8 @@
  * Display-only image-set preference for the style quiz.
  *
  * This module is intentionally free of React, Supabase, and any analytics.
- * The ImageSet value lives only in StyleQuiz component state and is never
- * persisted, never stored as "gender", and never included in QuizAnswer[].
+ * The quiz forwards the user’s choice to the catalog page. It is not
+ * persisted in the profile or included in QuizAnswer[].
  */
 
 // ---------------------------------------------------------------------------

@@ -5,6 +5,14 @@ import {
 } from './image-policy'
 
 describe('wardrobe image policy', () => {
+  it('bypasses only local public wardrobe PNG optimization during development', () => {
+    const local = 'http://127.0.0.1:54321/storage/v1/object/public/wardrobe-images/curated/item.png'
+    expect(shouldBypassWardrobeImageOptimization(local, 'development')).toBe(true)
+    expect(shouldBypassWardrobeImageOptimization(local, 'production')).toBe(false)
+    expect(shouldBypassWardrobeImageOptimization(local.replace('54321', '9999'), 'development')).toBe(false)
+    expect(shouldBypassWardrobeImageOptimization(local.replace('127.0.0.1', 'remote.invalid'), 'development')).toBe(false)
+    expect(shouldBypassWardrobeImageOptimization(local.replace('wardrobe-images', 'other-bucket'), 'development')).toBe(false)
+  })
   it('allows the local Supabase private IP only in development', () => {
     const localDevelopment = createWardrobeImageConfig(
       'http://127.0.0.1:54321',

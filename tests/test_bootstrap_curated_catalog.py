@@ -181,17 +181,14 @@ def test_onboarding_coverage_supports_separates_or_one_piece() -> None:
 
 def test_repository_canonical_dataset_is_valid_and_onboarding_eligible() -> None:
     inventory = inventory_dataset(DEFAULT_DATASET_ROOT)
-    assert len(inventory.valid) == 29
+    assert len(inventory.valid) == 25
     assert inventory.rejected == ()
     assert inventory.category_counts == {
-        "accessory": 4,
-        "bottom": 5,
+        "bottom": 9,
         "footwear": 7,
-        "one_piece": 4,
-        "outerwear": 2,
-        "top": 7,
+        "outerwear": 5,
+        "top": 4,
     }
-    assert onboarding_coverage(inventory.category_counts)["one_piece_path"]
     assert onboarding_coverage(inventory.category_counts)["separates_path"]
 
 
@@ -202,7 +199,7 @@ def test_dry_run_does_not_load_database_credentials(monkeypatch, capsys) -> None
         lambda: (_ for _ in ()).throw(AssertionError("dry-run attempted database access")),
     )
     assert bootstrap.main(["--dry-run", "--dataset-root", str(DEFAULT_DATASET_ROOT)]) == 0
-    assert '"valid": 29' in capsys.readouterr().out
+    assert '"valid": 25' in capsys.readouterr().out
 
 
 def test_local_credentials_reject_hosted_supabase(monkeypatch) -> None:

@@ -32,15 +32,30 @@ let tableResponses: Record<
 let upsertCalls: Record<string, unknown[]> = {}
 let rpcCalls: Array<{ name: string; args: unknown }> = []
 
+let catalogFilters: string[][] = []
+
 function createQueryBuilder(tableName: string) {
-  const response = () =>
-    tableResponses[tableName] ?? { data: null, error: null }
+  let collections: string[] | undefined
+  const response = () => {
+    const result = tableResponses[tableName] ?? { data: null, error: null }
+    if (collections && Array.isArray(result.data)) {
+      return { ...result, data: result.data.filter((item) =>
+        collections?.includes(Object.hasOwn(item, 'catalog_collection') ? item.catalog_collection : 'feminine')) }
+    }
+    return result
+  }
 
   const builder: Record<string, unknown> = {
     select: vi.fn().mockReturnThis(),
     eq: vi.fn().mockReturnThis(),
     order: vi.fn().mockReturnThis(),
-    in: vi.fn().mockReturnThis(),
+    in: vi.fn((field: string, values: string[]) => {
+      if (field === 'catalog_collection') {
+        collections = values
+        catalogFilters.push(values)
+      }
+      return builder
+    }),
     is: vi.fn().mockReturnThis(),
     or: vi.fn().mockReturnThis(),
     single: vi.fn().mockImplementation(() => response()),
@@ -126,6 +141,7 @@ function makeItems(
 
 beforeEach(() => {
   vi.clearAllMocks()
+  catalogFilters = []
   tableResponses = {}
   upsertCalls = {}
   rpcCalls = []
@@ -201,6 +217,58 @@ describe('removeWardrobeItem', () => {
 // ---------------------------------------------------------------------------
 
 describe('getRankedPieces', () => {
+  it('blocks one-piece ranking, pagination and search for Men’s before querying Supabase', async () => {
+    mockAuthenticatedUser()
+    expect(await getRankedPieces('one_piece', 'masculine')).toEqual({ items: [], hasMore: false })
+    expect(await getRankedPieces('one_piece', 'masculine', 1)).toEqual({ items: [], hasMore: false })
+    expect(await searchPieces('one_piece', 'dress', 'masculine')).toEqual([])
+    expect(mockSupabase.from).not.toHaveBeenCalled()
+  })
+
+  it('allows one-piece ranking and search for Women’s and drops them from the grouped Men’s catalog', async () => {
+    mockAuthenticatedUser()
+    tableResponses.fashion_dna = { data: { vector: { minimal: 1 } }, error: null }
+    tableResponses.wardrobe_items = { error: null, data: [{
+      ...makeItems('one_piece', 1, 1)[0],
+      display_name: 'Linen Dress', subcategory: 'dress', layer_role: 'one_piece',
+      catalog_collection: 'shared',
+    }] }
+    expect((await getRankedPieces('one_piece', 'feminine')).items[0]?.display_name).toBe('Linen Dress')
+    expect((await searchPieces('one_piece', 'dress', 'feminine'))[0]?.display_name).toBe('Linen Dress')
+    expect(await getCuratedPieces('masculine')).not.toHaveProperty('one_piece')
+    expect((await getCuratedPieces('feminine')).one_piece[0]?.display_name).toBe('Linen Dress')
+  })
+
+  it.each(['masculine', 'feminine'] as const)('scopes ranked pages and search to %s and shared', async (collection) => {
+    mockAuthenticatedUser()
+    tableResponses.fashion_dna = { data: { vector: { minimal: 1 } }, error: null }
+    tableResponses.wardrobe_items = {
+      error: null,
+      data: [
+        ...Array.from({ length: 18 }, (_, i) => ({
+          ...makeItems('top', 1, 1)[0],
+          id: `match-${i}`, display_name: 'Shared label shirt', catalog_collection: collection,
+        })),
+        ...[['shared', 'shared'], ['opposite', collection === 'feminine' ? 'masculine' : 'feminine'], ['unknown', null]]
+          .map(([id, profile]) => ({
+            ...makeItems('top', 1, 1)[0], id, display_name: 'Shared label shirt', catalog_collection: profile,
+          })),
+      ],
+    }
+    const first = await getRankedPieces('top', collection)
+    const second = await getRankedPieces('top', collection, 1, first.items.map(({ id }) => id))
+    const third = await getRankedPieces('top', collection, 2, [...first.items, ...second.items].map(({ id }) => id))
+    const ranked = [...first.items, ...second.items, ...third.items].map(({ id }) => id)
+    const search = await searchPieces('top', 'shirt', collection)
+    expect(first.hasMore).toBe(true)
+    expect(new Set(ranked).size).toBe(19)
+    expect(ranked).toContain('shared')
+    expect(ranked).not.toContain('opposite')
+    expect(ranked).not.toContain('unknown')
+    expect(search.map(({ id }) => id).sort()).toEqual(ranked.sort())
+    expect(catalogFilters).toEqual(Array.from({ length: 7 }, () => [collection, 'shared']))
+  })
+
   it('produces visibly different result counts for sharp vs. broad fashion DNA', async () => {
     mockAuthenticatedUser()
 
@@ -222,14 +290,14 @@ describe('getRankedPieces', () => {
       data: { vector: { minimal: 1.0, streetwear: 0.0 } },
       error: null,
     }
-    const sharpResult = await getRankedPieces('top', 0)
+    const sharpResult = await getRankedPieces('top', 'feminine')
 
     // Test B: Broad vector with flatter weights (0.5 vs 0.5)
     tableResponses['fashion_dna'] = {
       data: { vector: { minimal: 0.5, streetwear: 0.5 } },
       error: null,
     }
-    const broadResult = await getRankedPieces('top', 0)
+    const broadResult = await getRankedPieces('top', 'feminine')
 
     // Sharp vector produces fewer high-confidence threshold matches than broad vector
     expect(sharpResult.items.length).not.toEqual(broadResult.items.length)
@@ -246,7 +314,7 @@ describe('getRankedPieces', () => {
     const items = makeItems('top', 20, 0.9)
     tableResponses['wardrobe_items'] = { data: items, error: null }
 
-    const res = await getRankedPieces('top', 0)
+    const res = await getRankedPieces('top', 'feminine')
     expect(res.items.length).toBeGreaterThanOrEqual(4)
     expect(res.items.length).toBeLessThanOrEqual(14)
   })
@@ -262,7 +330,7 @@ describe('getRankedPieces', () => {
       error: null,
     }
 
-    const res = await getRankedPieces('top', 0)
+    const res = await getRankedPieces('top', 'feminine')
     expect(res.items.length).toBeGreaterThan(0)
 
     for (const item of res.items) {
@@ -291,12 +359,12 @@ describe('searchPieces', () => {
     tableResponses['wardrobe_items'] = { data: items, error: null }
 
     // Search for "White" in 'top' category — should return 't1' but NOT 'b1' (which is a bottom)
-    const topResults = await searchPieces('top', 'white')
+    const topResults = await searchPieces('top', 'white', 'feminine')
     expect(topResults).toHaveLength(1)
     expect(topResults[0].id).toBe('t1')
 
     // Search for "white" in 'bottom' category — should return 'b1'
-    const bottomResults = await searchPieces('bottom', 'white')
+    const bottomResults = await searchPieces('bottom', 'white', 'feminine')
     expect(bottomResults).toHaveLength(1)
     expect(bottomResults[0].id).toBe('b1')
   })
@@ -318,7 +386,7 @@ describe('searchPieces', () => {
       error: null,
     }
 
-    const topResults = await searchPieces('top', 'white')
+    const topResults = await searchPieces('top', 'white', 'feminine')
     expect(topResults).toHaveLength(1)
     expect(topResults[0].id).toBe('mixed-top')
   })
@@ -333,7 +401,7 @@ describe('searchPieces', () => {
       error: null,
     }
 
-    const results = await searchPieces('top', 'oxford')
+    const results = await searchPieces('top', 'oxford', 'feminine')
     expect(results).toHaveLength(1)
     expect(Object.keys(results[0]).sort()).toEqual(
       ['category', 'display_name', 'id', 'image_url'].sort(),
@@ -377,7 +445,7 @@ describe('saveWardrobeSelection', () => {
     expect(await getPendingOwnedSelection()).toEqual({
       exists: true,
       itemIds: ['top-1'],
-      items: [{ id: 'top-1', category: 'top', display_name: 'Catalog reference', image_url: '/shirt.png' }],
+      items: [{ id: 'top-1', category: 'top', display_name: 'Catalog reference', image_url: '/shirt.png', catalogCollection: null }],
       version: 2,
       committed: false,
     })
@@ -435,7 +503,7 @@ describe('getCuratedPieces', () => {
     ]
     tableResponses['wardrobe_items'] = { data: items, error: null }
 
-    const result = await getCuratedPieces()
+    const result = await getCuratedPieces('feminine')
 
     for (const [, categoryItems] of Object.entries(result)) {
       expect(categoryItems.length).toBeLessThanOrEqual(10)

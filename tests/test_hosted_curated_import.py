@@ -1,3 +1,4 @@
+import json
 from types import SimpleNamespace
 
 import httpx
@@ -73,7 +74,7 @@ def test_project_guard_and_publishable_rejection(monkeypatch):
 def test_preflight_runs_duplicate_checks_without_writes(monkeypatch, tmp_path, capsys, existing, orphan, expected):
     image = tmp_path / "test.png"
     image.write_bytes(b"test")
-    candidate = SimpleNamespace(item_id="test", processed_path=image, source_relative_path="test.png",
+    candidate = SimpleNamespace(item_id="test", processed_path=image, source_relative_path="muscline/test.png", presentation_profile="neutral",
                                 attributes={"category": "top", "display_name": "Shirt"})
     monkeypatch.setattr(hosted, "inventory_dataset", lambda *_: SimpleNamespace(valid=[candidate], rejected=[]))
     monkeypatch.setenv("STYLEGRAPH_HOSTED_SUPABASE_URL", URL)
@@ -88,7 +89,7 @@ def test_preflight_runs_duplicate_checks_without_writes(monkeypatch, tmp_path, c
         if "/object/list/" in request.url.path:
             return httpx.Response(200, json=[{"name": "test.png"}] if existing or orphan else [])
         assert request.method == "GET"
-        return httpx.Response(200, json=[{"id": "test", "source": "curated", "status": "confirmed",
+        return httpx.Response(200, json=[{"id": "test", "source": "curated", "status": "confirmed", "catalog_collection": "masculine",
                                         "image_url": f"{URL}/storage/v1/object/public/wardrobe-images/curated/test.png"}] if existing else [])
 
     factory = hosted.create_hosted_client
@@ -100,3 +101,60 @@ def test_preflight_runs_duplicate_checks_without_writes(monkeypatch, tmp_path, c
                         ("GET", "/rest/v1/wardrobe_items"), ("POST", "/storage/v1/object/list/wardrobe-images")]
     output = capsys.readouterr()
     assert "sb_secret_" not in output.out + output.err
+
+
+@pytest.mark.parametrize(("folder", "expected"), [
+    ("muscline", "masculine"), ("musculine", "masculine"), ("femine", "feminine"),
+    ("shared", "shared"),
+])
+def test_legacy_folder_is_authoritative_even_when_older_manifest_defaulted_to_neutral(folder, expected):
+    candidate = SimpleNamespace(source_relative_path=f"{folder}/shirt.png", presentation_profile="neutral")
+    assert hosted.hosted_collection(candidate) == expected
+
+
+def test_unknown_or_conflicting_collection_is_rejected():
+    for path, profile in (("tops/shirt.png", "neutral"), ("femine/shirt.png", "masculine")):
+        candidate = SimpleNamespace(source_relative_path=path, presentation_profile=profile)
+        with pytest.raises(hosted.BootstrapError, match="missing or conflicting collection"):
+            hosted.hosted_collection(candidate)
+
+
+def test_hosted_apply_persists_collection_and_never_writes_ownership(monkeypatch, tmp_path):
+    image = tmp_path / "shirt.png"
+    image.write_bytes(b"image bytes")
+    candidate = SimpleNamespace(
+        item_id="test", processed_path=image, source_relative_path="muscline/shirt.png",
+        presentation_profile="neutral", attributes={
+            "category": "top", "subcategory": "shirt", "display_name": "Shirt", "color": {},
+            "material": {}, "fit": {}, "pattern": "solid", "style_tags": {"minimal": 1},
+            "formality_score": 0, "season_weights": {}, "layer_role": "base_layer", "model_confidence": 1,
+        },
+    )
+    monkeypatch.setenv("STYLEGRAPH_HOSTED_SUPABASE_URL", URL)
+    monkeypatch.setenv("STYLEGRAPH_HOSTED_SUPABASE_SERVICE_KEY", "sb_secret_fixture")
+    monkeypatch.setattr(hosted, "inventory_dataset", lambda *_: SimpleNamespace(valid=[candidate], rejected=[]))
+    writes = []
+
+    def respond(request):
+        path = request.url.path
+        if "/bucket/" in path:
+            return httpx.Response(200, json=BUCKET)
+        if "/object/list/" in path or request.method == "GET":
+            return httpx.Response(200, json=[])
+        writes.append(path)
+        if path == "/rest/v1/wardrobe_items":
+            assert json.loads(request.content)["catalog_collection"] == "masculine"
+            return httpx.Response(201, json=[{"id": "test"}])
+        assert path == "/storage/v1/object/wardrobe-images/curated/test.png"
+        return httpx.Response(200, json={"Key": "wardrobe-images/curated/test.png", "Id": "test"})
+
+    factory = hosted.create_hosted_client
+    monkeypatch.setattr(hosted, "create_hosted_client",
+                        lambda url, key: factory(url, key, transport=httpx.MockTransport(respond)))
+    rollback = tmp_path / "rollback.json"
+    monkeypatch.setattr("sys.argv", ["importer", "--apply", "--target-project-ref", REF,
+                                    "--confirm-project-ref", REF, "--confirm-phrase", f"IMPORT_CURATED_TO_{REF}",
+                                    "--rollback-manifest", str(rollback)])
+    assert hosted.main() == 0
+    assert writes == ["/storage/v1/object/wardrobe-images/curated/test.png", "/rest/v1/wardrobe_items"]
+    assert json.loads(rollback.read_text())["status"] == "completed"

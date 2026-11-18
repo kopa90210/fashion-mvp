@@ -48,19 +48,30 @@ const samplePendingWithMultiCategory: PendingOwnedSelection = {
   exists: true,
   itemIds: ['top-1', 'top-2', 'bottom-1', 'footwear-1'],
   items: [
-    { id: 'top-1', category: 'top', display_name: 'White Tee', image_url: '/top1.jpg' },
-    { id: 'top-2', category: 'top', display_name: 'Silk Blouse', image_url: '/top2.jpg' },
-    { id: 'bottom-1', category: 'bottom', display_name: 'Denim Jeans', image_url: '/bottom1.jpg' },
-    { id: 'footwear-1', category: 'footwear', display_name: 'Loafers', image_url: '/shoes1.jpg' },
+    { id: 'top-1', category: 'top', display_name: 'White Tee', image_url: '/top1.jpg', catalogCollection: 'feminine' },
+    { id: 'top-2', category: 'top', display_name: 'Silk Blouse', image_url: '/top2.jpg', catalogCollection: 'feminine' },
+    { id: 'bottom-1', category: 'bottom', display_name: 'Denim Jeans', image_url: '/bottom1.jpg', catalogCollection: 'feminine' },
+    { id: 'footwear-1', category: 'footwear', display_name: 'Loafers', image_url: '/shoes1.jpg', catalogCollection: 'feminine' },
   ],
   version: 2,
   committed: false,
 }
 
 describe('PieceSelectionScreen with Category Tabs', () => {
+  it.each([
+    ['masculine', false],
+    ['feminine', true],
+  ] as const)('only renders the one-piece tab when allowed in %s', (collection, expected) => {
+    const html = renderToStaticMarkup(React.createElement(PieceSelectionScreen, {
+      pending: samplePendingWithMultiCategory, collection,
+    }))
+    expect(html.includes('id="category-tab-one_piece"')).toBe(expected)
+    expect(html).toContain('id="category-tab-footwear"')
+  })
+
   it('renders a semantic, horizontally scrollable category tablist with all 6 categories', () => {
     const html = renderToStaticMarkup(
-      React.createElement(PieceSelectionScreen, { pending: samplePendingWithMultiCategory }),
+      React.createElement(PieceSelectionScreen, { pending: samplePendingWithMultiCategory, collection: 'feminine' }),
     )
 
     // Tablist container
@@ -85,7 +96,7 @@ describe('PieceSelectionScreen with Category Tabs', () => {
 
   it('preserves selections across categories and shows badge counts on tabs', () => {
     const html = renderToStaticMarkup(
-      React.createElement(PieceSelectionScreen, { pending: samplePendingWithMultiCategory }),
+      React.createElement(PieceSelectionScreen, { pending: samplePendingWithMultiCategory, collection: 'feminine' }),
     )
 
     // Tops has 2 selected items
@@ -100,7 +111,7 @@ describe('PieceSelectionScreen with Category Tabs', () => {
 
   it('renders "None of these" button preserving alternative skip state', () => {
     const html = renderToStaticMarkup(
-      React.createElement(PieceSelectionScreen, { pending: samplePendingWithMultiCategory }),
+      React.createElement(PieceSelectionScreen, { pending: samplePendingWithMultiCategory, collection: 'feminine' }),
     )
 
     expect(html).toContain(STYLE_SELECTION_COPY.emptySelection)
@@ -108,7 +119,7 @@ describe('PieceSelectionScreen with Category Tabs', () => {
 
   it('preserves Continue action copy, placement, and calibration disclaimer', () => {
     const html = renderToStaticMarkup(
-      React.createElement(PieceSelectionScreen, { pending: samplePendingWithMultiCategory }),
+      React.createElement(PieceSelectionScreen, { pending: samplePendingWithMultiCategory, collection: 'feminine' }),
     )
 
     // Non-final step shows Next button
@@ -123,13 +134,13 @@ describe('PieceSelectionScreen with Category Tabs', () => {
     const pendingEmpty: PendingOwnedSelection = {
       exists: true,
       itemIds: ['acc-1'],
-      items: [{ id: 'acc-1', category: 'accessory', display_name: 'Belt', image_url: null }],
+      items: [{ id: 'acc-1', category: 'accessory', display_name: 'Belt', image_url: null, catalogCollection: 'feminine' }],
       version: 1,
       committed: false,
     }
 
     const html = renderToStaticMarkup(
-      React.createElement(PieceSelectionScreen, { pending: pendingEmpty }),
+      React.createElement(PieceSelectionScreen, { pending: pendingEmpty, collection: 'feminine' }),
     )
 
     // 1 total across categories
@@ -140,7 +151,7 @@ describe('PieceSelectionScreen with Category Tabs', () => {
 describe('Direct One-Tap Piece Selection Flow', () => {
   it('excludes selected pieces from the browsing rail and shows "All shown pieces are in your hand."', () => {
     const html = renderToStaticMarkup(
-      React.createElement(PieceSelectionScreen, { pending: samplePendingWithMultiCategory }),
+      React.createElement(PieceSelectionScreen, { pending: samplePendingWithMultiCategory, collection: 'feminine' }),
     )
 
     // Since both loaded tops ('top-1' and 'top-2') are selected, the rail shows the empty-in-hand notice
@@ -157,15 +168,15 @@ describe('Direct One-Tap Piece Selection Flow', () => {
       exists: true,
       itemIds: ['top-1'],
       items: [
-        { id: 'top-1', category: 'top', display_name: 'White Tee', image_url: '/top1.jpg' },
-        { id: 'top-3', category: 'top', display_name: 'Cashmere Knit', image_url: '/top3.jpg' },
+        { id: 'top-1', category: 'top', display_name: 'White Tee', image_url: '/top1.jpg', catalogCollection: 'feminine' },
+        { id: 'top-3', category: 'top', display_name: 'Cashmere Knit', image_url: '/top3.jpg', catalogCollection: 'feminine' },
       ],
       version: 1,
       committed: false,
     }
 
     const html = renderToStaticMarkup(
-      React.createElement(PieceSelectionScreen, { pending: pendingWithUnselected }),
+      React.createElement(PieceSelectionScreen, { pending: pendingWithUnselected, collection: 'feminine' }),
     )
 
     // Unselected piece 'top-3' appears in the browsing rail with direct select action
@@ -180,7 +191,7 @@ describe('Direct One-Tap Piece Selection Flow', () => {
 
   it('renders an accessible aria-live region for screen reader selection feedback without stealing focus', () => {
     const html = renderToStaticMarkup(
-      React.createElement(PieceSelectionScreen, { pending: samplePendingWithMultiCategory }),
+      React.createElement(PieceSelectionScreen, { pending: samplePendingWithMultiCategory, collection: 'feminine' }),
     )
 
     expect(html).toContain('role="status"')

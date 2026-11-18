@@ -12,11 +12,16 @@ import {
   saveWardrobeSelection,
   type PendingOwnedSelection,
 } from '@/src/app/actions/wardrobe'
-import { SELECTION_STEPS } from './selection-steps'
+import { CATALOG_COLLECTIONS } from '@/src/lib/quiz/catalog-collection'
+import type { QuizImagePreference } from '@/src/lib/quiz/imageSet'
+import { getSelectionSteps } from './selection-steps'
 import { STYLE_SELECTION_COPY } from './selection-copy'
 
-export default function PieceSelectionScreen({ pending }: { pending: PendingOwnedSelection }) {
+const EMPTY_ITEMS: CuratedItem[] = []
+
+export default function PieceSelectionScreen({ pending, collection }: { pending: PendingOwnedSelection; collection: QuizImagePreference }) {
   const router = useRouter()
+  const selectionSteps = getSelectionSteps(collection)
   const [currentStepIndex, setCurrentStepIndex] = useState(0)
   const [selections, setSelections] = useState<Record<string, Set<string>>>(() => {
     const selectedIds = new Set(pending.itemIds)
@@ -46,7 +51,7 @@ export default function PieceSelectionScreen({ pending }: { pending: PendingOwne
   const [batch, setBatch] = useState(0)
   const [hasMore, setHasMore] = useState(false)
   const [isFetching, setIsFetching] = useState(
-    () => !pending.items.some((item) => item.category === SELECTION_STEPS[0].category),
+    () => !pending.items.some((item) => item.category === selectionSteps[0].category),
   )
   const [isLoadingMore, setIsLoadingMore] = useState(false)
 
@@ -56,10 +61,10 @@ export default function PieceSelectionScreen({ pending }: { pending: PendingOwne
   const [searchResults, setSearchResults] = useState<CuratedItem[]>([])
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const currentStep = SELECTION_STEPS[currentStepIndex]
+  const currentStep = selectionSteps[currentStepIndex]
   const currentCategory = currentStep.category
 
-  const items = itemsByCategory[currentCategory] ?? []
+  const items = itemsByCategory[currentCategory] ?? EMPTY_ITEMS
   const isLoading = items.length === 0 && isFetching
   const currentSelectedIds = useMemo(
     () => selections[currentCategory] ?? new Set<string>(),
@@ -67,7 +72,7 @@ export default function PieceSelectionScreen({ pending }: { pending: PendingOwne
   )
   const selectedCount = currentSelectedIds.size
 
-  const isFinalStep = currentStepIndex === SELECTION_STEPS.length - 1
+  const isFinalStep = currentStepIndex === selectionSteps.length - 1
   const isStepValid = true
 
   // Total selected across all steps
@@ -85,7 +90,7 @@ export default function PieceSelectionScreen({ pending }: { pending: PendingOwne
     setSearchResults([])
 
     try {
-      const res = await getRankedPieces(cat, 0)
+      const res = await getRankedPieces(cat, collection)
       setItemsByCategory((prev) => {
         const existing = prev[cat] ?? []
         const seen = new Set(existing.map((item) => item.id))
@@ -100,7 +105,7 @@ export default function PieceSelectionScreen({ pending }: { pending: PendingOwne
     } finally {
       setIsFetching(false)
     }
-  }, [])
+  }, [collection])
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -121,23 +126,23 @@ export default function PieceSelectionScreen({ pending }: { pending: PendingOwne
   const handleTabKeyDown = (e: React.KeyboardEvent, index: number) => {
     if (e.key === 'ArrowRight') {
       e.preventDefault()
-      const nextIndex = (index + 1) % SELECTION_STEPS.length
+      const nextIndex = (index + 1) % selectionSteps.length
       setCurrentStepIndex(nextIndex)
-      document.getElementById(`category-tab-${SELECTION_STEPS[nextIndex].category}`)?.focus()
+      document.getElementById(`category-tab-${selectionSteps[nextIndex].category}`)?.focus()
     } else if (e.key === 'ArrowLeft') {
       e.preventDefault()
-      const prevIndex = (index - 1 + SELECTION_STEPS.length) % SELECTION_STEPS.length
+      const prevIndex = (index - 1 + selectionSteps.length) % selectionSteps.length
       setCurrentStepIndex(prevIndex)
-      document.getElementById(`category-tab-${SELECTION_STEPS[prevIndex].category}`)?.focus()
+      document.getElementById(`category-tab-${selectionSteps[prevIndex].category}`)?.focus()
     } else if (e.key === 'Home') {
       e.preventDefault()
       setCurrentStepIndex(0)
-      document.getElementById(`category-tab-${SELECTION_STEPS[0].category}`)?.focus()
+      document.getElementById(`category-tab-${selectionSteps[0].category}`)?.focus()
     } else if (e.key === 'End') {
       e.preventDefault()
-      const lastIndex = SELECTION_STEPS.length - 1
+      const lastIndex = selectionSteps.length - 1
       setCurrentStepIndex(lastIndex)
-      document.getElementById(`category-tab-${SELECTION_STEPS[lastIndex].category}`)?.focus()
+      document.getElementById(`category-tab-${selectionSteps[lastIndex].category}`)?.focus()
     }
   }
 
@@ -150,6 +155,7 @@ export default function PieceSelectionScreen({ pending }: { pending: PendingOwne
     try {
       const res = await getRankedPieces(
         currentCategory,
+        collection,
         nextBatch,
         items.map((i) => i.id), // never re-show what's already on screen
       )
@@ -180,7 +186,7 @@ export default function PieceSelectionScreen({ pending }: { pending: PendingOwne
 
     searchDebounceRef.current = setTimeout(async () => {
       try {
-        const results = await searchPieces(currentCategory, val)
+        const results = await searchPieces(currentCategory, val, collection)
         setSearchResults(results)
         setItemsByCategory((prev) => {
           const existing = prev[currentCategory] ?? []
@@ -208,7 +214,16 @@ export default function PieceSelectionScreen({ pending }: { pending: PendingOwne
 
   // Active items list (search mode vs threshold ranked mode).
   // Excludes items that are currently selected in this category so the rail only shows available pieces.
-  const rawDisplayItems = searchQuery.trim() ? searchResults : items
+  const hiddenPreviousSelections = useMemo(
+    () => new Set(pending.items
+      .filter((item) => item.catalogCollection !== collection && item.catalogCollection !== 'shared')
+      .map(({ id }) => id)),
+    [pending.items, collection],
+  )
+  const rawDisplayItems = useMemo(
+    () => searchQuery.trim() ? searchResults : items.filter((item) => !hiddenPreviousSelections.has(item.id)),
+    [searchQuery, searchResults, items, hiddenPreviousSelections],
+  )
   const displayItems = useMemo(() => {
     const seen = new Set<string>()
     return rawDisplayItems.filter((item) => {
@@ -293,7 +308,7 @@ export default function PieceSelectionScreen({ pending }: { pending: PendingOwne
 
   const handleNextStep = () => {
     if (!isStepValid) return
-    if (currentStepIndex < SELECTION_STEPS.length - 1) {
+    if (currentStepIndex < selectionSteps.length - 1) {
       setCurrentStepIndex((prev) => prev + 1)
     } else {
       handleSubmit()
@@ -365,6 +380,7 @@ export default function PieceSelectionScreen({ pending }: { pending: PendingOwne
 
         {/* Category Tabs & Header */}
         <div className="space-y-4">
+          <p className="text-sm text-[#B5B0A8]">{CATALOG_COLLECTIONS.find(({ id }) => id === collection)?.label}</p>
           {/* Category Tabs */}
           <div
             ref={tabsContainerRef}
@@ -372,7 +388,7 @@ export default function PieceSelectionScreen({ pending }: { pending: PendingOwne
             aria-label="Clothing categories"
             className="flex gap-2 overflow-x-auto pb-1 scrollbar-none sm:gap-2.5"
           >
-            {SELECTION_STEPS.map((step, idx) => {
+            {selectionSteps.map((step, idx) => {
               const isActive = idx === currentStepIndex
               const count = selections[step.category]?.size ?? 0
               return (
@@ -412,7 +428,7 @@ export default function PieceSelectionScreen({ pending }: { pending: PendingOwne
               className="h-full bg-[#E8C568] rounded-full"
               initial={{ width: '0%' }}
               animate={{
-                width: `${((currentStepIndex + 1) / SELECTION_STEPS.length) * 100}%`,
+                width: `${((currentStepIndex + 1) / selectionSteps.length) * 100}%`,
               }}
               transition={{ duration: 0.3 }}
             />
@@ -512,7 +528,7 @@ export default function PieceSelectionScreen({ pending }: { pending: PendingOwne
                         ? 'All shown pieces are in your hand.'
                         : searchQuery.trim()
                           ? `No ${currentStep.label.toLowerCase()} match "${searchQuery}".`
-                          : `No items available in this category.`}
+                          : `No items in this category for this collection yet.`}
                     </p>
                     {!searchQuery.trim() && hasMore && (
                       <button
@@ -677,7 +693,7 @@ export default function PieceSelectionScreen({ pending }: { pending: PendingOwne
                   : 'cursor-not-allowed border border-[#38383D] bg-[#1E1E21] text-[#B5B0A8]/40'
                 }`}
             >
-              {currentStepIndex === SELECTION_STEPS.length - 1 ? (
+              {currentStepIndex === selectionSteps.length - 1 ? (
                 STYLE_SELECTION_COPY.continueWithCount(totalSelectedCount)
               ) : (
                 <>

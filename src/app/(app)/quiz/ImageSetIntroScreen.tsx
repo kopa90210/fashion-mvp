@@ -76,7 +76,7 @@ interface ImageSetIntroScreenProps {
  *
  * - Presents two photographic cards: "Women’s looks" and "Men’s looks".
  * - Selecting a card sets display-only image preference and advances to Q1.
- * - Display-only: never submitted to backend, never infers user gender,
+ * - Selects imagery and catalog examples without inferring user gender,
  *   and never alters style scoring or recommendation vectors.
  */
 export default function ImageSetIntroScreen({ onSelect }: ImageSetIntroScreenProps) {

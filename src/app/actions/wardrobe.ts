@@ -5,6 +5,15 @@ import { createClient } from '@/src/lib/supabase/server'
 import { isValidWardrobeClassification, normalizeWardrobeItem } from '@/src/lib/wardrobe/normalize'
 import { deletePrivateObject, signedOwnedPrivatePreviewUrl, signedOwnedPrivateUrl, uploadValidatedPrivateImage } from '@/src/lib/media/private-media'
 import { randomUUID } from 'node:crypto'
+import { parseCatalogCollection } from '@/src/lib/quiz/catalog-collection'
+import { canBrowseCuratedCategory } from '@/src/lib/quiz/catalog-category-policy'
+import type { QuizImagePreference } from '@/src/lib/quiz/imageSet'
+
+function catalogCollections(requested: QuizImagePreference) {
+  const collection = parseCatalogCollection(requested)
+  if (!collection) throw new Error('Choose a catalog collection')
+  return [collection, 'shared']
+}
 
 // ---------------------------------------------------------------------------
 // Public types — the only shape the frontend ever sees
@@ -387,14 +396,18 @@ function scoreItem(
  * below the threshold. Max 3 total batches per category.
  *
  * @param category  One of the mapped category keys (top, bottom, etc.)
+ * @param collection The selected catalog, plus explicitly shared pieces.
  * @param batch     Pagination batch index (0, 1, or 2). Default 0.
  */
 export async function getRankedPieces(
   category: string,
+  collection: QuizImagePreference,
   batch = 0,
-   excludeIds: string[] = [],
+  excludeIds: string[] = [],
 ): Promise<RankedPiecesResult> {
-  if (batch < 0 || batch >= MAX_BATCHES) {
+  const collections = catalogCollections(collection)
+  if (!canBrowseCuratedCategory(collection, category)) return { items: [], hasMore: false }
+  if (!Number.isInteger(batch) || batch < 0 || batch >= MAX_BATCHES) {
     return { items: [], hasMore: false }
   }
 
@@ -419,9 +432,12 @@ export async function getRankedPieces(
   const userVector = dna.vector as Record<string, number>
 
   // 2. Prefer the database category filter, with a legacy fallback query.
+  const rankedQuery = () => supabase.from('wardrobe_items')
+    .select('id, category, subcategory, image_url, display_name, layer_role, style_tags')
+    .eq('source', 'curated').eq('status', 'confirmed').in('catalog_collection', collections)
   const [primaryResult, legacyResult] = await Promise.all([
-    supabase.from('wardrobe_items').select('id, category, subcategory, image_url, display_name, layer_role, style_tags').eq('source', 'curated').eq('status', 'confirmed').eq('category', category),
-    supabase.from('wardrobe_items').select('id, category, subcategory, image_url, display_name, layer_role, style_tags').eq('source', 'curated').eq('status', 'confirmed').or('category.is.null,category.eq.'),
+    rankedQuery().eq('category', category),
+    rankedQuery().or('category.is.null,category.eq.'),
   ])
   const itemsError = primaryResult.error ?? legacyResult.error
   const items = [...(primaryResult.data ?? []), ...(legacyResult.data ?? [])]
@@ -434,7 +450,6 @@ export async function getRankedPieces(
 
   for (let i = 0; i < items.length; i++) {
     const item = items[i]
-    if (excludeSet && excludeSet.has(item.id)) continue
     if (seenIds.has(item.id)) continue
     if (mapWardrobeCategory(item) !== category) continue
 
@@ -447,71 +462,27 @@ export async function getRankedPieces(
     })
   }
 
-  categoryItems.sort((a, b) => b.score - a.score)
+  categoryItems.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id))
 
   if (categoryItems.length === 0) {
     return { items: [], hasMore: false }
   }
 
-  // 4. Compute threshold
-  const topScore = categoryItems[0].score
-  const threshold = topScore * THRESHOLD_RATIO
-
-  // 5. Split into threshold items and below-threshold items
-  const aboveThreshold: typeof categoryItems = []
-  const belowThreshold: typeof categoryItems = []
-  for (let i = 0; i < categoryItems.length; i++) {
-    const item = categoryItems[i]
-    if (item.score >= threshold) {
-      aboveThreshold.push(item)
-    } else {
-      belowThreshold.push(item)
-    }
-  }
-
-  // 6. Build batches
-  //    Batch 0: threshold items (clamped to [BATCH_FLOOR, BATCH_CEILING])
-  //    Batch 1+: below-threshold items split into equal-ish chunks
-  if (batch === 0) {
-    // Clamp batch 0 to guardrails
-    const clamped = aboveThreshold.slice(0, BATCH_CEILING)
-    // If threshold produced fewer than floor, pad from below-threshold
-    while (clamped.length < BATCH_FLOOR && belowThreshold.length > 0) {
-      clamped.push(belowThreshold.shift()!)
-    }
-
-    const remainingBelowCount = belowThreshold.length
-    return {
-      items: clamped.map((item) => ({
-        id: item.id,
-        category,
-        image_url: item.image_url,
-        display_name: item.display_name,
-      })),
-      hasMore: remainingBelowCount > 0,
-    }
-  }
-
-  // For batch 1 and 2, split below-threshold items evenly
-  const chunkSize = Math.ceil(belowThreshold.length / (MAX_BATCHES - 1))
-  const batchStart = (batch - 1) * chunkSize
-  const batchEnd = Math.min(batchStart + chunkSize, belowThreshold.length)
-
-  if (batchStart >= belowThreshold.length) {
-    return { items: [], hasMore: false }
-  }
-
-  const batchItems = belowThreshold.slice(batchStart, batchEnd)
-  const hasMore = batchEnd < belowThreshold.length
+  // Build stable pages from the complete ranked collection. Exclusions are
+  // applied after slicing so previous pages and search cannot move the boundary.
+  const threshold = categoryItems[0].score * THRESHOLD_RATIO
+  const qualifying = categoryItems.filter((item) => item.score >= threshold).length
+  const firstPageSize = Math.min(BATCH_CEILING, Math.max(BATCH_FLOOR, qualifying))
+  const remainderCount = Math.max(0, categoryItems.length - firstPageSize)
+  const chunkSize = Math.ceil(remainderCount / (MAX_BATCHES - 1))
+  const pageStart = batch === 0 ? 0 : firstPageSize + (batch - 1) * chunkSize
+  const pageEnd = batch === 0 ? firstPageSize : pageStart + chunkSize
 
   return {
-    items: batchItems.map((item) => ({
-      id: item.id,
-      category,
-      image_url: item.image_url,
-      display_name: item.display_name,
-    })),
-    hasMore,
+    items: categoryItems.slice(pageStart, pageEnd)
+      .filter((item) => !excludeSet?.has(item.id))
+      .map(({ id, image_url, display_name }) => ({ id, category, image_url, display_name })),
+    hasMore: categoryItems.slice(pageEnd).some((item) => !excludeSet?.has(item.id)),
   }
 }
 
@@ -529,7 +500,10 @@ export async function getRankedPieces(
 export async function searchPieces(
   category: string,
   query: string,
+  collection: QuizImagePreference,
 ): Promise<CuratedItem[]> {
+  const collections = catalogCollections(collection)
+  if (!canBrowseCuratedCategory(collection, category)) return []
   if (!query || query.trim().length === 0) {
     return []
   }
@@ -550,6 +524,7 @@ export async function searchPieces(
     .select('id, category, subcategory, image_url, display_name, layer_role')
     .eq('source', 'curated')
     .eq('status', 'confirmed')
+    .in('catalog_collection', collections)
     .or(`display_name.ilike.%${cleanQuery}%,subcategory.ilike.%${cleanQuery}%`)
 
   if (itemsError || !items) {
@@ -607,7 +582,7 @@ export async function findOrphanedWardrobeItems(): Promise<OrphanedWardrobeItems
 export type PendingOwnedSelection = {
   exists: boolean
   itemIds: string[]
-  items: CuratedItem[]
+  items: Array<CuratedItem & { catalogCollection: QuizImagePreference | 'shared' | null }>
   version: number
   committed: boolean
 }
@@ -620,7 +595,7 @@ export async function getPendingOwnedSelection(): Promise<PendingOwnedSelection>
   const itemIds: string[] = Array.isArray(data?.item_ids) ? data.item_ids : []
   const { data: rows, error: itemsError } = itemIds.length
     ? await supabase.from('wardrobe_items')
-      .select('id, category, subcategory, layer_role, display_name, image_url')
+      .select('id, category, subcategory, layer_role, display_name, image_url, catalog_collection')
       .in('id', itemIds).eq('source', 'curated')
     : { data: [], error: null }
   if (itemsError) throw new Error('Could not load selected piece details')
@@ -632,6 +607,7 @@ export async function getPendingOwnedSelection(): Promise<PendingOwnedSelection>
       category: mapWardrobeCategory(row),
       display_name: row.display_name,
       image_url: row.image_url,
+      catalogCollection: row.catalog_collection === 'shared' ? 'shared' : parseCatalogCollection(row.catalog_collection),
     })),
     version: data?.version ?? 0,
     committed: Boolean(data?.committed_at),
@@ -675,7 +651,8 @@ export async function finalizeOnboardingSelection(expectedVersion: number) {
 // getCuratedPieces — kept for backward compatibility
 // ---------------------------------------------------------------------------
 
-export async function getCuratedPieces(): Promise<Record<string, CuratedItem[]>> {
+export async function getCuratedPieces(collection: QuizImagePreference): Promise<Record<string, CuratedItem[]>> {
+  const collections = catalogCollections(collection)
   const supabase = await createClient()
 
   const { data: userData, error: authError } = await supabase.auth.getUser()
@@ -698,7 +675,8 @@ export async function getCuratedPieces(): Promise<Record<string, CuratedItem[]>>
   const { data: items, error: itemsError } = await supabase
     .from('wardrobe_items')
     .select('id, category, subcategory, image_url, display_name, layer_role, style_tags')
-    .eq('source', 'curated')
+    .eq('source', 'curated').eq('status', 'confirmed')
+    .in('catalog_collection', collections)
 
   if (itemsError || !items) {
     throw new Error('Could not fetch wardrobe items')
@@ -715,13 +693,15 @@ export async function getCuratedPieces(): Promise<Record<string, CuratedItem[]>>
   }))
 
   const grouped: Record<string, CuratedItem[]> = Object.fromEntries(
-    CATEGORY_ORDER.map((category) => [category, []]),
+    CATEGORY_ORDER.filter((category) => canBrowseCuratedCategory(collection, category))
+      .map((category) => [category, []]),
   )
 
   scoredItems.sort((a, b) => b.score - a.score)
 
   for (const item of scoredItems) {
     const mappedCat = mapWardrobeCategory(item)
+    if (!canBrowseCuratedCategory(collection, mappedCat)) continue
 
     if (!grouped[mappedCat]) {
       grouped[mappedCat] = []
