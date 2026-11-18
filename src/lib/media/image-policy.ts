@@ -51,11 +51,20 @@ export function createWardrobeImageConfig(
   }
 }
 
-export function shouldBypassWardrobeImageOptimization(src: string): boolean {
+export function shouldBypassWardrobeImageOptimization(
+  src: string,
+  environment: string | undefined = process.env.NODE_ENV,
+): boolean {
   if (src.startsWith('data:') || src.startsWith('blob:')) return true
 
   try {
-    return new URL(src, 'https://stylegraph.local').pathname.includes(
+    const url = new URL(src, 'https://stylegraph.local')
+    // Local PNGs are already processed. Avoid a second server-to-server hop
+    // through the optimizer's short upstream timeout on a busy dev laptop.
+    if (environment === 'development' && url.protocol === 'http:' &&
+        LOCAL_IMAGE_HOSTS.has(url.hostname) && url.port === '54321' &&
+        url.pathname.startsWith('/storage/v1/object/public/wardrobe-images/')) return true
+    return url.pathname.includes(
       '/storage/v1/object/sign/private-wardrobe-media/',
     )
   } catch {

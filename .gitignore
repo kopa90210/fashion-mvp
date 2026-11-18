@@ -15,6 +15,8 @@ __pycache__/
 
 # testing
 /coverage
+/.playwright-cli/
+/.tmp/
 
 # next.js
 /.next/
@@ -26,6 +28,12 @@ __pycache__/
 # misc
 .DS_Store
 *.pem
+# datasets
+*.zip
+/datasets/
+/smoke5_input/
+/stylegraph_curated_qwen_normalized*/
+/stylegraph_qwen_curated_processed*/
 
 # debug
 .last_groq_response.json
@@ -60,3 +68,4 @@ next-env.d.ts
 .trae
 .windsurf
 .insforge.worker.env
+.worktrees/

@@ -24,6 +24,7 @@ export default function GarmentCard({
   variant,
   selected = false,
   selectionMode = false,
+  selectionIndicator = 'circle',
   quantity = 1,
 }: {
   image: string | null
@@ -38,6 +39,7 @@ export default function GarmentCard({
   variant: GarmentCardVariant
   selected?: boolean
   selectionMode?: boolean
+  selectionIndicator?: 'circle' | 'badge' | 'none'
   quantity?: number
 }) {
   const resolvedRole = presentationRole(role, category)
@@ -61,8 +63,16 @@ export default function GarmentCard({
       data-role={resolvedRole}
       className={`min-w-0 overflow-hidden rounded-2xl border transition-colors ${
         reference
-          ? selected ? 'border-amber-300 bg-white/10 ring-2 ring-amber-300/30' : 'border-white/10 bg-white/5'
-          : selected ? 'border-[#1D1B18] bg-[#FFFDFA] ring-1 ring-[#1D1B18]' : 'border-transparent'
+          ? selectionIndicator === 'badge'
+            ? selected
+              ? 'border-[#E8C568] bg-[#1E1E21] ring-1 ring-[#E8C568]/40 shadow-xs'
+              : 'border-[#38383D] bg-[#1E1E21]/60 hover:border-[#38383D]/80'
+            : selected
+              ? 'border-amber-300 bg-white/10 ring-2 ring-amber-300/30'
+              : 'border-white/10 bg-white/5'
+          : selected
+            ? 'border-[#1D1B18] bg-[#FFFDFA] ring-1 ring-[#1D1B18]'
+            : 'border-transparent'
       }`}
     >
       <div className={`relative overflow-hidden ${stageClass} ${reference ? 'bg-white/5' : 'bg-[#EBE3D8]'}`}>
@@ -76,12 +86,29 @@ export default function GarmentCard({
         />
         {quantity > 1 ? <span className="absolute right-2 top-2 rounded-full bg-[#FFFDFA] px-2 py-1 text-[11px] font-medium text-[#1D1B18] shadow-sm">{quantity} pieces</span> : null}
         {badge ? <span className="absolute bottom-2 left-2 rounded-full bg-[#FFFDFA] px-2.5 py-1 text-[10px] font-medium text-[#1D1B18] shadow-sm">{badge}</span> : null}
-        {(selectionMode || selected) ? (
+
+        {/* Circular indicator: used only when selectionIndicator is 'circle' (legacy / wardrobe) */}
+        {selectionIndicator === 'circle' && (selectionMode || selected) ? (
           <span aria-hidden="true" className={`absolute left-3 top-3 flex size-6 items-center justify-center rounded-full border ${selected ? 'border-[#1D1B18] bg-[#1D1B18] text-white' : reference ? 'border-white/40 bg-black/20 text-transparent' : 'border-[#D8CEC2] bg-[#FFFDFA] text-transparent'}`}>
             <Check className="size-4" />
           </span>
         ) : null}
-          {reference && selected && selectionLabel ? <span aria-hidden="true" className="absolute inset-x-2 bottom-2 rounded-lg bg-black/75 px-2 py-1 text-center text-[10px] leading-3 text-white">{selectionLabel}</span> : null}
+
+        {/* Non-circular badge indicator: small text label positioned in top corner without obscuring garment */}
+        {selectionIndicator === 'badge' && selected ? (
+          <span
+            aria-hidden="true"
+            className="absolute right-2.5 top-2.5 rounded-md bg-[#E8C568] px-2 py-0.5 text-[10px] font-semibold tracking-wide text-[#171717] shadow-xs"
+          >
+            Selected
+          </span>
+        ) : null}
+
+        {reference && selected && selectionLabel && selectionIndicator === 'circle' ? (
+          <span aria-hidden="true" className="absolute inset-x-2 bottom-2 rounded-lg bg-black/75 px-2 py-1 text-center text-[10px] leading-3 text-white">
+            {selectionLabel}
+          </span>
+        ) : null}
       </div>
       <div className={reference ? 'p-3 text-white' : 'px-0 pb-1 pt-3 text-[#1D1B18]'}>
         {brand ? <p className={`truncate text-[11px] uppercase tracking-[0.12em] ${reference ? 'text-white/45' : 'text-[#6D6257]'}`}>{brand}</p> : null}

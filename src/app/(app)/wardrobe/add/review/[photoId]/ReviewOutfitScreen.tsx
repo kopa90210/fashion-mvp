@@ -2,24 +2,32 @@
 
 import Link from 'next/link'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ArrowLeft, LoaderCircle, X } from 'lucide-react'
+import { ArrowLeft, ChevronDown, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { confirmOutfitPhotoDraft, discardDraftItem, getOutfitPhotoReview, updateWardrobeItemAttributes, type OutfitPhotoReview } from '@/src/app/actions/wardrobe'
 import { WARDROBE_CATEGORIES } from '@/src/lib/wardrobe/normalize'
-import { completionCopy, processingFailed, processingMessage, processingSupport, reviewComplete, reviewPieces, type ReviewGarment } from './review-flow'
+import { completionCopy, LONG_PROCESSING_SUPPORT, processingFailed, processingMessage, processingSupport, reviewComplete, reviewPieces, type ReviewGarment } from './review-flow'
 import GarmentImage from '@/src/components/wardrobe/GarmentImage'
 
 const field = 'mt-2 w-full rounded-xl border border-[#D8CEC2] bg-[#FFFDFA] px-3 py-3 text-base text-[#1D1B18]'
 const categoryName = (category: string | null) => category ? category.charAt(0).toUpperCase() + category.slice(1) : 'Choose a category'
 
-function FocusedPiece({ item, onHandled, onEdited }: {
+function FocusedPiece({
+  item,
+  alternate,
+  onToggleAlternate,
+  onHandled,
+  onEdited,
+}: {
   item: ReviewGarment
+  alternate: boolean
+  onToggleAlternate: () => void
   onHandled: (id: string) => void
   onEdited: (item: ReviewGarment) => void
 }) {
-  const [alternate, setAlternate] = useState(false)
   const [editing, setEditing] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [successMessage, setSuccessMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [name, setName] = useState(item.displayName)
   const [category, setCategory] = useState(item.category ?? '')
@@ -27,6 +35,14 @@ function FocusedPiece({ item, onHandled, onEdited }: {
   const [color, setColor] = useState(item.color)
   const [brand, setBrand] = useState(item.brand ?? '')
   const dialog = useRef<HTMLDialogElement>(null)
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current)
+    }
+  }, [])
+
   useEffect(() => {
     if (editing) dialog.current?.showModal()
     else dialog.current?.close()
@@ -34,9 +50,11 @@ function FocusedPiece({ item, onHandled, onEdited }: {
 
   async function saveDetails() {
     if (!name.trim() || !WARDROBE_CATEGORIES.some((value) => value === category)) {
-      setError('Please add a name and choose a category.'); return
+      setError('Please add a name and choose a category.')
+      return
     }
-    setBusy(true); setError(null)
+    setBusy(true)
+    setError(null)
     try {
       await updateWardrobeItemAttributes(item.id, {
         display_name: name.trim(), category, subcategory: subcategory.trim() || null,
@@ -44,56 +62,204 @@ function FocusedPiece({ item, onHandled, onEdited }: {
       })
       setEditing(false)
       onEdited({ ...item, displayName: name.trim(), category, subcategory: subcategory.trim() || null, color: color.trim() || 'Unknown', brand: brand.trim() || null })
-    } catch { setError('Could not save these details. Please try again.') }
-    finally { setBusy(false) }
+    } catch {
+      setError('Could not save these details. Please try again.')
+    } finally {
+      setBusy(false)
+    }
   }
 
   async function handle(add: boolean) {
     if (add && (!item.displayName.trim() || !WARDROBE_CATEGORIES.some((value) => value === item.category))) {
-      setError('Add a name and category in Edit details before adding this piece.'); return
+      setError('Add a name and category in Edit details before adding this piece.')
+      return
     }
-    setBusy(true); setError(null)
+    setBusy(true)
+    setError(null)
     try {
-      if (add) await confirmOutfitPhotoDraft(item.id, alternate && !!item.reconstructedImageUrl)
-      else await discardDraftItem(item.id)
-      onHandled(item.id)
-    } catch { setError(add ? 'Could not add this piece. Please try again.' : 'Could not skip this piece. Please try again.') }
-    finally { setBusy(false) }
+      if (add) {
+        await confirmOutfitPhotoDraft(item.id, alternate && !!item.reconstructedImageUrl)
+        setSuccessMessage('Added to wardrobe')
+        timerRef.current = setTimeout(() => {
+          onHandled(item.id)
+        }, 600)
+      } else {
+        await discardDraftItem(item.id)
+        onHandled(item.id)
+      }
+    } catch {
+      setError(add ? 'Could not add this piece. Please try again.' : 'Could not skip this piece. Please try again.')
+      setBusy(false)
+      setSuccessMessage(null)
+    }
   }
 
   function openEditor() {
-    setName(item.displayName); setCategory(item.category ?? ''); setSubcategory(item.subcategory ?? '')
-    setColor(item.color); setBrand(item.brand ?? ''); setError(null); setEditing(true)
+    setName(item.displayName)
+    setCategory(item.category ?? '')
+    setSubcategory(item.subcategory ?? '')
+    setColor(item.color)
+    setBrand(item.brand ?? '')
+    setError(null)
+    setEditing(true)
   }
 
-  return <article>
-    <div className="relative aspect-[4/5] max-h-[52vh] overflow-hidden rounded-3xl bg-[#EBE3D8] sm:max-h-[560px]">
-      <GarmentImage src={alternate && item.reconstructedImageUrl ? item.reconstructedImageUrl : item.originalImageUrl} alt={item.displayName || 'Clothing piece'} label={item.displayName || 'Clothing piece'} role={item.category} sizes="(min-width: 768px) 520px, 100vw" className="object-contain p-8 sm:p-12" />
-    </div>
-    {item.reconstructedImageUrl && <button type="button" disabled={busy} aria-pressed={alternate} onClick={() => setAlternate(!alternate)} className="mt-3 min-h-10 text-sm text-[#6D6257] underline underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D1B18] focus-visible:ring-offset-2">{alternate ? 'Show original photo' : 'See alternate view'}</button>}
-    <p className="mt-6 text-xs uppercase tracking-[0.2em] text-[#6D6257]">Review piece</p>
-    <h1 className="mt-2 text-2xl font-medium">{item.displayName || 'Your piece'}</h1>
-    <p className="mt-2 text-sm text-[#6D6257]">{item.category ? categoryName(item.category) : 'Category needs review'} · {item.color && item.color.toLowerCase() !== 'unknown' ? item.color : 'Color needs review'}</p>
-    <p className="mt-1 text-xs text-[#6D6257]">Suggested by StyleGraph</p>
-    <div className="mt-6 flex gap-3">
-      <Button variant="outline" disabled={busy} onClick={() => void handle(false)} className="h-12 flex-1 rounded-full border-[#D8CEC2] bg-[#FFFDFA] focus-visible:ring-2 focus-visible:ring-[#1D1B18] focus-visible:ring-offset-2">Skip</Button>
-      <Button disabled={busy} onClick={() => void handle(true)} className="h-12 flex-[2] rounded-full bg-[#1D1B18] text-[#FFFDFA] focus-visible:ring-2 focus-visible:ring-[#1D1B18] focus-visible:ring-offset-2">{busy ? 'Saving…' : 'Add to wardrobe'}</Button>
-    </div>
-    <button type="button" onClick={openEditor} disabled={busy} className="mt-3 min-h-11 text-sm text-[#6D6257] underline underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D1B18] focus-visible:ring-offset-2">Edit details</button>
-    {error && !editing && <p role="alert" className="mt-3 text-sm text-red-700">{error}</p>}
-    <dialog ref={dialog} onCancel={(event) => { if (busy) event.preventDefault(); else setEditing(false) }} onClose={() => setEditing(false)} aria-labelledby="details-title" className="fixed inset-x-0 bottom-0 top-auto m-0 max-h-[90dvh] w-full max-w-none overflow-y-auto rounded-t-3xl bg-[#FFFDFA] p-6 text-[#1D1B18] backdrop:bg-black/35 sm:inset-0 sm:m-auto sm:max-w-lg sm:rounded-3xl">
-      <div className="flex items-center justify-between"><h2 id="details-title" className="text-2xl">Edit details</h2><button type="button" disabled={busy} onClick={() => setEditing(false)} aria-label="Close details" className="flex size-11 items-center justify-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D1B18] focus-visible:ring-offset-2"><X className="size-5" /></button></div>
-      <form onSubmit={(event) => { event.preventDefault(); void saveDetails() }} className="mt-6 space-y-4">
-        <label className="block text-sm">Name<input autoFocus required maxLength={120} value={name} onChange={(event) => setName(event.target.value)} className={field} disabled={busy} /></label>
-        <label className="block text-sm">Category<select required value={category} onChange={(event) => setCategory(event.target.value)} className={field} disabled={busy}><option value="">Choose category</option>{WARDROBE_CATEGORIES.map((value) => <option key={value} value={value}>{categoryName(value)}</option>)}</select></label>
-        <label className="block text-sm">Subcategory<input maxLength={120} value={subcategory} onChange={(event) => setSubcategory(event.target.value)} className={field} disabled={busy} /></label>
-        <label className="block text-sm">Color<input maxLength={80} value={color} onChange={(event) => setColor(event.target.value)} className={field} disabled={busy} /></label>
-        <label className="block text-sm">Brand (optional)<input maxLength={80} value={brand} onChange={(event) => setBrand(event.target.value)} placeholder="Add brand" className={field} disabled={busy} /></label>
-        {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
-        <Button type="submit" disabled={busy} className="h-12 w-full rounded-full">{busy ? 'Saving…' : 'Save details'}</Button>
-      </form>
-    </dialog>
-  </article>
+  return (
+    <article className="flex flex-col">
+      {/* Screen reader status announcement */}
+      <div className="sr-only" role="status" aria-live="polite">
+        {successMessage || error}
+      </div>
+
+      {/* Responsively bounded garment stage: single clean frame, object-contain, no nested boxes */}
+      <div className="relative aspect-[4/5] max-h-[36vh] min-h-[220px] w-full overflow-hidden rounded-3xl border border-[#D8CEC2]/80 bg-[#EBE3D8] sm:max-h-[44vh] md:max-h-[480px]">
+        <GarmentImage
+          src={alternate && item.reconstructedImageUrl ? item.reconstructedImageUrl : item.originalImageUrl}
+          alt={item.displayName || 'Clothing piece'}
+          label={item.displayName || 'Clothing piece'}
+          role={item.category}
+          sizes="(min-width: 768px) 520px, 100vw"
+          className="object-contain p-4 sm:p-6 md:p-8"
+        />
+      </div>
+
+      {item.reconstructedImageUrl && (
+        <button
+          type="button"
+          disabled={busy || !!successMessage}
+          aria-pressed={alternate}
+          onClick={onToggleAlternate}
+          className="mt-2.5 self-start text-xs text-[#6D6257] underline underline-offset-4 transition-colors hover:text-[#1D1B18] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D1B18] focus-visible:ring-offset-2 sm:text-sm"
+        >
+          {alternate ? 'Show original photo' : 'See alternate view'}
+        </button>
+      )}
+
+      {/* Piece details close below the stage */}
+      <div className="mt-3.5 sm:mt-4">
+        <p className="text-xs uppercase tracking-[0.2em] text-[#6D6257]">Review piece</p>
+        <h1 className="mt-1 break-words text-xl font-medium tracking-tight text-[#1D1B18] sm:text-2xl md:text-3xl">
+          {item.displayName || 'Your piece'}
+        </h1>
+        <p className="mt-1 text-sm text-[#6D6257]">
+          {item.category ? categoryName(item.category) : 'Category needs review'} · {item.color && item.color.toLowerCase() !== 'unknown' ? item.color : 'Color needs review'}
+        </p>
+        <p className="mt-0.5 text-xs text-[#6D6257]">Suggested by StyleGraph</p>
+      </div>
+
+      {/* Bottom action dock: Skip, Add piece, Edit details */}
+      <div className="mt-5 flex flex-col gap-3">
+        <div className="flex items-center gap-3">
+          <Button
+            variant="outline"
+            type="button"
+            disabled={busy || !!successMessage}
+            onClick={() => void handle(false)}
+            className="h-12 flex-1 rounded-full border-[#D8CEC2] bg-[#FFFDFA] text-base font-medium text-[#1D1B18] hover:bg-[#EBE3D8] focus-visible:ring-2 focus-visible:ring-[#1D1B18] focus-visible:ring-offset-2"
+          >
+            Skip
+          </Button>
+          <Button
+            type="button"
+            disabled={busy || !!successMessage}
+            onClick={() => void handle(true)}
+            className={`h-12 flex-[2] rounded-full text-base font-medium transition-all duration-200 motion-reduce:transition-none focus-visible:ring-2 focus-visible:ring-[#1D1B18] focus-visible:ring-offset-2 ${
+              successMessage
+                ? 'bg-[#4A5D43] text-[#FFFDFA]'
+                : 'bg-[#1D1B18] text-[#FFFDFA] hover:bg-[#34312C]'
+            }`}
+          >
+            {successMessage ? (
+              <span className="flex items-center justify-center gap-2">
+                <span aria-hidden="true">✓</span>
+                <span>Added!</span>
+              </span>
+            ) : busy ? (
+              'Saving…'
+            ) : (
+              'Add piece'
+            )}
+          </Button>
+        </div>
+
+        <div className="flex items-center justify-between px-1">
+          <button
+            type="button"
+            onClick={openEditor}
+            disabled={busy || !!successMessage}
+            className="inline-flex min-h-11 items-center text-sm font-medium text-[#6D6257] underline underline-offset-4 transition-colors hover:text-[#1D1B18] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D1B18] focus-visible:ring-offset-2"
+          >
+            Edit details
+          </button>
+          {successMessage && (
+            <span role="status" className="text-xs font-medium text-[#4A5D43]">
+              {successMessage}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Error alert with retry guidance */}
+      {error && !editing && (
+        <div role="alert" className="mt-3 rounded-2xl border border-red-200 bg-red-50/70 p-3.5 text-sm text-red-800">
+          {error}
+        </div>
+      )}
+
+      {/* Edit details dialog */}
+      <dialog
+        ref={dialog}
+        onCancel={(event) => { if (busy) event.preventDefault(); else setEditing(false) }}
+        onClose={() => setEditing(false)}
+        aria-labelledby="details-title"
+        className="fixed inset-x-0 bottom-0 top-auto m-0 max-h-[90dvh] w-full max-w-none overflow-y-auto rounded-t-3xl bg-[#FFFDFA] p-6 text-[#1D1B18] backdrop:bg-black/35 sm:inset-0 sm:m-auto sm:max-w-lg sm:rounded-3xl"
+      >
+        <div className="flex items-center justify-between">
+          <h2 id="details-title" className="text-2xl font-medium">Edit details</h2>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => setEditing(false)}
+            aria-label="Close details"
+            className="flex size-11 items-center justify-center rounded-full text-[#6D6257] hover:text-[#1D1B18] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D1B18] focus-visible:ring-offset-2"
+          >
+            <X className="size-5" />
+          </button>
+        </div>
+        <form onSubmit={(event) => { event.preventDefault(); void saveDetails() }} className="mt-6 space-y-4">
+          <label className="block text-sm">
+            Name
+            <input autoFocus required maxLength={120} value={name} onChange={(event) => setName(event.target.value)} className={field} disabled={busy} />
+          </label>
+          <label className="block text-sm">
+            Category
+            <select required value={category} onChange={(event) => setCategory(event.target.value)} className={field} disabled={busy}>
+              <option value="">Choose category</option>
+              {WARDROBE_CATEGORIES.map((value) => (
+                <option key={value} value={value}>{categoryName(value)}</option>
+              ))}
+            </select>
+          </label>
+          <label className="block text-sm">
+            Subcategory
+            <input maxLength={120} value={subcategory} onChange={(event) => setSubcategory(event.target.value)} className={field} disabled={busy} />
+          </label>
+          <label className="block text-sm">
+            Color
+            <input maxLength={80} value={color} onChange={(event) => setColor(event.target.value)} className={field} disabled={busy} />
+          </label>
+          <label className="block text-sm">
+            Brand (optional)
+            <input maxLength={80} value={brand} onChange={(event) => setBrand(event.target.value)} placeholder="Add brand" className={field} disabled={busy} />
+          </label>
+          {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
+          <Button type="submit" disabled={busy} className="h-12 w-full rounded-full bg-[#1D1B18] text-[#FFFDFA]">
+            {busy ? 'Saving…' : 'Save details'}
+          </Button>
+        </form>
+      </dialog>
+    </article>
+  )
 }
 
 export default function ReviewOutfitScreen({ initial }: { initial: OutfitPhotoReview }) {
@@ -102,6 +268,9 @@ export default function ReviewOutfitScreen({ initial }: { initial: OutfitPhotoRe
   const [handled, setHandled] = useState<string[]>([])
   const [accessories, setAccessories] = useState(false)
   const [finished, setFinished] = useState(false)
+  const [activePieceId, setActivePieceId] = useState<string | null>(null)
+  const [imageChoices, setImageChoices] = useState<Record<string, boolean>>({})
+  const [announcement, setAnnouncement] = useState<string | null>(null)
   const active = useRef(false)
   const request = useRef(0)
   const failed = processingFailed(review.status, review.jobStatus)
@@ -113,56 +282,316 @@ export default function ReviewOutfitScreen({ initial }: { initial: OutfitPhotoRe
       if (active.current && sequence === request.current) { setReview(next); setPollError(false) }
     } catch { if (active.current && sequence === request.current) setPollError(true) }
   }, [initial.sourcePhotoId])
+
   useEffect(() => {
     active.current = true
     ++request.current
     const timer = window.setInterval(() => { void refresh() }, waiting ? 3000 : 240000)
     return () => { active.current = false; window.clearInterval(timer) }
   }, [waiting, refresh])
+
   const pieces = reviewPieces(review.garments, handled)
-  const current = pieces.main[0] ?? (accessories ? pieces.accessories[0] : undefined)
+  const currentPieceList = accessories && !pieces.main.length ? pieces.accessories : pieces.main
+  const current = currentPieceList.find((p) => p.id === activePieceId) ?? currentPieceList[0]
   const total = Math.max(review.detectedCount, review.garments.length + handled.filter((id) => !review.garments.some((item) => item.id === id)).length)
   const remaining = pieces.main.length + pieces.accessories.length
   const complete = reviewComplete(finished, total, remaining)
   const completion = completionCopy(remaining)
   const ready = !failed && review.status === 'done'
 
-  return <main className="min-h-dvh bg-[#F7F4EF] px-5 py-6 text-[#1D1B18] sm:px-8 sm:py-10"><div className="mx-auto max-w-5xl">
-    <Link href="/wardrobe" aria-label="Back to wardrobe" className="mb-7 inline-flex size-11 items-center justify-center rounded-full border border-[#D8CEC2] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D1B18] focus-visible:ring-offset-2 focus-visible:ring-offset-[#F7F4EF]"><ArrowLeft className="size-5" /></Link>
-    {waiting && <section aria-live="polite" aria-atomic="true" className="max-w-xl">
-      <p className="text-xs uppercase tracking-[0.2em] text-[#6D6257]">Preparing your wardrobe</p>
-      <h1 className="mt-3 text-3xl font-medium sm:text-4xl">{processingMessage(review.jobStatus)}</h1>
-      <p className="mt-4 text-sm leading-relaxed text-[#6D6257]">{processingSupport(review.startedAt)}</p>
-      <p className="mt-2 text-sm leading-relaxed text-[#6D6257]">Your pieces will appear here automatically when they’re ready. You can return to this upload from your wardrobe.</p>
-      <ol className="mt-10 space-y-5 rounded-3xl border border-[#D8CEC2] bg-[#FFFDFA] p-6" aria-label="Photo processing progress">
-        <li className="flex items-center gap-3"><span aria-hidden="true" className="flex size-6 items-center justify-center rounded-full bg-[#1D1B18] text-xs text-[#FFFDFA]">✓</span><span>Photo uploaded</span><span className="sr-only">Complete</span></li>
-        <li aria-current="step" className="flex items-center gap-3 font-medium"><LoaderCircle aria-hidden="true" className="size-6 animate-spin text-[#6D6257] motion-reduce:animate-none" /><span>Finding visible pieces</span></li>
-        <li className="flex items-center gap-3 text-[#6D6257]"><span aria-hidden="true" className="ml-2 size-2 rounded-full border border-[#6D6257]" /><span>Preparing pieces for review</span></li>
-      </ol>
-      {pollError && <p role="status" className="mt-4 text-sm text-[#6D6257]">Connection interrupted. We’ll keep checking for your pieces.</p>}
-      <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-        <Link href="/wardrobe" className="inline-flex min-h-12 items-center justify-center rounded-full bg-[#1D1B18] px-7 text-[#FFFDFA] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D1B18] focus-visible:ring-offset-2 focus-visible:ring-offset-[#F7F4EF]">Back to wardrobe</Link>
-        <Link href="/wardrobe/add" className="inline-flex min-h-12 items-center justify-center rounded-full border border-[#D8CEC2] bg-[#FFFDFA] px-7 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D1B18] focus-visible:ring-offset-2 focus-visible:ring-offset-[#F7F4EF]">Upload another photo</Link>
+  const pieceOffset = Math.max(0, current ? currentPieceList.findIndex((p) => p.id === current.id) : 0)
+  const currentPieceIndex = Math.min(total, total - remaining + 1 + pieceOffset)
+
+  return (
+    <main className="stylegraph-review-surface min-h-dvh bg-[#F7F4EF] px-4 py-5 pb-[calc(1.5rem+env(safe-area-inset-bottom,0px))] text-[#1D1B18] sm:px-8 sm:py-8">
+      {/* Screen reader status announcements */}
+      <div className="sr-only" role="status" aria-live="polite">
+        {announcement}
       </div>
-    </section>}
-    {failed && <section role="alert" className="max-w-xl">
-      <p className="text-xs uppercase tracking-[0.2em] text-[#6D6257]">Photo upload</p>
-      <h1 className="mt-3 text-3xl font-medium sm:text-4xl">We couldn’t prepare this photo</h1>
-      <p className="mt-4 leading-relaxed text-[#6D6257]">Try another clear photo where the clothes are easy to see.</p>
-      <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-        <Link href="/wardrobe/add" className="inline-flex min-h-12 items-center justify-center rounded-full bg-[#1D1B18] px-7 text-[#FFFDFA] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D1B18] focus-visible:ring-offset-2 focus-visible:ring-offset-[#F7F4EF]">Upload another photo</Link>
-        <Link href="/wardrobe" className="inline-flex min-h-12 items-center justify-center rounded-full border border-[#D8CEC2] bg-[#FFFDFA] px-7 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D1B18] focus-visible:ring-offset-2 focus-visible:ring-offset-[#F7F4EF]">Back to wardrobe</Link>
+
+      <div className="mx-auto max-w-5xl">
+        {/* Navigation header: Back button + compact Piece X of Y with segmented progress */}
+        <header className="mb-5 flex items-center justify-between gap-4 sm:mb-7">
+          <Link
+            href="/wardrobe"
+            aria-label="Back to wardrobe"
+            className="flex size-11 items-center justify-center rounded-full border border-[#D8CEC2] bg-[#FFFDFA] text-[#1D1B18] transition-colors hover:bg-[#EBE3D8] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D1B18] focus-visible:ring-offset-2 focus-visible:ring-offset-[#F7F4EF]"
+          >
+            <ArrowLeft className="size-5" />
+          </Link>
+
+          {ready && !complete && current && (
+            <div className="flex items-center gap-3">
+              <span aria-live="polite" className="text-sm font-medium text-[#6D6257]">
+                Piece {currentPieceIndex} of {total}
+              </span>
+              <div
+                role="progressbar"
+                aria-label="Pieces reviewed"
+                aria-valuemin={0}
+                aria-valuemax={total}
+                aria-valuenow={total - remaining}
+                className="flex h-1.5 w-24 items-center gap-1 sm:w-32"
+              >
+                {Array.from({ length: Math.max(1, total) }).map((_, idx) => {
+                  const isReviewed = idx < total - remaining
+                  const isCurrent = idx === total - remaining
+                  return (
+                    <div
+                      key={idx}
+                      className={`h-full flex-1 rounded-full transition-all duration-300 motion-reduce:transition-none ${
+                        isReviewed
+                          ? 'bg-[#1D1B18]'
+                          : isCurrent
+                          ? 'bg-[#1D1B18]/60 ring-1 ring-[#1D1B18]/40'
+                          : 'bg-[#D8CEC2]'
+                      }`}
+                    />
+                  )
+                })}
+              </div>
+            </div>
+          )}
+        </header>
+
+        {waiting && (
+          <section aria-live="polite" aria-atomic="true" className="mx-auto flex max-w-md flex-col items-center text-center">
+            {/* Photo preview with subtle activity effect */}
+            <div className="relative w-full">
+              <div
+                aria-hidden="true"
+                className="pointer-events-none absolute -inset-1 rounded-[28px] border-2 border-[#8E9B82]/35 bg-gradient-to-b from-[#8E9B82]/15 via-transparent to-[#8E9B82]/15 animate-pulse motion-reduce:animate-none"
+              />
+              <div className="relative aspect-[4/5] max-h-[44vh] min-h-[240px] w-full overflow-hidden rounded-3xl border border-[#D8CEC2] bg-[#EBE3D8] sm:max-h-[460px]">
+                <GarmentImage
+                  src={review.sourceImageUrl}
+                  alt="Your uploaded outfit"
+                  label="Uploaded outfit"
+                  role="one_piece"
+                  sizes="(min-width: 640px) 440px, 100vw"
+                  className="object-contain p-4 sm:p-6"
+                />
+              </div>
+            </div>
+
+            {/* Real backend status indicator */}
+            <div className="mt-6 inline-flex items-center gap-2 rounded-full border border-[#D8CEC2] bg-[#FFFDFA] px-3.5 py-1.5 text-xs font-medium text-[#34312C]">
+              <span className="relative flex size-2">
+                <span className="absolute inline-flex size-full animate-ping rounded-full bg-[#8E9B82] opacity-75 motion-reduce:animate-none" />
+                <span className="relative inline-flex size-2 rounded-full bg-[#4A5D43]" />
+              </span>
+              <span>{processingMessage(review.jobStatus)}</span>
+            </div>
+
+            {/* Heading and supporting copy */}
+            <h1 className="mt-3 text-2xl font-medium tracking-tight text-[#1D1B18] sm:text-3xl">
+              Finding your pieces
+            </h1>
+            <p className="mt-2 text-sm leading-relaxed text-[#6D6257]">
+              You can leave this screen. Processing will continue.
+            </p>
+
+            {/* Delayed processing notice */}
+            {processingSupport(review.startedAt) === LONG_PROCESSING_SUPPORT && (
+              <p className="mt-3 rounded-2xl border border-[#D8CEC2] bg-[#FFFDFA] px-4 py-2.5 text-xs leading-relaxed text-[#6D6257]">
+                {LONG_PROCESSING_SUPPORT}
+              </p>
+            )}
+
+            {/* Polling connection error notice */}
+            {pollError && (
+              <p role="status" className="mt-3 text-xs text-[#8C2C1D]">
+                Connection interrupted. We’ll keep checking for your pieces.
+              </p>
+            )}
+
+            {/* Actions */}
+            <div className="mt-8 flex w-full flex-col items-center gap-3">
+              <Link
+                href="/wardrobe"
+                className="inline-flex min-h-12 w-full items-center justify-center rounded-full bg-[#1D1B18] px-7 text-sm font-medium text-[#FFFDFA] transition-colors hover:bg-[#34312C] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D1B18] focus-visible:ring-offset-2 focus-visible:ring-offset-[#F7F4EF] sm:w-auto"
+              >
+                Back to wardrobe
+              </Link>
+              <Link
+                href="/wardrobe/add"
+                className="inline-flex min-h-11 items-center justify-center rounded-full px-4 text-xs font-medium text-[#6D6257] underline underline-offset-4 transition-colors hover:text-[#1D1B18] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D1B18]"
+              >
+                Upload another photo
+              </Link>
+            </div>
+          </section>
+        )}
+
+        {failed && (
+          <section role="alert" className="max-w-xl">
+            <p className="text-xs uppercase tracking-[0.2em] text-[#6D6257]">Photo upload</p>
+            <h1 className="mt-3 text-3xl font-medium sm:text-4xl">We couldn’t prepare this photo</h1>
+            <p className="mt-4 leading-relaxed text-[#6D6257]">Try another clear photo where the clothes are easy to see.</p>
+            <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+              <Link href="/wardrobe/add" className="inline-flex min-h-12 items-center justify-center rounded-full bg-[#1D1B18] px-7 text-[#FFFDFA] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D1B18] focus-visible:ring-offset-2 focus-visible:ring-offset-[#F7F4EF]">Upload another photo</Link>
+              <Link href="/wardrobe" className="inline-flex min-h-12 items-center justify-center rounded-full border border-[#D8CEC2] bg-[#FFFDFA] px-7 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D1B18] focus-visible:ring-offset-2 focus-visible:ring-offset-[#F7F4EF]">Back to wardrobe</Link>
+            </div>
+          </section>
+        )}
+
+        {ready && !complete && current && (
+          <div className="grid gap-6 md:grid-cols-[0.8fr_1fr] md:gap-14">
+            {/* Desktop side-by-side outfit reference */}
+            <aside className="hidden md:block">
+              <p className="mb-3 text-sm font-medium text-[#6D6257]">Your outfit reference</p>
+              <div className="relative aspect-[3/4] overflow-hidden rounded-3xl bg-[#EBE3D8]">
+                <GarmentImage
+                  src={review.sourceImageUrl}
+                  alt="Your uploaded outfit"
+                  role="one_piece"
+                  sizes="420px"
+                  className="object-contain p-5"
+                />
+              </div>
+            </aside>
+
+            {/* Review column */}
+            <div className="flex flex-col">
+              {/* Mobile collapsible outfit reference */}
+              <details className="group mb-4 rounded-2xl border border-[#D8CEC2] bg-[#FFFDFA] p-3 text-[#1D1B18] md:hidden">
+                <summary className="flex min-h-10 cursor-pointer list-none items-center justify-between text-sm font-medium text-[#6D6257] [&::-webkit-details-marker]:hidden">
+                  <span>View original outfit photo</span>
+                  <ChevronDown className="size-4 transition-transform duration-200 group-open:rotate-180" aria-hidden="true" />
+                </summary>
+                <div className="relative mt-3 aspect-[4/5] max-h-[300px] w-full overflow-hidden rounded-xl bg-[#EBE3D8]">
+                  <GarmentImage
+                    src={review.sourceImageUrl}
+                    alt="Your uploaded outfit reference"
+                    role="one_piece"
+                    sizes="100vw"
+                    className="object-contain p-3"
+                  />
+                </div>
+              </details>
+
+              {/* Small horizontal thumbnail rail for remaining draft pieces */}
+              {currentPieceList.length > 1 && (
+                <nav aria-label="Remaining draft pieces" className="mb-4">
+                  <div className="flex items-center gap-2 overflow-x-auto pb-1 pt-1 no-scrollbar sm:gap-2.5">
+                    {currentPieceList.map((piece, index) => {
+                      const isActive = piece.id === current.id
+                      const useAlternate = !!imageChoices[piece.id]
+                      const thumbSrc = useAlternate && piece.reconstructedImageUrl ? piece.reconstructedImageUrl : piece.originalImageUrl
+                      const pieceName = piece.displayName || (piece.category ? categoryName(piece.category) : `Piece ${index + 1}`)
+
+                      return (
+                        <button
+                          key={piece.id}
+                          type="button"
+                          onClick={() => {
+                            setActivePieceId(piece.id)
+                            setAnnouncement(`Showing ${pieceName}`)
+                          }}
+                          aria-label={`Select ${pieceName}`}
+                          aria-pressed={isActive}
+                          className={`group relative size-14 flex-shrink-0 overflow-hidden rounded-2xl border transition-all duration-200 motion-reduce:transition-none sm:size-16 ${
+                            isActive
+                              ? 'border-[#1D1B18] ring-2 ring-[#1D1B18] ring-offset-2 ring-offset-[#F7F4EF] shadow-sm'
+                              : 'border-[#D8CEC2] bg-[#EBE3D8]/60 opacity-60 hover:opacity-100 hover:border-[#1D1B18]/50'
+                          }`}
+                        >
+                          <GarmentImage
+                            src={thumbSrc}
+                            alt=""
+                            role={piece.category}
+                            sizes="64px"
+                            className="object-contain p-1.5"
+                          />
+                        </button>
+                      )
+                    })}
+                  </div>
+                </nav>
+              )}
+
+              {/* Active piece review stage */}
+              <section aria-label={accessories && !pieces.main.length ? 'Accessory review' : 'Main-piece review'}>
+                <FocusedPiece
+                  key={current.id}
+                  item={current}
+                  alternate={!!imageChoices[current.id]}
+                  onToggleAlternate={() => {
+                    setImageChoices((prev) => ({
+                      ...prev,
+                      [current.id]: !prev[current.id],
+                    }))
+                  }}
+                  onHandled={(id) => {
+                    setHandled((ids) => [...ids, id])
+                    setAnnouncement('Piece saved to wardrobe')
+                    void refresh()
+                  }}
+                  onEdited={(item) => {
+                    ++request.current
+                    setReview((value) => ({
+                      ...value,
+                      garments: value.garments.map((garment) => garment.id === item.id ? item : garment),
+                    }))
+                    setAnnouncement(`Updated details for ${item.displayName || 'piece'}`)
+                  }}
+                />
+              </section>
+            </div>
+          </div>
+        )}
+
+        {ready && !complete && !current && pieces.accessories.length > 0 && (
+          <section className="mx-auto mt-12 max-w-lg py-8 text-center sm:text-left">
+            <h1 className="text-2xl font-medium sm:text-3xl">Main pieces reviewed</h1>
+            <p className="mt-3 leading-relaxed text-[#6D6257]">
+              We also found {pieces.accessories.length} {pieces.accessories.length === 1 ? 'accessory' : 'accessories'}. Review {pieces.accessories.length === 1 ? 'it' : 'them'} now or come back later.
+            </p>
+            <Button
+              className="mt-8 h-12 w-full rounded-full bg-[#1D1B18] text-[#FFFDFA] focus-visible:ring-2 focus-visible:ring-[#1D1B18] focus-visible:ring-offset-2"
+              onClick={() => {
+                setAccessories(true)
+                setActivePieceId(null)
+              }}
+            >
+              Review accessories
+            </Button>
+            <Button
+              variant="outline"
+              className="mt-3 h-12 w-full rounded-full border-[#D8CEC2] bg-[#FFFDFA] focus-visible:ring-2 focus-visible:ring-[#1D1B18] focus-visible:ring-offset-2"
+              onClick={() => setFinished(true)}
+            >
+              Finish for now
+            </Button>
+          </section>
+        )}
+
+        {ready && complete && (
+          <section className="mt-12 max-w-xl">
+            <h1 className="text-3xl font-medium sm:text-4xl">{completion.title}</h1>
+            <p className="mt-3 leading-relaxed text-[#6D6257]">{completion.supporting}</p>
+            {handled.length > 0 && (
+              <p className="mt-2 text-sm text-[#6D6257]">
+                {handled.length} {handled.length === 1 ? 'piece' : 'pieces'} reviewed from this photo.
+              </p>
+            )}
+            <div className="mt-7 flex flex-wrap gap-3">
+              <Link href="/outfits" className="inline-flex min-h-12 items-center rounded-full bg-[#1D1B18] px-7 text-[#FFFDFA] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D1B18] focus-visible:ring-offset-2 focus-visible:ring-offset-[#F7F4EF]">See today’s outfit</Link>
+              <Link href="/wardrobe" className="inline-flex min-h-12 items-center rounded-full border border-[#D8CEC2] bg-[#FFFDFA] px-7 text-[#1D1B18] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D1B18] focus-visible:ring-offset-2 focus-visible:ring-offset-[#F7F4EF]">View wardrobe</Link>
+            </div>
+          </section>
+        )}
+
+        {ready && !total && (
+          <section className="mt-12">
+            <h2 className="text-2xl font-medium">No clear pieces found</h2>
+            <p className="mt-3 text-[#6D6257]">Try a well-lit photo where each piece is easy to see.</p>
+            <Link href="/wardrobe/add" className="mt-6 inline-block font-medium underline underline-offset-4">
+              Upload another photo
+            </Link>
+          </section>
+        )}
       </div>
-    </section>}
-    {ready && !complete && current && <div className="grid gap-10 md:grid-cols-[0.8fr_1fr] md:gap-16">
-      <aside className="hidden md:block"><p className="mb-3 text-sm text-[#6D6257]">Your outfit reference</p><div className="relative aspect-[3/4] overflow-hidden rounded-3xl bg-[#EBE3D8]"><GarmentImage src={review.sourceImageUrl} alt="Your uploaded outfit" role="one_piece" sizes="420px" className="object-contain p-5" /></div></aside>
-      <section aria-label={accessories && !pieces.main.length ? 'Accessory review' : 'Main-piece review'}>
-        <div className="mb-5"><p aria-live="polite" className="mb-3 text-sm text-[#6D6257]">{Math.max(1, total - remaining + 1)} of {total}</p><div role="progressbar" aria-label="Pieces reviewed" aria-valuemin={0} aria-valuemax={total} aria-valuenow={total - remaining} className="h-1 overflow-hidden rounded-full bg-[#D8CEC2]"><div className="h-full bg-[#6D6257] transition-all" style={{ width: `${total ? (total - remaining) / total * 100 : 0}%` }} /></div></div>
-        <FocusedPiece key={current.id} item={current} onHandled={(id) => { setHandled((ids) => [...ids, id]); void refresh() }} onEdited={(item) => { ++request.current; setReview((value) => ({ ...value, garments: value.garments.map((garment) => garment.id === item.id ? item : garment) })) }} />
-      </section>
-    </div>}
-    {ready && !complete && !current && pieces.accessories.length > 0 && <section className="mx-auto mt-12 max-w-lg py-8"><h1 className="text-2xl font-medium">Main pieces reviewed</h1><p className="mt-3 leading-relaxed text-[#6D6257]">We also found {pieces.accessories.length} {pieces.accessories.length === 1 ? 'accessory' : 'accessories'}. Review {pieces.accessories.length === 1 ? 'it' : 'them'} now or come back later.</p><Button className="mt-8 h-12 w-full rounded-full bg-[#1D1B18] text-[#FFFDFA] focus-visible:ring-2 focus-visible:ring-[#1D1B18] focus-visible:ring-offset-2" onClick={() => setAccessories(true)}>Review accessories</Button><Button variant="outline" className="mt-3 h-12 w-full rounded-full border-[#D8CEC2] bg-[#FFFDFA] focus-visible:ring-2 focus-visible:ring-[#1D1B18] focus-visible:ring-offset-2" onClick={() => setFinished(true)}>Finish for now</Button></section>}
-    {ready && complete && <section className="mt-12 max-w-xl"><h1 className="text-3xl font-medium sm:text-4xl">{completion.title}</h1><p className="mt-3 leading-relaxed text-[#6D6257]">{completion.supporting}</p><div className="mt-7 flex flex-wrap gap-3"><Link href="/outfits" className="inline-flex min-h-12 items-center rounded-full bg-[#1D1B18] px-7 text-[#FFFDFA] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D1B18] focus-visible:ring-offset-2 focus-visible:ring-offset-[#F7F4EF]">See today’s outfit</Link><Link href="/wardrobe" className="inline-flex min-h-12 items-center rounded-full border border-[#D8CEC2] bg-[#FFFDFA] px-7 text-[#1D1B18] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D1B18] focus-visible:ring-offset-2 focus-visible:ring-offset-[#F7F4EF]">View wardrobe</Link></div></section>}
-    {ready && !total && <section className="mt-12"><h2 className="text-2xl">No clear pieces found</h2><p className="mt-3 text-[#6D6257]">Try a well-lit photo where each piece is easy to see.</p><Link href="/wardrobe/add" className="mt-6 inline-block underline underline-offset-4">Upload another photo</Link></section>}
-  </div></main>
+    </main>
+  )
 }

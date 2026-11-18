@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useRef, useState, useTransition } from 'react'
+import { useRef, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { Heart, ThumbsDown } from 'lucide-react'
@@ -11,17 +11,17 @@ import {
   type CalibrationOutfit,
 } from '@/src/app/actions/outfit'
 import { getChangedTags, getOptimisticVector } from '@/src/lib/outfit/feedback-helpers'
-import { vectorToSignals } from '@/src/lib/fashion-dna/labels'
-import FashionDnaPanel from '@/src/components/fashion-dna/FashionDnaPanel'
 import OutfitCanvas from '@/src/components/outfit/OutfitCanvas'
 
 export default function OutfitCalibrationScreen({
   outfit: initialOutfit,
   answeredCount: initialAnsweredCount,
+  target = 3,
   feedbackCount,
 }: {
   outfit: CalibrationOutfit
   answeredCount: number
+  target?: number
   feedbackCount: number
 }) {
   const router = useRouter()
@@ -29,20 +29,19 @@ export default function OutfitCalibrationScreen({
   const [lastFeedback, setLastFeedback] = useState<boolean | null>(null)
   const [currentOutfit, setCurrentOutfit] = useState(initialOutfit)
   const [answeredCount, setAnsweredCount] = useState(initialAnsweredCount)
-  const [vector, setVector] = useState(initialOutfit.vector)
+  const [, setVector] = useState(initialOutfit.vector)
   const [isFinishing, setIsFinishing] = useState(false)
   const [isSkipping, setIsSkipping] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
-  const [swipeCount, setSwipeCount] = useState(feedbackCount)
+  const [, setSwipeCount] = useState(feedbackCount)
   const submissionLock = useRef(false)
   const [, startTransition] = useTransition()
   const prefersReducedMotion = useReducedMotion()
 
   const outfit = currentOutfit
-  const progressLabel = `Look ${Math.min(answeredCount + 1, 3)} of 3`
-
-  const signals = useMemo(() => vectorToSignals(vector), [vector])
+  const currentLookNumber = Math.min(answeredCount + 1, target)
+  const progressLabel = `Look ${currentLookNumber} of ${target}`
 
   function handleSkip() {
     if (isSkipping || isSubmitting || isFinishing) return
@@ -63,7 +62,7 @@ export default function OutfitCalibrationScreen({
     if (!visible || isSubmitting || isFinishing || submissionLock.current) return
 
     const activeOutfit = outfit
-    const priorVector = vector
+    const priorVector = initialOutfit.vector
     const changedTags = getChangedTags(activeOutfit)
     const idempotencyKey = `outfit-feedback:${activeOutfit.id}`
 
@@ -82,9 +81,6 @@ export default function OutfitCalibrationScreen({
           idempotencyKey,
         )
 
-        setVector(result.vector)
-        setAnsweredCount(result.answeredCount)
-
         if (result.completed) {
           setIsFinishing(true)
           setVisible(false)
@@ -92,6 +88,9 @@ export default function OutfitCalibrationScreen({
           router.refresh()
           return
         }
+
+        setVector(result.vector)
+        setAnsweredCount(result.answeredCount)
 
         if (!result.nextOutfit) {
           setErrorMessage(
@@ -125,136 +124,132 @@ export default function OutfitCalibrationScreen({
   }
 
   return (
-    <main className="px-4 py-6 text-[#1d1b18] sm:px-6 lg:py-10">
-      <div className="mx-auto grid max-w-5xl gap-8 lg:grid-cols-[minmax(0,7fr)_minmax(17rem,3fr)] lg:gap-10">
-        <section className="min-w-0">
-          <header className="mb-6 flex flex-wrap items-start justify-between gap-4 sm:mb-8">
-            <div>
-              <p className="text-xs font-medium uppercase tracking-[0.18em] text-[#7a6f62]">
-                Style check
-              </p>
-              <h1 className="mt-2 text-3xl font-medium tracking-tight sm:text-4xl">
-                What feels like you?
-              </h1>
-              <p className="mt-3 max-w-xl text-sm leading-6 text-[#6d6257] sm:text-base">
-                Three quick looks help us understand your taste.
-              </p>
-            </div>
-            <div className="flex items-center gap-4">
-              <button
-                type="button"
-                onClick={handleSkip}
-                disabled={isSkipping || isSubmitting || isFinishing}
-                className="rounded-sm text-xs text-[#7a6f62] underline-offset-4 transition-colors hover:text-[#1d1b18] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1d1b18] focus-visible:ring-offset-4 disabled:opacity-50"
-              >
-                Back to pieces
-              </button>
-              <span
-                role="progressbar"
-                aria-label="Style check progress"
-                aria-valuemin={1}
-                aria-valuemax={3}
-                aria-valuenow={Math.min(answeredCount + 1, 3)}
-                className="rounded-full border border-[#b9aa99] bg-[#fffdfa]/60 px-3 py-1.5 text-xs font-medium text-[#4f463d]"
-              >
-                {progressLabel}
-              </span>
-            </div>
-          </header>
+    <main className="min-h-[100dvh] bg-[#FBF8F4] px-4 py-6 pb-[calc(2.5rem+env(safe-area-inset-bottom))] text-[#1D1B18] sm:px-6 lg:py-10">
+      <div className="mx-auto max-w-lg">
+        <header className="mb-5 flex flex-wrap items-start justify-between gap-4 sm:mb-6">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight text-[#1D1B18] sm:text-3xl">
+              Let’s tune your style.
+            </h1>
+            <p className="mt-1 text-base font-medium text-[#1D1B18] sm:text-lg">
+              Would you wear this?
+            </p>
+            <p className="mt-0.5 text-xs text-[#6D6257] sm:text-sm">
+              This helps us learn your taste.
+            </p>
+          </div>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={handleSkip}
+              disabled={isSkipping || isSubmitting || isFinishing}
+              className="rounded-sm text-xs font-medium text-[#7A6F62] underline-offset-4 transition-colors hover:text-[#1D1B18] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D1B18] disabled:opacity-50"
+            >
+              Back to pieces
+            </button>
+            <span
+              role="progressbar"
+              aria-label="Style check progress"
+              aria-valuemin={1}
+              aria-valuemax={target}
+              aria-valuenow={currentLookNumber}
+              className="rounded-full border border-[#D8CEC2] bg-[#FFFDFA] px-3.5 py-1 text-xs font-medium text-[#4F463D] shadow-xs"
+            >
+              {progressLabel}
+            </span>
+          </div>
+        </header>
 
-          <AnimatePresence mode="wait">
-            {visible && !isFinishing ? (
-              <motion.div
-                key={outfit.id}
-                initial={prefersReducedMotion ? false : { opacity: 0, y: 14 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, x: lastFeedback ? 36 : -36, scale: 0.99 }}
-                transition={{ duration: prefersReducedMotion ? 0 : 0.24, ease: 'easeOut' }}
-                aria-busy={isSubmitting}
+        <AnimatePresence mode="wait">
+          {visible && !isFinishing ? (
+            <motion.div
+              key={outfit.id}
+              initial={prefersReducedMotion ? undefined : { opacity: 0, y: 14 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, x: lastFeedback ? 36 : -36, scale: 0.99 }}
+              transition={{ duration: prefersReducedMotion ? 0 : 0.24, ease: 'easeOut' }}
+              aria-busy={isSubmitting}
+              className="mx-auto w-full"
+            >
+              <OutfitCanvas
+                items={outfit.items}
+                calibration={true}
+                variant="editorial"
+                className="w-full"
               >
-                <OutfitCanvas
-                  items={outfit.items}
-                  reasons={outfit.reasons}
-                  variant="editorial"
+                <section
+                  aria-label="Style preference feedback"
+                  className="mt-4 sm:mt-5"
                 >
-                  <section
-                    aria-label="Style preference feedback"
-                    className="sticky bottom-[calc(5.75rem+env(safe-area-inset-bottom))] z-40 -mx-1 mt-5 rounded-2xl border border-[#d8cec2] bg-[#f7f4ef]/95 p-2 shadow-[0_8px_24px_rgba(62,51,40,0.10)] backdrop-blur-sm lg:static lg:mx-0 lg:border-0 lg:bg-transparent lg:p-0 lg:shadow-none"
-                  >
-                    <div className="grid grid-cols-2 gap-2.5 sm:gap-3">
+                  <div className="grid grid-cols-2 gap-2.5 sm:gap-3">
                     <Button
                       type="button"
                       variant="outline"
-                      aria-label="Not my style"
+                      aria-label="Not for me"
                       aria-pressed={isSubmitting && lastFeedback === false}
                       onClick={() => handleFeedback(false)}
                       disabled={isSubmitting || isFinishing}
-                      className="h-14 rounded-full border-[#b9aa99] bg-[#fffdfa] px-3 text-sm focus-visible:ring-2 focus-visible:ring-[#1d1b18] focus-visible:ring-offset-2 disabled:opacity-60 sm:text-base"
+                      className="h-13 rounded-full border border-[#D8CEC2] bg-[#FFFDFA] px-4 text-sm font-semibold text-[#1D1B18] shadow-xs transition-colors hover:bg-[#F7F4EF] hover:border-[#B9AA99] focus-visible:ring-2 focus-visible:ring-[#1D1B18] focus-visible:ring-offset-2 disabled:opacity-60 sm:h-14 sm:text-base"
                     >
-                      <ThumbsDown aria-hidden="true" className="size-4" />
-                      Not my style
+                      <ThumbsDown aria-hidden="true" className="size-4 shrink-0" />
+                      <span>Not for me</span>
                     </Button>
                     <Button
                       type="button"
-                      aria-label="Love this"
+                      aria-label="I’d wear this"
                       aria-pressed={isSubmitting && lastFeedback === true}
                       onClick={() => handleFeedback(true)}
                       disabled={isSubmitting || isFinishing}
-                      className="h-14 rounded-full bg-[#1d1b18] px-3 text-sm text-[#fffdfa] focus-visible:ring-2 focus-visible:ring-[#1d1b18] focus-visible:ring-offset-2 disabled:opacity-60 sm:text-base"
+                      className="h-13 rounded-full bg-[#1D1B18] px-4 text-sm font-semibold text-[#FFFDFA] shadow-xs transition-colors hover:bg-[#2C2925] focus-visible:ring-2 focus-visible:ring-[#1D1B18] focus-visible:ring-offset-2 disabled:opacity-60 sm:h-14 sm:text-base"
                     >
-                      <Heart aria-hidden="true" className="size-4" />
-                      Love this
+                      <Heart aria-hidden="true" className="size-4 shrink-0 fill-current text-[#FFFDFA]" />
+                      <span>I’d wear this</span>
                     </Button>
-                    </div>
-                    <p aria-live="polite" className="min-h-5 pt-2 text-center text-xs text-[#6d6257]">
-                      {isSubmitting ? 'Saving your choice…' : ''}
-                    </p>
-                  </section>
-                  {errorMessage ? (
-                    <p role="alert" className="mt-3 rounded-2xl border border-[#c9a8a3] bg-[#fffdfa] px-4 py-3 text-sm text-[#8a352e]">
-                      {errorMessage}
-                    </p>
-                  ) : null}
-                </OutfitCanvas>
-              </motion.div>
-            ) : isFinishing ? (
-              <motion.div
-                key="finishing"
-                initial={prefersReducedMotion ? false : { opacity: 0, y: 16 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: prefersReducedMotion ? 0 : 0.28, ease: 'easeOut' }}
-                className="flex min-h-[32rem] items-center justify-center rounded-[2rem] border border-[#d8cec2] bg-[#fffdfa]/65 p-8 text-center"
-              >
-                <div className="max-w-md">
-                  <p className="text-sm font-medium uppercase tracking-[0.18em] text-[#7a6f62]">
-                    Style check complete
+                  </div>
+                  <p aria-live="polite" className="min-h-5 pt-2 text-center text-xs text-[#6D6257]">
+                    {isSubmitting ? 'Saving your choice…' : ''}
                   </p>
-                  <h2 className="mt-3 text-2xl font-semibold tracking-tight">
-                    Your taste profile is ready.
-                  </h2>
-                  <p className="mt-3 text-sm leading-6 text-[#6d6257]">
-                    Your reactions are saved. Review your selected pieces to finish.
+                </section>
+                {errorMessage ? (
+                  <p role="alert" className="mt-3 rounded-2xl border border-[#C9A8A3] bg-[#FFFDFA] px-4 py-3 text-sm text-[#8A352E]">
+                    {errorMessage}
                   </p>
-                </div>
-              </motion.div>
-            ) : (
-              <motion.div
-                key="transitioning"
-                role="status"
-                aria-label="Loading the next look"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                className="h-[clamp(28rem,68vw,42rem)] animate-pulse rounded-[2rem] bg-[#ebe3d8] motion-reduce:animate-none"
-              >
-                <span className="sr-only">Loading the next look…</span>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </section>
-
-        <aside aria-label="Style learning summary" className="self-start lg:sticky lg:top-8 lg:pt-28">
-          <FashionDnaPanel signals={signals} feedbackCount={swipeCount} />
-        </aside>
+                ) : null}
+              </OutfitCanvas>
+            </motion.div>
+          ) : isFinishing ? (
+            <motion.div
+              key="finishing"
+              initial={prefersReducedMotion ? undefined : { opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: prefersReducedMotion ? 0 : 0.28, ease: 'easeOut' }}
+              className="flex min-h-[24rem] items-center justify-center rounded-[2rem] border border-[#D8CEC2] bg-[#FFFDFA]/65 p-8 text-center"
+            >
+              <div className="max-w-md">
+                <p className="text-sm font-medium uppercase tracking-[0.18em] text-[#7A6F62]">
+                  Style check complete
+                </p>
+                <h2 className="mt-3 text-2xl font-semibold tracking-tight text-[#1D1B18]">
+                  Your taste profile is ready.
+                </h2>
+                <p className="mt-3 text-sm leading-6 text-[#6D6257]">
+                  Your reactions are saved. Review your selected pieces to finish.
+                </p>
+              </div>
+            </motion.div>
+          ) : (
+            <motion.div
+              key="transitioning"
+              role="status"
+              aria-label="Loading the next look"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="mx-auto h-[clamp(24rem,60vw,36rem)] w-full max-w-lg animate-pulse rounded-[2rem] bg-[#EBE3D8] motion-reduce:animate-none"
+            >
+              <span className="sr-only">Loading the next look…</span>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     </main>
   )

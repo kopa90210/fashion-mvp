@@ -1,3 +1,6 @@
+import { canBrowseCuratedCategory } from '@/src/lib/quiz/catalog-category-policy'
+import type { QuizImagePreference } from '@/src/lib/quiz/imageSet'
+
 export type PipelineStep = {
   category: string
   label: string
@@ -14,6 +17,14 @@ export const SELECTION_STEPS: PipelineStep[] = [
   { category: 'outerwear', label: 'Outerwear', required: false, minSelections: 0 },
   { category: 'accessory', label: 'Accessories', required: false, minSelections: 0 },
 ]
+
+const MEN_SELECTION_STEPS = SELECTION_STEPS.filter(({ category }) =>
+  canBrowseCuratedCategory('masculine', category),
+)
+
+export function getSelectionSteps(collection: QuizImagePreference): PipelineStep[] {
+  return collection === 'feminine' ? SELECTION_STEPS : MEN_SELECTION_STEPS
+}
 
 export type SelectionCounts = Partial<Record<string, number>>
 

@@ -1,5 +1,64 @@
 # Curated catalog ingestion
 
+## Strict local batch verification
+
+Use `scripts/local_curated_import.py` for a processed cache containing both
+onboarding collections. It reads only `.env.development.local`, requires matching
+loopback app/import URLs, rejects invalid or duplicate source identities, and
+does not call inference providers. Run the modes in order with a report folder:
+
+```powershell
+python scripts/local_curated_import.py --mode dry-run --dataset-root "stylegraph_qwen_curated_processed (3)" --report-dir .tmp/local-curated-verification/new-run
+python scripts/local_curated_import.py --mode preflight --dataset-root "stylegraph_qwen_curated_processed (3)" --report-dir .tmp/local-curated-verification/new-run
+python scripts/local_curated_import.py --mode apply --dataset-root "stylegraph_qwen_curated_processed (3)" --report-dir .tmp/local-curated-verification/new-run
+```
+
+Preflight completes before any write. Matching existing curated rows may receive
+only a missing collection label; IDs, images and ownership stay unchanged.
+The apply command verifies image hashes, ownership preservation and a zero-write
+second execution. Use a separate report directory when rerunning the command so
+the first import's snapshots remain available. Reports and browser auth artifacts
+are local ignored files; never publish them.
+
+## Hosted importer authentication and preflight
+
+`scripts/hosted_curated_import.py` reads only the process environment, never `.env`
+files. Set `STYLEGRAPH_HOSTED_SUPABASE_URL` to the exact hosted project URL and
+`STYLEGRAPH_HOSTED_SUPABASE_SERVICE_KEY` to its secret key in the launching
+PowerShell session. New `sb_secret_` keys are sent in `apikey` only; legacy
+service-role JWTs retain Bearer authentication. Publishable keys are rejected.
+
+Run a read-only hosted check from that session:
+
+```powershell
+python scripts/hosted_curated_import.py --preflight --target-project-ref wwmumdmpruqwralxniwk
+```
+
+Preflight validates the dataset, project URL, public bucket, existing rows, and
+storage duplicates. Storage listing uses a read-only POST endpoint. It never
+uploads, inserts, or creates a rollback manifest. Default dry-run remains local
+and makes no requests. `--apply` retains its separate project/phrase confirmations
+and rollback-manifest requirement. HTTP failures report a fixed operation label
+and status, without credentials, headers, or upstream response bodies.
+
+Repeated content-derived item IDs within a dataset are skipped automatically.
+The importer keeps the first source path in alphabetical order per ID and reports
+the copies in `dataset_duplicates` in the plan and rollback manifest. Category
+counts and intended writes use unique candidates. Matching confirmed curated
+items already in Supabase are skipped too. Conflicting rows and orphan storage
+objects still stop the import for reconciliation; no existing data is overwritten.
+
+To diagnose a bucket HTTP error with the same PowerShell credentials:
+
+```powershell
+python scripts/hosted_curated_import.py --check-connection --target-project-ref wwmumdmpruqwralxniwk
+```
+
+This compares a direct bucket GET with the SDK bucket GET, prints statuses only,
+and does not read the dataset or create any manifest. Both calls are read-only.
+If the direct call succeeds and the SDK call fails, investigate client differences;
+if both fail, investigate the configured project/credential and project access.
+
 Curated catalog ingestion has two independent phases. The laptop owns source files, hashing, validation, cache artifacts, duplicate checks, and all local Supabase writes. The remote Colab service receives one image and two non-sensitive hints. It performs background removal and fashion metadata inference only.
 
 ## Dataset layout

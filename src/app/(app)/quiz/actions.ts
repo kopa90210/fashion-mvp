@@ -1,12 +1,13 @@
 'use server'
 
 import { createClient } from '@/src/lib/supabase/server'
+import { catalogSelectionHref } from '@/src/lib/quiz/catalog-collection'
 import { redirect } from 'next/navigation'
 import { QUIZ_QUESTIONS_FOR_SCORING } from '@/src/lib/quiz/questions'
 import { computeStyleVector, parseQuizSignals, type QuizAnswer } from '@/src/lib/quiz/scoring'
 
 /** Persist one server-derived quiz result and Fashion DNA version. */
-export async function submitStyleQuiz(answers: QuizAnswer[]) {
+export async function submitStyleQuiz(answers: QuizAnswer[], collection?: unknown) {
   const signals = parseQuizSignals(answers, QUIZ_QUESTIONS_FOR_SCORING)
   const vector = computeStyleVector(answers, QUIZ_QUESTIONS_FOR_SCORING)
   const supabase = await createClient()
@@ -25,5 +26,5 @@ export async function submitStyleQuiz(answers: QuizAnswer[]) {
     p_quiz_signals: signals,
   })
   if (error) throw new Error(`Failed to save style data: ${error.message}`)
-  redirect('/quiz?done=true')
+  redirect(catalogSelectionHref(collection))
 }
