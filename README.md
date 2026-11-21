@@ -2,7 +2,20 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 ## Getting Started
 
-First, run the development server:
+Start your local Supabase stack with `supabase start`. From the checkout or
+Git worktree where you will run Next.js, create or update a Git-ignored
+`.env.development.local` with the public values reported by `supabase status`.
+
+```dotenv
+NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:54321
+NEXT_PUBLIC_SUPABASE_ANON_KEY=<local Supabase anon or publishable key>
+```
+
+Use the local API URL if it differs from the example. Keep server-only Supabase
+keys out of `NEXT_PUBLIC_` variables. Each worktree needs its own local env
+file. An env file in another checkout will not configure signup here.
+
+Start or restart the development server from that same directory:
 
 ```bash
 npm run dev

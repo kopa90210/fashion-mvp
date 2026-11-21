@@ -15,7 +15,8 @@ offers require `feminine`. Valid roles are `base_layer`, `bottom`, `one_piece`,
 `work|everyday`) and leave `style_tags` blank or provide a JSON object of
 style weights between 0 and 1. Reviews expire after 48 hours.
 
-From the repository root in PowerShell:
+[Configure local Supabase in the worktree](../README.md#getting-started) before
+starting Next.js. Then run these commands from that worktree in PowerShell:
 
 ```powershell
 New-Item -ItemType Directory -Force .tmp | Out-Null
