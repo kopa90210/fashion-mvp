@@ -26,6 +26,8 @@ beforeEach(() => {
   vi.stubEnv('ENABLE_STYLIST', 'true')
   vi.stubEnv('GEMINI_STYLIST_API_KEY', 'test-only')
   vi.stubEnv('STYLIST_CATALOG_JSON', '')
+  vi.stubEnv('STYLIST_PILOT_USER_IDS', 'current-user')
+  vi.stubEnv('STYLIST_PILOT_METRICS', 'false')
   calls.getUser.mockResolvedValue({ data: { user: { id: 'current-user' } } })
   calls.loadWardrobe.mockResolvedValue({ items: [
     piece('Oxford', 'base_layer'), piece('Loafers', 'footwear'), piece('Jeans', 'bottom'),
@@ -34,6 +36,46 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllEnvs())
 
 describe('stylist HTTP boundary', () => {
+  it('keeps a deployed pilot closed without a cohort and rejects non-members before reading their wardrobes', async () => {
+    const body = { view: 'ask', collection: 'masculine', question: 'What can I wear?' }
+    vi.stubEnv('NODE_ENV', 'production')
+    vi.stubEnv('STYLIST_PILOT_USER_IDS', undefined)
+    expect((await POST(request(body))).status).toBe(404)
+    vi.stubEnv('STYLIST_PILOT_USER_IDS', 'another-user')
+    expect((await POST(request(body))).status).toBe(404)
+    expect(calls.loadWardrobe).not.toHaveBeenCalled()
+    expect(calls.classify).not.toHaveBeenCalled()
+    vi.stubEnv('STYLIST_PILOT_USER_IDS', 'another-user, current-user')
+    expect((await POST(request(body))).status).toBe(200)
+  })
+
+  it('takes an Arabic shopping request through catalog validation, budget and outfit matching', async () => {
+    const offer = {
+      id: 'fixture-chino', title: 'Beige chinos', url: 'https://www.lcwaikiki.eg/en/fixture-chino',
+      priceEgp: 899.50, currency: 'EGP', stock: 'in_stock',
+      checkedAt: new Date().toISOString(), collection: 'masculine', role: 'bottom', occasions: ['work'],
+    }
+    vi.stubEnv('STYLIST_CATALOG_JSON', JSON.stringify([
+      offer, { ...offer, id: 'stale', url: 'https://www.defacto.com.eg/fixture-stale', priceEgp: 400, checkedAt: '2024-01-01T00:00:00Z' },
+    ]))
+    calls.loadWardrobe.mockResolvedValue({ items: [
+      piece('Oxford', 'base_layer'), piece('Navy tee', 'base_layer'), piece('Loafers', 'footwear'), piece('Jeans', 'bottom'),
+    ], dna: {}, signals: null })
+    calls.classify.mockResolvedValue(null)
+    const body = { view: 'ask', collection: 'masculine', question: 'عايز أشتري بنطلون للشغل تحت ١٢٠٠ جنيه' }
+    const buy = await POST(request(body))
+    const data = await buy.json()
+    expect(data).toMatchObject({ status: 'shop', source: 'rules', suggestion: { product: { id: offer.id, url: offer.url } } })
+    const looks = data.suggestion.looks as { pieces: { name: string; owned: boolean }[] }[]
+    expect(looks).toHaveLength(2)
+    expect(looks.every(({ pieces }) => pieces.filter(p => !p.owned).map(p => p.name).join() === offer.title)).toBe(true)
+    expect(new Set(looks.map(({ pieces }) => pieces.filter(p => p.owned).map(p => p.name).sort().join())).size).toBe(2)
+    expect(await (await POST(request({ ...body, budget: 899 }))).json()).toMatchObject({ status: 'no-match' })
+    expect(await (await POST(request({ ...body, collection: 'feminine' }))).json()).toMatchObject({ status: 'no-match' })
+    const owned = await (await POST(request({ ...body, question: 'ألبس إيه من دولابي؟' }))).json()
+    expect(owned.status).toBe('restyle')
+    expect(owned.suggestion).toBeUndefined()
+  })
   it('rejects signed-out, cross-origin, disabled, and oversized requests without calling Gemini', async () => {
     const body = { view: 'ask', collection: 'masculine', question: 'What can I wear?' }
     calls.getUser.mockResolvedValueOnce({ data: { user: null } })
@@ -71,5 +113,23 @@ describe('stylist HTTP boundary', () => {
     calls.classify.mockResolvedValue({ mode: 'shop', role: 'bottom', occasion: 'work', budget: 2000 })
     const ask = await POST(request({ view: 'ask', collection: 'masculine', question: 'Find me work trousers' }))
     expect(await ask.json()).toMatchObject({ status: 'clarify', clarification: 'budget' })
+  })
+  it('logs opt-in aggregate results and distinguishes Gemini fallback without logging wardrobe or prompt text', async () => {
+    vi.stubEnv('STYLIST_PILOT_METRICS', 'true')
+    calls.classify.mockResolvedValue(null)
+    const log = vi.spyOn(console, 'info').mockImplementation(() => {})
+    try {
+      const response = await POST(request({
+        view: 'ask', collection: 'masculine', question: 'ألبس إيه من دولابي للميعاد؟',
+      }))
+      expect(response.status).toBe(200)
+      expect(log).toHaveBeenCalledTimes(1)
+      expect(JSON.parse(log.mock.calls[0][0])).toEqual({
+        event: 'stylist_pilot', view: 'ask', outcome: 'restyle', intent: 'fallback',
+        catalog: 'not-needed', elapsedMs: expect.any(Number),
+      })
+    } finally {
+      log.mockRestore()
+    }
   })
 })

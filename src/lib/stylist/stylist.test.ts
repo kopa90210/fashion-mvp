@@ -59,6 +59,12 @@ describe('stylist behavior evaluation', () => {
     expect(searchCatalog(catalog, { ...shop, budget: 800 }, 'masculine')).toEqual([])
     expect(searchCatalog(catalog, { ...shop, occasion: 'going-out' }, 'masculine')).toEqual([])
   })
+  it('keeps one-piece offers out of the shared and masculine catalogs even when JSON bypasses the importer', () => {
+    const entries = readCatalog(JSON.stringify(['feminine', 'masculine', 'shared'].map(collection => ({
+      ...row, id: collection, url: row.url + '-' + collection, collection, role: 'one_piece',
+    }))), now)
+    expect(entries.map(entry => entry.collection)).toEqual(['feminine'])
+  })
   it('returns owned restyling without displaying a purchase', () => {
     const result = recommendations(ctx, catalog, { ...shop, mode: 'restyle' }, 'masculine')
     expect(result.status).toBe('restyle')

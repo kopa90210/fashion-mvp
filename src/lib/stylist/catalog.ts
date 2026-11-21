@@ -29,6 +29,7 @@ export function readCatalog(json: string | undefined, now = Date.now()): Product
         p.currency !== 'EGP' || p.stock !== 'in_stock' ||
         typeof p.checkedAt !== 'string' || !p.role || !gaps.includes(p.role) ||
         !(p.collection === 'masculine' || p.collection === 'feminine' || p.collection === 'shared') ||
+        (p.role === 'one_piece' && p.collection !== 'feminine') ||
         !Array.isArray(p.occasions) || !p.occasions.length || !p.occasions.every((value) => occasions.includes(value))) continue
     const age = now - Date.parse(p.checkedAt)
     if (!Number.isFinite(age) || age < 0 || age > MAX_AGE_MS) continue

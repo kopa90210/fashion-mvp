@@ -2,6 +2,7 @@ import { createClient } from '@/src/lib/supabase/server'
 import { readCatalog } from '@/src/lib/stylist/catalog'
 import { classifyWithGemini } from '@/src/lib/stylist/gemini'
 import { resolveIntent, type Collection, type Intent } from '@/src/lib/stylist/intent'
+import { pilotAllows, recordPilotEvent } from '@/src/lib/stylist/pilot'
 import { recommendations } from '@/src/lib/stylist/recommend'
 import { loadStylistWardrobe } from '@/src/lib/stylist/wardrobe'
 
@@ -51,10 +52,15 @@ export async function POST(request: Request) {
   if (budget !== null && (typeof budget !== 'number' || !Number.isInteger(budget) || budget < 1 || budget > 100_000)) {
     return json({ error: 'Enter a whole EGP budget between 1 and 100,000' }, 400)
   }
+  const startedAt = performance.now()
+  const view = daily ? 'daily' : 'ask'
+  let admitted = false
   try {
     const supabase = await createClient()
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return json({ error: 'Sign in to use your wardrobe' }, 401)
+    if (!pilotAllows(user.id)) return json({ error: 'Stylist is not enabled' }, 404)
+    admitted = true
     const context = await loadStylistWardrobe(supabase, user.id)
     const key = process.env.GEMINI_STYLIST_API_KEY
     // Never send the wardrobe, Style DNA, item IDs, or product data to Gemini.
@@ -64,8 +70,20 @@ export async function POST(request: Request) {
     const resolved = resolveIntent(question, model)
     const intent: Intent = daily ? { mode: 'shop', occasion: context.signals?.primaryOccasion === 'work-university' ? 'work' : context.signals?.primaryOccasion === 'going-out' ? 'going-out' : 'everyday', role: null, budget }
       : { ...resolved, budget: resolved.budget === null ? budget : budget === null ? resolved.budget : Math.min(resolved.budget, budget) }
-    return json({ ...recommendations(context, readCatalog(process.env.STYLIST_CATALOG_JSON), intent, collection, daily), source: model ? 'gemini' : 'rules' })
+    const needsCatalog = intent.mode === 'shop' && intent.budget !== null && Boolean(intent.role || daily) && Boolean(context.items.length)
+    const catalog = needsCatalog ? readCatalog(process.env.STYLIST_CATALOG_JSON) : []
+    const result = recommendations(context, catalog, intent, collection, daily)
+    recordPilotEvent({
+      view, outcome: result.status, elapsedMs: Math.round(performance.now() - startedAt),
+      catalog: needsCatalog ? catalog.length ? 'ready' : 'empty' : 'not-needed',
+      intent: model ? 'gemini' : daily || !context.items.length ? 'not-used' : key ? 'fallback' : 'rules',
+    })
+    return json({ ...result, source: model ? 'gemini' : 'rules' })
   } catch {
+    if (admitted) recordPilotEvent({
+      view, outcome: 'unavailable', elapsedMs: Math.round(performance.now() - startedAt),
+      catalog: 'not-needed', intent: 'unknown',
+    })
     return json({ error: 'Could not load your styling recommendations. Try again.' }, 503)
   }
 }
