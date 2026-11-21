@@ -241,6 +241,8 @@ export interface RecommendOutfitsOptions {
   /** Require this supplied wardrobe piece in every result. */
   anchorItemId?: string;
   signals?: QuizSignals | null;
+  /** Optional occasion proxy for wardrobes without completed quiz signals. */
+  occasion?: QuizSignals['primaryOccasion'];
 }
 
 interface ScoredWardrobeItem {
@@ -274,6 +276,7 @@ export function recommendOutfits(
   if (items.length === 0 || topN <= 0) return [];
 
   const compiledDna = compileStyleVector(dna);
+  const occasionTarget = opts.occasion ? { 'work-university': 0.6, 'everyday-errands': 0.2, 'going-out': 0.8, mixed: undefined }[opts.occasion] : undefined;
 
   // Partition items by layer role and precompute individual item scores.
   const byRole: Record<LayerRole, ScoredWardrobeItem[]> = {
@@ -289,7 +292,13 @@ export function recommendOutfits(
     const item = items[i];
     const role = item.layer_role as LayerRole;
     if (role in byRole) {
-      const score = opts.signals ? scoreItemForSignals(item, compiledDna, opts.signals) : scoreItemCompiled(item, compiledDna);
+      let score = opts.signals ? scoreItemForSignals(item, compiledDna, opts.signals) : scoreItemCompiled(item, compiledDna);
+      if (!opts.signals && occasionTarget !== undefined) {
+        const formality = item.formality_score;
+        const occasionFit = typeof formality === 'number' && formality >= 0 && formality <= 1
+          ? 1 - Math.abs(formality - occasionTarget) : 0.5;
+        score = 0.9 * score + 0.1 * occasionFit;
+      }
       byRole[role].push({ item, score });
     }
   }

@@ -2,7 +2,8 @@
 
 import { useState, type FormEvent } from 'react'
 import Link from 'next/link'
-import type { Collection } from '@/src/lib/stylist/intent'
+import type { WardrobeNeed } from '@/src/lib/stylist/daily-needs'
+import type { Collection, Occasion } from '@/src/lib/stylist/intent'
 import type { Look, Result } from '@/src/lib/stylist/recommend'
 
 type View = 'ask' | 'daily'
@@ -11,6 +12,17 @@ const prompts = [
   { text: 'Find work trousers under 1,500 EGP', language: 'en', direction: 'ltr' },
 ] as const
 const focus = 'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#625142]'
+const occasionLabels = { everyday: 'Everyday', work: 'Work', 'going-out': 'Going out' }
+const roleLabels = { footwear: 'Shoes', base_layer: 'A top', bottom: 'A bottom', one_piece: 'A one-piece' }
+
+function describeNeed(need: WardrobeNeed) {
+  if (need.kind === 'building-block') return 'One of the pieces missing from a complete outfit.'
+  if (need.kind === 'missing') return need.possibleNewCombinations === 1
+    ? 'Could complete your first outfit.'
+    : 'Could complete your first outfits.'
+  return need.possibleNewCombinations === 1 ? 'Could add one new combination.'
+    : `Could add up to ${need.possibleNewCombinations} combinations.`
+}
 
 function LookCard({ look }: { look: Look }) {
   return (
@@ -31,6 +43,7 @@ export default function StylistSearch() {
   const [shoppingOptionsOpen, setShoppingOptionsOpen] = useState(false)
   const [budget, setBudget] = useState('')
   const [collection, setCollection] = useState<Collection>('masculine')
+  const [occasion, setOccasion] = useState<Occasion | ''>('')
   const [result, setResult] = useState<Result | null>(null)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState('')
@@ -51,7 +64,8 @@ export default function StylistSearch() {
     try {
       const r = await fetch('/api/stylist', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ view, ...(view === 'ask' ? { question } : {}), collection, budget: budget ? Number(budget) : null }),
+        body: JSON.stringify({ view, ...(view === 'ask' ? { question } : occasion ? { occasion } : {}),
+          collection, budget: budget ? Number(budget) : null }),
       })
       const data = await r.json()
       if (!r.ok) { setError(typeof data.error === 'string' ? data.error : 'Could not load the stylist.'); return }
@@ -87,8 +101,8 @@ export default function StylistSearch() {
       </div>
       <form className={`mt-4 space-y-4 ${panel}`} onSubmit={submit}>
         <div>
-          <h2 className="font-serif text-3xl">{view === 'ask' ? 'What are you dressing for?' : 'Refresh your wardrobe'}</h2>
-          <p className="mt-2 text-sm text-[#6d6257]">{view === 'ask' ? 'Ask about an outfit or a piece you want to buy.' : 'See a look you already own. Set a budget to look for one useful addition.'}</p>
+          <h2 className="font-serif text-3xl">{view === 'ask' ? 'What are you dressing for?' : 'What works today?'}</h2>
+          <p className="mt-2 text-sm text-[#6d6257]">{view === 'ask' ? 'Ask about an outfit or a piece you want to buy.' : 'Start with an outfit you already own and see what could make your wardrobe more versatile.'}</p>
         </div>
         {view === 'ask' && <>
           <label className="block text-sm">Your question
@@ -101,7 +115,17 @@ export default function StylistSearch() {
               onClick={() => updateQuestion(text)}>{text}</button>)}
           </div>
         </>}
-        {view === 'daily' ? shoppingFields : (
+        {view === 'daily' ? <>
+          <label className="block text-sm">Occasion
+            <select className={'mt-1 block min-h-11 rounded-xl border border-[#d8cec2] px-3 ' + focus}
+              value={occasion} disabled={pending}
+              onChange={e => { setOccasion(e.target.value as Occasion | ''); setResult(null) }}>
+              <option value="">Use my style profile</option>
+              {Object.entries(occasionLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+            </select>
+          </label>
+          {shoppingFields}
+        </> : (
           <details open={shoppingOptionsOpen} onToggle={(event) => setShoppingOptionsOpen(event.currentTarget.open)}>
             <summary className={'flex min-h-11 w-fit cursor-pointer items-center gap-2 rounded-lg px-1 text-sm underline underline-offset-4 ' + focus}>Shopping options</summary>
             {shoppingFields}
@@ -123,11 +147,20 @@ export default function StylistSearch() {
         {result?.status === 'no-match' && <p className={panel}>{result.looks.length
           ? 'No checked product matched your request and formed two looks with your pieces.'
           : 'No complete look matched. Add more pieces to your wardrobe and try again.'}</p>}
-        {!!result?.looks.length && <section className={panel}><h3 className="mb-3 font-serif text-2xl">Restyle what you own</h3>{result.looks.map((look, i) => <LookCard key={i} look={look} />)}</section>}
+        {!!result?.looks.length && <section className={panel}><h3 className="mb-3 font-serif text-2xl">{result.daily ? 'Today’s look from your wardrobe' : 'Restyle what you own'}</h3>
+          {result.daily && <p className="mb-3 text-sm text-[#6d6257]">{occasionLabels[result.daily.occasion]} · <time dateTime={result.daily.date}>{result.daily.date}</time></p>}
+          {result.looks.map((look, i) => <LookCard key={i} look={look} />)}</section>}
+        {!!result?.daily?.gaps.length && <section className={panel}>
+          <h3 className="mb-3 font-serif text-2xl">Where your wardrobe could do more</h3>
+          <ul className="space-y-2 text-sm">{result.daily.gaps.map(need => <li key={need.role}>
+            <strong>{roleLabels[need.role]}</strong> — {describeNeed(need)}
+          </li>)}</ul>
+          <p className="mt-3 text-xs text-[#6d6257]">Estimates are based on the pieces in your wardrobe.</p>
+        </section>}
         {result?.suggestion && <section className={panel}><h3 className="font-serif text-2xl">One piece worth adding</h3>
           <h4 dir="auto" className="mt-2 font-medium">{result.suggestion.product.title}</h4>
           <p className="mt-2 text-sm">{result.suggestion.product.brand} · {Intl.NumberFormat('en-EG', { style: 'currency', currency: 'EGP' }).format(result.suggestion.product.priceEgp)}</p>
-          <p className="my-3 text-sm text-[#6d6257]">Two ways to wear it with pieces you own.</p>
+          <p className="my-3 text-sm text-[#6d6257]">{result.suggestion.need ? describeNeed(result.suggestion.need) + ' ' : ''}Two ways to wear it with pieces you own.</p>
           <div className="grid gap-2 sm:grid-cols-2">{result.suggestion.looks.map((look, i) => <LookCard key={i} look={look} />)}</div>
           <a className={'mt-4 inline-flex min-h-11 items-center rounded-full border border-[#d8cec2] px-4 text-sm ' + focus} href={result.suggestion.product.url} target="_blank" rel="noopener noreferrer">View at {result.suggestion.product.brand} ↗</a>
           <p className="mt-2 text-xs text-[#6d6257]">Checked {result.suggestion.product.checkedAt.slice(0, 10)}. Confirm price, size and availability at the retailer.</p>

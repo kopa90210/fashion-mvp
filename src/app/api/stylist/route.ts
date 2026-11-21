@@ -1,7 +1,8 @@
 import { createClient } from '@/src/lib/supabase/server'
 import { readCatalog } from '@/src/lib/stylist/catalog'
+import { dailyOccasion } from '@/src/lib/stylist/daily-needs'
 import { classifyWithGemini } from '@/src/lib/stylist/gemini'
-import { resolveIntent, type Collection, type Intent } from '@/src/lib/stylist/intent'
+import { occasions, resolveIntent, type Collection, type Intent } from '@/src/lib/stylist/intent'
 import { pilotAllows, recordPilotEvent } from '@/src/lib/stylist/pilot'
 import { recommendations } from '@/src/lib/stylist/recommend'
 import { loadStylistWardrobe } from '@/src/lib/stylist/wardrobe'
@@ -46,6 +47,8 @@ export async function POST(request: Request) {
       (input.collection !== 'masculine' && input.collection !== 'feminine')) return json({ error: 'Invalid request' }, 400)
   const collection: Collection = input.collection
   const daily = input.view === 'daily'
+  const selectedOccasion = occasions.find(value => value === input.occasion)
+  if (daily && input.occasion !== undefined && !selectedOccasion) return json({ error: 'Choose a valid occasion' }, 400)
   const question = typeof input.question === 'string' ? input.question.trim() : ''
   if (!daily && (!question || question.length > 280)) return json({ error: 'Enter a question of up to 280 characters' }, 400)
   const budget = input.budget ?? null
@@ -67,9 +70,10 @@ export async function POST(request: Request) {
     const model = !daily && context.items.length && key ? await classifyWithGemini(question, {
       key, model: process.env.GEMINI_STYLIST_MODEL ?? 'gemini-3.1-flash-lite',
     }) : null
-    const resolved = resolveIntent(question, model)
-    const intent: Intent = daily ? { mode: 'shop', occasion: context.signals?.primaryOccasion === 'work-university' ? 'work' : context.signals?.primaryOccasion === 'going-out' ? 'going-out' : 'everyday', role: null, budget }
-      : { ...resolved, budget: resolved.budget === null ? budget : budget === null ? resolved.budget : Math.min(resolved.budget, budget) }
+    const resolved = daily ? null : resolveIntent(question, model)
+    const intent: Intent = resolved
+      ? { ...resolved, budget: resolved.budget === null ? budget : budget === null ? resolved.budget : Math.min(resolved.budget, budget) }
+      : { mode: 'shop', occasion: dailyOccasion(context.signals, selectedOccasion), role: null, budget }
     const needsCatalog = intent.mode === 'shop' && intent.budget !== null && Boolean(intent.role || daily) && Boolean(context.items.length)
     const catalog = needsCatalog ? readCatalog(process.env.STYLIST_CATALOG_JSON) : []
     const result = recommendations(context, catalog, intent, collection, daily)

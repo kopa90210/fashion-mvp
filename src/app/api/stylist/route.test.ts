@@ -36,6 +36,15 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllEnvs())
 
 describe('stylist HTTP boundary', () => {
+  it('uses a daily occasion override without calling Gemini and rejects bad choices', async () => {
+    const body = { view: 'daily', collection: 'masculine' }
+    const bad = await POST(request({ ...body, occasion: 'anything' }))
+    expect(bad.status).toBe(400)
+    const valid = await POST(request({ ...body, occasion: 'work' }))
+    expect(valid.status).toBe(200)
+    expect(await valid.json()).toMatchObject({ daily: { occasion: 'work', gaps: expect.any(Array) } })
+    expect(calls.classify).not.toHaveBeenCalled()
+  })
   it('keeps a deployed pilot closed without a cohort and rejects non-members before reading their wardrobes', async () => {
     const body = { view: 'ask', collection: 'masculine', question: 'What can I wear?' }
     vi.stubEnv('NODE_ENV', 'production')
