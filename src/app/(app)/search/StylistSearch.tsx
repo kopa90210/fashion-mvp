@@ -5,8 +5,9 @@ import Link from 'next/link'
 import type { WardrobeNeed } from '@/src/lib/stylist/daily-needs'
 import type { Collection, Occasion } from '@/src/lib/stylist/intent'
 import type { Look, Result } from '@/src/lib/stylist/recommend'
+import CatalogSearch from './CatalogSearch'
 
-type View = 'ask' | 'daily'
+type View = 'ask' | 'daily' | 'browse'
 const prompts = [
   { text: 'ألبس إيه للشغل من دولابي؟', language: 'ar', direction: 'rtl' },
   { text: 'Find work trousers under 1,500 EGP', language: 'en', direction: 'ltr' },
@@ -92,13 +93,14 @@ export default function StylistSearch() {
   )
   return (
     <div className="mt-6">
-      <div className="inline-flex gap-1 rounded-full bg-[#ebe3d8] p-1" aria-label="Stylist views" role="group">
-        {([['ask', 'Ask Stylist'], ['daily', 'Daily Finds']] as const).map(([value, label]) => (
+      <div className="inline-flex max-w-full flex-wrap gap-1 rounded-3xl bg-[#ebe3d8] p-1" aria-label="Stylist views" role="group">
+        {([['ask', 'Ask Stylist'], ['daily', 'Daily Finds'], ['browse', 'Browse products']] as const).map(([value, label]) => (
           <button key={value} type="button" disabled={pending} aria-pressed={view === value}
             className={`min-h-11 rounded-full px-4 text-sm ${focus} ${view === value ? 'bg-[#1d1b18] text-[#fffdfa]' : 'text-[#6d6257]'}`}
             onClick={() => changeView(value)}>{label}</button>
         ))}
       </div>
+      {view === 'browse' ? <CatalogSearch /> : <>
       <form className={`mt-4 space-y-4 ${panel}`} onSubmit={submit}>
         <div>
           <h2 className="font-serif text-3xl">{view === 'ask' ? 'What are you dressing for?' : 'What works today?'}</h2>
@@ -166,6 +168,7 @@ export default function StylistSearch() {
           <p className="mt-2 text-xs text-[#6d6257]">Checked {result.suggestion.product.checkedAt.slice(0, 10)}. Confirm price, size and availability at the retailer.</p>
         </section>}
       </div>
+      </>}
     </div>
   )
 }
