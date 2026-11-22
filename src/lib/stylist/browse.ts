@@ -5,7 +5,7 @@ const PAGE_SIZE = 12
 const sorts = ['relevance', 'price-asc', 'price-desc'] as const
 type Sort = typeof sorts[number]
 type BrowseFilters = { q: string; collection: Collection | null; role: Gap | null; maxPrice: number | null; sort: Sort; page: number }
-export type BrowseResult = { offers: Pick<Product, 'id' | 'title' | 'brand' | 'role' | 'priceEgp' | 'url' | 'checkedAt' | 'demo'>[]; total: number; page: number; hasMore: boolean; catalogAvailable: boolean }
+export type BrowseResult = { offers: Pick<Product, 'id' | 'title' | 'brand' | 'role' | 'priceEgp' | 'url' | 'checkedAt' | 'demo' | 'referenceUrl'>[]; total: number; page: number; hasMore: boolean; catalogAvailable: boolean }
 
 export function parseBrowseFilters(params: URLSearchParams): BrowseFilters | null {
   for (const key of ['q', 'collection', 'role', 'maxPrice', 'sort', 'page']) {
@@ -51,7 +51,7 @@ export function browseCatalog(catalog: Product[], filters: BrowseFilters): Brows
     : filters.sort === 'price-desc' ? b.offer.priceEgp - a.offer.priceEgp : b.score - a.score)
     || b.score - a.score || a.offer.priceEgp - b.offer.priceEgp || a.offer.id.localeCompare(b.offer.id))
   const offset = (filters.page - 1) * PAGE_SIZE
-  const offers = scored.slice(offset, offset + PAGE_SIZE).map(({ offer: { id, title, brand, role, priceEgp, url, checkedAt, demo } }) =>
-    ({ id, title, brand, role, priceEgp, url, checkedAt, demo }))
+  const offers = scored.slice(offset, offset + PAGE_SIZE).map(({ offer: { id, title, brand, role, priceEgp, url, checkedAt, demo, referenceUrl } }) =>
+    ({ id, title, brand, role, priceEgp, url, checkedAt, demo, referenceUrl }))
   return { offers, total: scored.length, page: filters.page, hasMore: offset + PAGE_SIZE < scored.length, catalogAvailable: catalog.length > 0 }
 }

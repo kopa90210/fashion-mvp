@@ -1,5 +1,7 @@
 'use client'
 
+import DemoOfferNote from './DemoOfferNote'
+
 import { useState, type FormEvent } from 'react'
 import Link from 'next/link'
 import type { WardrobeNeed } from '@/src/lib/stylist/daily-needs'
@@ -182,7 +184,7 @@ export default function StylistSearch() {
           <p className="mt-2 text-sm">{result.suggestion.product.brand} · {Intl.NumberFormat('en-EG', { style: 'currency', currency: 'EGP' }).format(result.suggestion.product.priceEgp)}</p>
           <p className="my-3 text-sm text-[#6d6257]">{result.event ? '' : result.suggestion.need ? describeNeed(result.suggestion.need) + ' ' : ''}{result.suggestion.looks.length === 1 ? 'One way to wear it with pieces you own.' : 'Two ways to wear it with pieces you own.'}</p>
           <div className="grid gap-2 sm:grid-cols-2">{result.suggestion.looks.map((look, i) => <LookCard key={i} look={look} />)}</div>
-          {result.suggestion.product.demo ? <p className="mt-3 text-sm">Demo offer · illustrative price, unavailable for purchase.</p> : <>
+          {result.suggestion.product.demo ? <DemoOfferNote offer={result.suggestion.product} /> : <>
           <a className={'mt-4 inline-flex min-h-11 items-center rounded-full border border-[#d8cec2] px-4 text-sm ' + focus} href={result.suggestion.product.url} target="_blank" rel="noopener noreferrer">View at {result.suggestion.product.brand} ↗</a>
           <p className="mt-2 text-xs text-[#6d6257]">Checked {result.suggestion.product.checkedAt.slice(0, 10)}. Confirm price, size and availability at the retailer.</p></>}
         </section>}

@@ -8,7 +8,7 @@ const shops = {
 } as const
 const MAX_AGE_MS = 48 * 60 * 60 * 1000
 export type Product = {
-  id: string; title: string; brand: (typeof shops)[keyof typeof shops] | 'StyleGraph demo'; demo?: true; url: string; priceEgp: number
+  id: string; title: string; brand: (typeof shops)[keyof typeof shops] | 'StyleGraph demo'; demo?: true; referenceUrl?: string; url: string; priceEgp: number
   checkedAt: string; collection: Collection | 'shared'; role: Gap; occasions: Occasion[]; styleTags: Partial<StyleVector>
 }
 
@@ -74,5 +74,8 @@ export function runtimeCatalog(): Product[] {
   })
   return [fixture('demo-loafers', 'Black loafers', 'footwear', 900),
     fixture('demo-trousers', 'Charcoal trousers', 'bottom', 850),
-    fixture('demo-shirt', 'Oxford shirt', 'base_layer', 650)]
+    fixture('demo-shirt', 'Oxford shirt', 'base_layer', 650),
+    // Non-purchasable examples adapted from the 22 Nov retailer workbook.
+    { ...fixture('wb-df-3358222', 'Workbook sample · Women’s black flat loafers', 'footwear', 1499), brand: 'DeFacto', referenceUrl: 'https://www.defacto.com.eg/en-eg/kadin-3358222', collection: 'feminine', occasions: ['work', 'going-out'] },
+    { ...fixture('wb-lcw-s6rh10z8-q6k', 'Workbook sample · Men’s white regular poplin shirt', 'base_layer', 799), brand: 'LC Waikiki', referenceUrl: 'https://www.lcwaikiki.eg/en/regular-fit-poplin-mens-shirt-white-o-5477878', collection: 'masculine', occasions: ['work', 'going-out'] }]
 }
