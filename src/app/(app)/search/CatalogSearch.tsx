@@ -79,10 +79,11 @@ export default function CatalogSearch() {
           <p className="text-sm text-[#6d6257]">{offer.brand}</p>
           <h3 dir="auto" className="my-2 font-serif text-xl">{offer.title}</h3>
           <p className="font-medium">{price.format(offer.priceEgp)}</p>
+          {offer.demo ? <p className="mt-2 text-sm">Demo offer · illustrative price, unavailable for purchase.</p> : <>
           <p className="mt-2 text-xs text-[#6d6257]">Checked <time dateTime={offer.checkedAt}>{offer.checkedAt.slice(0, 10)}</time>. Confirm price and stock at the retailer.</p>
           <a href={offer.url} target="_blank" rel="noopener noreferrer" className="mt-2 inline-flex min-h-11 items-center rounded-full border border-[#d8cec2] px-4 text-sm">
             View at {offer.brand} ↗
-          </a>
+          </a></>}
         </li>)}
       </ul>}
       {result && (result.page > 1 || result.hasMore) && <nav className="flex items-center gap-4" aria-label="Search result pages">

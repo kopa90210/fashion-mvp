@@ -1,6 +1,6 @@
 import { createClient } from '@/src/lib/supabase/server'
 import { browseCatalog, parseBrowseFilters } from '@/src/lib/stylist/browse'
-import { readCatalog } from '@/src/lib/stylist/catalog'
+import { runtimeCatalog } from '@/src/lib/stylist/catalog'
 import { pilotAllows } from '@/src/lib/stylist/pilot'
 
 const json = (data: unknown, status = 200) => Response.json(data, {
@@ -17,7 +17,7 @@ export async function GET(request: Request) {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return json({ error: 'Sign in to browse products' }, 401)
     if (!pilotAllows(user.id)) return json({ error: 'Search is not enabled' }, 404)
-    return json(browseCatalog(readCatalog(process.env.STYLIST_CATALOG_JSON), filters))
+    return json(browseCatalog(runtimeCatalog(), filters))
   } catch {
     return json({ error: 'Search is unavailable. Try again.' }, 503)
   }

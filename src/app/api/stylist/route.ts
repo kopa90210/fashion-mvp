@@ -1,5 +1,5 @@
 import { createClient } from '@/src/lib/supabase/server'
-import { readCatalog } from '@/src/lib/stylist/catalog'
+import { runtimeCatalog } from '@/src/lib/stylist/catalog'
 import { dailyOccasion } from '@/src/lib/stylist/daily-needs'
 import { eventRequest } from '@/src/lib/stylist/event'
 import { classifyWithGemini } from '@/src/lib/stylist/gemini'
@@ -70,7 +70,7 @@ export async function POST(request: Request) {
     if (event) {
       const fromQuestion = explicitBudget(question)
       const limit = fromQuestion === null ? budget : budget === null ? fromQuestion : Math.min(fromQuestion, budget)
-      const catalog = event.ownedOnly || limit === null ? [] : readCatalog(process.env.STYLIST_CATALOG_JSON)
+      const catalog = event.ownedOnly || limit === null ? [] : runtimeCatalog()
       const result = eventRecommendation(context, catalog, event, collection, limit)
       recordPilotEvent({
         view, outcome: result.status, elapsedMs: Math.round(performance.now() - startedAt),
@@ -89,7 +89,7 @@ export async function POST(request: Request) {
       ? { ...resolved, budget: resolved.budget === null ? budget : budget === null ? resolved.budget : Math.min(resolved.budget, budget) }
       : { mode: 'shop', occasion: dailyOccasion(context.signals, selectedOccasion), role: null, budget }
     const needsCatalog = intent.mode === 'shop' && intent.budget !== null && Boolean(intent.role || daily) && Boolean(context.items.length)
-    const catalog = needsCatalog ? readCatalog(process.env.STYLIST_CATALOG_JSON) : []
+    const catalog = needsCatalog ? runtimeCatalog() : []
     const result = recommendations(context, catalog, intent, collection, daily)
     recordPilotEvent({
       view, outcome: result.status, elapsedMs: Math.round(performance.now() - startedAt),

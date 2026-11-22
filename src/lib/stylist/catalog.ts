@@ -8,7 +8,7 @@ const shops = {
 } as const
 const MAX_AGE_MS = 48 * 60 * 60 * 1000
 export type Product = {
-  id: string; title: string; brand: (typeof shops)[keyof typeof shops]; url: string; priceEgp: number
+  id: string; title: string; brand: (typeof shops)[keyof typeof shops] | 'StyleGraph demo'; demo?: true; url: string; priceEgp: number
   checkedAt: string; collection: Collection | 'shared'; role: Gap; occasions: Occasion[]; styleTags: Partial<StyleVector>
 }
 
@@ -58,4 +58,21 @@ export function searchCatalog(catalog: Product[], intent: Intent, collection: Co
       p.priceEgp <= budget && p.role === intent.role && p.occasions.includes(intent.occasion))
     .sort((a, b) => a.priceEgp - b.priceEgp || a.id.localeCompare(b.id))
     .slice(0, 20)
+}
+
+
+// Keep investor fixtures separate from reviewed stock: they never expire,
+// imply a retailer partnership, or carry a checkout link.
+export function runtimeCatalog(): Product[] {
+  if (process.env.VERCEL_ENV !== 'preview' ||
+      process.env.VERCEL_GIT_COMMIT_REF !== 'feat/stylist-daily-needs' ||
+      process.env.NEXT_PUBLIC_SUPABASE_URL !== 'https://xaxwzncbvmxicbnvjfad.supabase.co' ||
+      process.env.STYLIST_DEMO_CATALOG !== 'true') return readCatalog(process.env.STYLIST_CATALOG_JSON)
+  const fixture = (id: string, title: string, role: Gap, priceEgp: number): Product => ({
+    id, title, role, priceEgp, brand: 'StyleGraph demo', demo: true, url: '', checkedAt: '',
+    collection: 'shared', occasions: ['work', 'everyday', 'going-out'], styleTags: {},
+  })
+  return [fixture('demo-loafers', 'Black loafers', 'footwear', 900),
+    fixture('demo-trousers', 'Charcoal trousers', 'bottom', 850),
+    fixture('demo-shirt', 'Oxford shirt', 'base_layer', 650)]
 }
