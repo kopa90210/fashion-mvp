@@ -9,12 +9,14 @@ import CatalogSearch from './CatalogSearch'
 
 type View = 'ask' | 'daily' | 'browse'
 const prompts = [
+  { text: 'عندي انترفيو النهارده، ألبس إيه؟', language: 'ar', direction: 'rtl' },
+  { text: 'I have a wedding tonight. What should I wear?', language: 'en', direction: 'ltr' },
   { text: 'ألبس إيه للشغل من دولابي؟', language: 'ar', direction: 'rtl' },
-  { text: 'Find work trousers under 1,500 EGP', language: 'en', direction: 'ltr' },
 ] as const
 const focus = 'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#625142]'
 const occasionLabels = { everyday: 'Everyday', work: 'Work', 'going-out': 'Going out' }
 const roleLabels = { footwear: 'Shoes', base_layer: 'A top', bottom: 'A bottom', one_piece: 'A one-piece' }
+const eventLabels = { interview: 'Interview', wedding: 'Wedding', dinner: 'Dinner', occasion: 'Event' }
 
 function describeNeed(need: WardrobeNeed) {
   if (need.kind === 'building-block') return 'One of the pieces missing from a complete outfit.'
@@ -104,7 +106,7 @@ export default function StylistSearch() {
       <form className={`mt-4 space-y-4 ${panel}`} onSubmit={submit}>
         <div>
           <h2 className="font-serif text-3xl">{view === 'ask' ? 'What are you dressing for?' : 'What works today?'}</h2>
-          <p className="mt-2 text-sm text-[#6d6257]">{view === 'ask' ? 'Ask about an outfit or a piece you want to buy.' : 'Start with an outfit you already own and see what could make your wardrobe more versatile.'}</p>
+          <p className="mt-2 text-sm text-[#6d6257]">{view === 'ask' ? 'Tell me what’s coming up. I’ll check what you own first and look for a piece to fill a gap if you give me a budget.' : 'Start with an outfit you already own and see what could make your wardrobe more versatile.'}</p>
         </div>
         {view === 'ask' && <>
           <label className="block text-sm">Your question
@@ -140,13 +142,29 @@ export default function StylistSearch() {
       </form>
       <div className="mt-4 space-y-4" aria-live="polite" aria-busy={pending}>
         {error && <p role="alert" className={panel}>{error}</p>}
+        {result?.event && <section className={panel}>
+          <h3 className="font-serif text-2xl">{eventLabels[result.event.kind]} plan</h3>
+          {result.identity && <p className="mt-2 text-sm text-[#6d6257] capitalize">
+            From your Style Profile: {result.identity.style} · {result.identity.fit} fit · {result.identity.formality.replace('-', ' ')}
+          </p>}
+          <p className="mt-2 text-sm">{{
+            owned: 'Start with this outfit from your wardrobe.',
+            gap: 'I couldn’t make a complete outfit from the pieces saved in your wardrobe.',
+            'missing-budget': 'I found a wardrobe gap. Add a maximum budget only if you want me to check retailer options.',
+            shortlist: 'This option fills the gap and works with the saved pieces shown below.',
+            'no-offer': 'No recently checked offer fits your budget and completes the looks for this occasion.',
+            'check-dress-code': 'Here’s the closest outfit from your wardrobe. Check it against the event dress code.',
+          }[result.event.outcome]}</p>
+          {result.event.need && <p className="mt-2 text-sm">Gap: {roleLabels[result.event.need.role]}</p>}
+          {result.event.urgent && <p className="mt-2 text-sm text-[#6d6257]">For today, start with pieces you can get now. Confirm store stock, size and pickup before relying on a retailer option.</p>}
+        </section>}
         {result?.status === 'empty' && <div className={panel}><p>Your wardrobe is empty. Add a few pieces to get started.</p><Link href="/wardrobe/add" className={'mt-2 inline-flex min-h-11 items-center rounded-lg underline ' + focus}>Add pieces</Link></div>}
-        {result?.status === 'clarify' && <p className={panel}>{{
+        {result?.status === 'clarify' && !result.event && <p className={panel}>{{
           intent: 'Ask for a look from your wardrobe, or tell us which piece you want to buy.',
           category: 'Which piece are you looking for? Try a shirt, trousers, shoes, a dress, or a jacket.',
           budget: 'What is your maximum budget in EGP?',
         }[result.clarification ?? 'intent']}</p>}
-        {result?.status === 'no-match' && <p className={panel}>{result.looks.length
+        {result?.status === 'no-match' && !result.event && <p className={panel}>{result.looks.length
           ? 'No checked product matched your request and formed two looks with your pieces.'
           : 'No complete look matched. Add more pieces to your wardrobe and try again.'}</p>}
         {!!result?.looks.length && <section className={panel}><h3 className="mb-3 font-serif text-2xl">{result.daily ? 'Today’s look from your wardrobe' : 'Restyle what you own'}</h3>
@@ -162,7 +180,7 @@ export default function StylistSearch() {
         {result?.suggestion && <section className={panel}><h3 className="font-serif text-2xl">One piece worth adding</h3>
           <h4 dir="auto" className="mt-2 font-medium">{result.suggestion.product.title}</h4>
           <p className="mt-2 text-sm">{result.suggestion.product.brand} · {Intl.NumberFormat('en-EG', { style: 'currency', currency: 'EGP' }).format(result.suggestion.product.priceEgp)}</p>
-          <p className="my-3 text-sm text-[#6d6257]">{result.suggestion.need ? describeNeed(result.suggestion.need) + ' ' : ''}Two ways to wear it with pieces you own.</p>
+          <p className="my-3 text-sm text-[#6d6257]">{result.event ? '' : result.suggestion.need ? describeNeed(result.suggestion.need) + ' ' : ''}{result.suggestion.looks.length === 1 ? 'One way to wear it with pieces you own.' : 'Two ways to wear it with pieces you own.'}</p>
           <div className="grid gap-2 sm:grid-cols-2">{result.suggestion.looks.map((look, i) => <LookCard key={i} look={look} />)}</div>
           <a className={'mt-4 inline-flex min-h-11 items-center rounded-full border border-[#d8cec2] px-4 text-sm ' + focus} href={result.suggestion.product.url} target="_blank" rel="noopener noreferrer">View at {result.suggestion.product.brand} ↗</a>
           <p className="mt-2 text-xs text-[#6d6257]">Checked {result.suggestion.product.checkedAt.slice(0, 10)}. Confirm price, size and availability at the retailer.</p>

@@ -1,10 +1,11 @@
 import { createClient } from '@/src/lib/supabase/server'
 import { readCatalog } from '@/src/lib/stylist/catalog'
 import { dailyOccasion } from '@/src/lib/stylist/daily-needs'
+import { eventRequest } from '@/src/lib/stylist/event'
 import { classifyWithGemini } from '@/src/lib/stylist/gemini'
-import { occasions, resolveIntent, type Collection, type Intent } from '@/src/lib/stylist/intent'
+import { explicitBudget, occasions, resolveIntent, type Collection, type Intent } from '@/src/lib/stylist/intent'
 import { pilotAllows, recordPilotEvent } from '@/src/lib/stylist/pilot'
-import { recommendations } from '@/src/lib/stylist/recommend'
+import { eventRecommendation, recommendations } from '@/src/lib/stylist/recommend'
 import { loadStylistWardrobe } from '@/src/lib/stylist/wardrobe'
 
 const MAX_BYTES = 4096
@@ -65,6 +66,19 @@ export async function POST(request: Request) {
     if (!pilotAllows(user.id)) return json({ error: 'Stylist is not enabled' }, 404)
     admitted = true
     const context = await loadStylistWardrobe(supabase, user.id)
+    const event = daily ? null : eventRequest(question)
+    if (event) {
+      const fromQuestion = explicitBudget(question)
+      const limit = fromQuestion === null ? budget : budget === null ? fromQuestion : Math.min(fromQuestion, budget)
+      const catalog = event.ownedOnly || limit === null ? [] : readCatalog(process.env.STYLIST_CATALOG_JSON)
+      const result = eventRecommendation(context, catalog, event, collection, limit)
+      recordPilotEvent({
+        view, outcome: result.status, elapsedMs: Math.round(performance.now() - startedAt),
+        catalog: event.ownedOnly || limit === null ? 'not-needed' : catalog.length ? 'ready' : 'empty',
+        intent: 'rules',
+      })
+      return json({ ...result, source: 'rules' })
+    }
     const key = process.env.GEMINI_STYLIST_API_KEY
     // Never send the wardrobe, Style DNA, item IDs, or product data to Gemini.
     const model = !daily && context.items.length && key ? await classifyWithGemini(question, {

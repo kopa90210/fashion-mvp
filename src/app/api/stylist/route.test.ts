@@ -36,6 +36,45 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllEnvs())
 
 describe('stylist HTTP boundary', () => {
+  it('handles a same-day Arabic interview as a plan, asking only for a missing budget', async () => {
+    calls.loadWardrobe.mockResolvedValue({ items: [
+      { ...piece('Oxford', 'base_layer'), formality_score: 0.65 },
+      { ...piece('Polo', 'base_layer'), formality_score: 0.45 },
+      { ...piece('Trousers', 'bottom'), formality_score: 0.55 },
+    ], dna: {}, signals: { style: 'classic', fit: 'regular', formality: 'polished', primaryOccasion: 'everyday-errands', exploration: 'familiar' } })
+    vi.stubEnv('STYLIST_CATALOG_JSON', JSON.stringify([{
+      id: 'demo', title: 'Demo loafers', url: 'https://concrete.store/products/test-loafers', currency: 'EGP',
+      priceEgp: 900, stock: 'in_stock', checkedAt: new Date().toISOString(), role: 'footwear', collection: 'masculine', occasions: ['work'],
+    }]))
+    const ask = async (question: string) => (await POST(request({ view: 'ask', collection: 'masculine', question }))).json()
+    const q = 'عندي انترفيو النهارده، ألبس إيه؟'
+    expect(await ask(q)).toMatchObject({
+      clarification: 'budget', identity: { style: 'classic', fit: 'regular', formality: 'polished' },
+      event: { kind: 'interview', urgent: true, outcome: 'missing-budget', need: { role: 'footwear' } },
+    })
+    expect(await ask(q + ' ميزانيتي ١٢٠٠ جنيه')).toMatchObject({
+      event: { outcome: 'shortlist' }, suggestion: { product: { id: 'demo' }, looks: [expect.any(Object)] },
+    })
+    expect(await ask(q + ' ميزانيتي ٨٠٠ جنيه')).toMatchObject({ event: { outcome: 'no-offer' } })
+    const noBuy = await ask(q + ' من غير ما أشتري، ميزانيتي ١٢٠٠ جنيه')
+    expect(noBuy.event.outcome).toBe('gap')
+    expect(noBuy.suggestion).toBeUndefined()
+    expect(calls.classify).not.toHaveBeenCalled()
+  })
+
+  it('prefers an owned outfit even with a budget and flags uncertain wedding formality', async () => {
+    calls.loadWardrobe.mockResolvedValue({ items: [
+      { ...piece('Oxford', 'base_layer'), formality_score: 0.65 },
+      { ...piece('Trousers', 'bottom'), formality_score: 0.55 },
+      piece('Loafers', 'footwear'),
+    ], dna: {}, signals: null })
+    const ask = async (question: string) => (await POST(request({ view: 'ask', collection: 'masculine', question }))).json()
+    const interview = await ask('I have an interview today, budget 1200 EGP')
+    expect(interview.event.outcome).toBe('owned')
+    expect(interview.looks[0].pieces.every((p: { owned: boolean }) => p.owned)).toBe(true)
+    expect(interview.suggestion).toBeUndefined()
+    expect(await ask('I have a wedding tonight')).toMatchObject({ event: { outcome: 'check-dress-code' } })
+  })
   it('uses a daily occasion override without calling Gemini and rejects bad choices', async () => {
     const body = { view: 'daily', collection: 'masculine' }
     const bad = await POST(request({ ...body, occasion: 'anything' }))
