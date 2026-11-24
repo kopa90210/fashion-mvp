@@ -3,7 +3,11 @@ import { createClient } from '@supabase/supabase-js'
 
 export type StylistQuota = 'api_hourly' | 'gemini_daily'
 
-/** Only call with a user ID verified by the server's auth client. */
+/**
+ * Only call with a user ID verified by the server's auth client.
+ * gemini_daily reserves user/day, global/day and global/month atomically.
+ * A false result means an exhausted allowance; no Gemini call is authorized.
+ */
 export async function reserveStylistQuota(userId: string, quota: StylistQuota): Promise<boolean> {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
   const key = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY
