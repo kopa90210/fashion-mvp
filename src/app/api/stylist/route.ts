@@ -1,9 +1,10 @@
+import { createHash } from 'node:crypto'
 import { createClient } from '@/src/lib/supabase/server'
 import { readCatalog } from '@/src/lib/stylist/catalog'
 import { classifyWithGemini } from '@/src/lib/stylist/gemini'
 import { resolveIntent, type Collection, type Intent } from '@/src/lib/stylist/intent'
 import { recommendations } from '@/src/lib/stylist/recommend'
-import { reserveStylistQuota } from '@/src/lib/stylist/quota'
+import { reserveStylistQuota, beginStylistAi, finishStylistAi } from '@/src/lib/stylist/quota'
 import { loadStylistWardrobe } from '@/src/lib/stylist/wardrobe'
 
 const MAX_BYTES = 4096
@@ -52,6 +53,10 @@ export async function POST(request: Request) {
   if (budget !== null && (typeof budget !== 'number' || !Number.isInteger(budget) || budget < 1 || budget > 100_000)) {
     return json({ error: 'Enter a whole EGP budget between 1 and 100,000' }, 400)
   }
+  const requestId = request.headers.get('Idempotency-Key')
+  if (!daily && (!requestId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(requestId))) {
+    return json({ error: 'A valid Idempotency-Key is required' }, 400)
+  }
   try {
     const supabase = await createClient()
     const { data: { user } } = await supabase.auth.getUser()
@@ -62,9 +67,20 @@ export async function POST(request: Request) {
     const context = await loadStylistWardrobe(supabase, user.id)
     const key = process.env.GEMINI_STYLIST_API_KEY
     // Never send the wardrobe, Style DNA, item IDs, or product data to Gemini.
-    const model = !daily && context.items.length && key && await reserveStylistQuota(user.id, 'gemini_daily') ? await classifyWithGemini(question, {
-      key, model: process.env.GEMINI_STYLIST_MODEL ?? 'gemini-3.1-flash-lite',
-    }) : null
+    let model: Intent | null = null
+    if (!daily && context.items.length && key && requestId) {
+      const fingerprint = createHash('sha256').update(JSON.stringify([question, collection, budget])).digest('hex')
+      const claim = await beginStylistAi(user.id, requestId, fingerprint)
+      if (claim.status === 'busy') return json({ error: 'A styling request is still processing. Try again shortly.', code: 'STYLIST_BUSY' }, 409)
+      if (claim.status === 'conflict') return json({ error: 'Request identifier was already used for different inputs.', code: 'STYLIST_KEY_CONFLICT' }, 409)
+      if (claim.status === 'completed') model = claim.intent
+      if (claim.status === 'claimed') {
+        model = await classifyWithGemini(question, {
+          key, model: process.env.GEMINI_STYLIST_MODEL ?? 'gemini-3.1-flash-lite',
+        })
+        await finishStylistAi(user.id, requestId, claim.token, model)
+      }
+    }
     const resolved = resolveIntent(question, model)
     const intent: Intent = daily ? { mode: 'shop', occasion: context.signals?.primaryOccasion === 'work-university' ? 'work' : context.signals?.primaryOccasion === 'going-out' ? 'going-out' : 'everyday', role: null, budget }
       : { ...resolved, budget: resolved.budget === null ? budget : budget === null ? resolved.budget : Math.min(resolved.budget, budget) }
