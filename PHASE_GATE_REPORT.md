@@ -47,3 +47,15 @@
 
 ### If "Pass":
 - **Phase 2 Authorization**: *Explicit confirmation that Phase 1 MVP gate metrics have been satisfied and Phase 2 scope is authorized to begin.*
+
+
+## P0-06 regression evidence — 2026-11-24
+**Decision: NO-GO.** Scope: staging xaxwzncbvmxicbnvjfad and draft PR #12 only.
+- Baseline ea27eb0: CI #60 (https://github.com/kopa90210/fashion-mvp/actions/runs/45461195257) passed install/typecheck/lint/test/build. Actual logs: 52 files, 621 passed, 4 skipped, zero failures, 7 lint warnings. Stylist: recommendation 28, route 19, quota 11, telemetry 9, observability 3, request guard 2. Mocked application tests, not hosted E2E.
+- npm ci reports 29 vulnerabilities (2 critical, 9 high, 18 moderate). Runtime exposure and package-level remediation not verified. New dependency-audit workflow aa12c4d collects full/runtime JSON and fails runtime high/critical. Result pending; no upgrades.
+- Re-executed committed wardrobe_security_closure.sql against staging: passed; rollback and zero synthetic accounts verified. Previous advisor: 25 authenticated definer warnings, leaked password protection disabled; actual Storage HTTP tests and legacy provenance outstanding.
+- Executed stylist_quota_regression.sql (d6c6104): 20 hourly accepted/21st denied; 10 daily accepted/11th denied; duplicate and different-key active claims blocked; timeout completion and replay; global daily/monthly increments consistent. Rolled back; zero test users. Sequential only, not concurrent sessions. dblink not installed. Parallel session and global boundary race tests remain mandatory. Older callers bypass metered claims.
+- Recommendation regression passed; structural counts and lexical/formality heuristics not stylist-validated. Live retailer verification and browser E2E outstanding.
+- Observability tests passed; no real provider traffic or measured p95/cost in prior snapshot. Hosted ingestion, alerting, retention, pricing and billing outstanding.
+- Before release: resolve runtime high/critical findings or documented approved exceptions; review skips; complete concurrent and real two-account Storage/browser testing; verify staging environment isolation; validate recommendations and live catalog; close security/privacy/operational blockers; verify final head CI and enforce audit check. Business activation/retention/monetization gates not measured.
+No production merge, migration or manual deployment.
