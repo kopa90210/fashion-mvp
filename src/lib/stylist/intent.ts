@@ -15,9 +15,16 @@ export function parseIntent(raw: unknown): Intent | null {
   return { mode: p.mode, occasion: p.occasion, role: p.role, budget: p.budget }
 }
 
+export function explicitOccasion(question: string): Occasion | null {
+  const matches: Occasion[] = []
+  if (/\b(work|office|interview|university)\b|الشغل|للشغل|مكتب|جامعة/i.test(question)) matches.push('work')
+  if (/going out|evening|خروج|خروجة|سهرة/i.test(question)) matches.push('going-out')
+  if (/\b(everyday|casual|errands)\b|يومي|مشاوير/i.test(question)) matches.push('everyday')
+  return matches.length === 1 ? matches[0] : null
+}
+
 export function fallbackIntent(question: string): Intent {
-  const occasion = /work|office|interview|الشغل|للشغل|مكتب/i.test(question) ? 'work'
-    : /going out|evening|خروج|خروجة|سهرة/i.test(question) ? 'going-out' : 'everyday'
+  const occasion = explicitOccasion(question) ?? 'everyday'
   const role: Gap | null = /trousers?|chinos?|pants|بنطلون/i.test(question) ? 'bottom'
     : /jacket|overshirt|جاكيت/i.test(question) ? 'outerwear'
     : /shoes|sneakers|loafers|جزمة|حذاء|كوتشي/i.test(question) ? 'footwear'
@@ -54,6 +61,8 @@ export function resolveIntent(question: string, model: Intent | null): Intent {
   return {
     ...chosen,
     mode: fallback.mode === 'clarify' ? chosen.mode : fallback.mode,
+    occasion: explicitOccasion(question) ?? chosen.occasion,
+    role: fallback.role ?? chosen.role,
     budget: ceiling,
   }
 }
