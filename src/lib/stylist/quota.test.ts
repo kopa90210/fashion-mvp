@@ -5,7 +5,7 @@ const mocks = vi.hoisted(() => ({
 }))
 vi.mock('server-only', () => ({}))
 vi.mock('@supabase/supabase-js', () => ({ createClient: mocks.createClient }))
-import { reserveStylistQuota } from './quota'
+import { reserveStylistQuota, beginStylistAi, finishStylistAi } from './quota'
 
 beforeEach(() => {
   vi.resetAllMocks()
@@ -60,5 +60,25 @@ describe('server-only quota RPC', () => {
     vi.stubEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY', 'anon-test-key')
     await expect(reserveStylistQuota('user-a', 'api_hourly')).rejects.toThrow('configuration unavailable')
     expect(mocks.createClient).not.toHaveBeenCalled()
+  })
+})
+
+describe('idempotent AI RPC', () => {
+  const token = '22222222-2222-4222-8222-222222222222'
+  it('validates a claimed token and forwards the fingerprint', async () => {
+    mocks.abortSignal.mockResolvedValue({ data: { status: 'claimed', token }, error: null })
+    await expect(beginStylistAi('user-a', 'request-a', 'a'.repeat(64))).resolves.toEqual({ status: 'claimed', token })
+    expect(mocks.rpc).toHaveBeenCalledExactlyOnceWith('begin_stylist_ai', {
+      p_user_id: 'user-a', p_request_id: 'request-a', p_fingerprint: 'a'.repeat(64),
+    })
+  })
+  it('rejects malformed cached intent', async () => {
+    mocks.abortSignal.mockResolvedValue({ data: { status: 'completed', intent: { mode: 'invalid' } }, error: null })
+    await expect(beginStylistAi('user-a', 'request-a', 'a'.repeat(64))).rejects.toThrow('claim unavailable')
+  })
+  it('rejects a lost completion claim without retry', async () => {
+    mocks.abortSignal.mockResolvedValue({ data: false, error: null })
+    await expect(finishStylistAi('user-a', 'request-a', token, null)).rejects.toThrow('completion unavailable')
+    expect(mocks.rpc).toHaveBeenCalledTimes(1)
   })
 })
