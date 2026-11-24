@@ -16,6 +16,20 @@ const look = (o: Outfit, candidate?: string): Look => ({
   pieces: o.items.map((p) => ({ name: p.display_name, owned: p.id !== candidate })),
 })
 const nameKey = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '')
+// Conservative lexical overlap, not an inference of visual equivalence.
+export function redundancyPenalty(items: WardrobeItem[], product: Product): number {
+  const tokens = (s: string) => new Set(s.normalize('NFKC').toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [])
+  const target = tokens(product.title)
+  let max = 0
+  for (const item of items) {
+    if (item.layer_role !== product.role) continue
+    const owned = tokens(item.display_name)
+    const union = new Set([...target, ...owned]).size
+    const overlap = [...target].filter(t => owned.has(t)).length
+    if (union) max = Math.max(max, overlap / union)
+  }
+  return max
+}
 const core = new Set(['base_layer', 'bottom', 'one_piece', 'footwear'])
 
 // Exact count of new canonical core combinations, excluding optional accessories.
@@ -33,12 +47,14 @@ export function incrementalUnlockCount(items: WardrobeItem[], role: Product['rol
 }
 
 function chooseProduct(context: StylistContext, candidates: Product[]) {
-  let best: { product: Product; outfits: Outfit[]; score: number; unlockCount: number } | undefined
+  let best: { product: Product; outfits: Outfit[]; score: number; unlockCount: number; adjustedUnlock: number } | undefined
   const ownedProductNames = new Set(context.items.map((i) => nameKey(i.display_name)))
   for (const product of candidates.slice(0, 25)) {
     if (ownedProductNames.has(nameKey(product.title))) continue
     const unlockCount = incrementalUnlockCount(context.items, product.role)
     if (unlockCount < 2) continue
+    const penalty = redundancyPenalty(context.items, product)
+    const adjustedUnlock = unlockCount * (1 - 0.5 * penalty)
     const anchor = `catalog:${product.id}`
     const candidate: WardrobeItem = {
       id: anchor, display_name: product.title, image_url: null,
@@ -57,9 +73,9 @@ function chooseProduct(context: StylistContext, candidates: Product[]) {
     const outfits = [...unique.values()]
     if (outfits.length < 2) continue
     const score = outfits.slice(0, 2).reduce((n, o) => n + o.score, 0)
-    if (!best || unlockCount > best.unlockCount ||
-      (unlockCount === best.unlockCount && (score > best.score ||
-        (score === best.score && product.priceEgp < best.product.priceEgp)))) best = { product, outfits, score, unlockCount }
+    if (!best || adjustedUnlock > best.adjustedUnlock ||
+      (adjustedUnlock === best.adjustedUnlock && (score > best.score ||
+        (score === best.score && product.priceEgp < best.product.priceEgp)))) best = { product, outfits, score, unlockCount, adjustedUnlock }
   }
   return best ? { product: best.product, unlockCount: best.unlockCount, looks: best.outfits.slice(0, 2).map((o) => look(o, `catalog:${best.product.id}`)) } : undefined
 }
