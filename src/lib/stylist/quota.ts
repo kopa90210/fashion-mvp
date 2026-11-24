@@ -6,7 +6,7 @@ export type StylistQuota = 'api_hourly' | 'gemini_daily'
 /** Only call with a user ID verified by the server's auth client. */
 export async function reserveStylistQuota(userId: string, quota: StylistQuota): Promise<boolean> {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY
+  const key = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY
   if (!url || !key) throw new Error('Stylist quota configuration unavailable')
 
   const client = createClient(url, key, {
