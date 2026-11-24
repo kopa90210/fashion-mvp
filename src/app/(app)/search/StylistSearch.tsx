@@ -1,7 +1,8 @@
 'use client'
 
-import { useRef, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import Link from 'next/link'
+import { createRequestGuard } from '@/src/lib/stylist/request-guard'
 import type { Collection } from '@/src/lib/stylist/intent'
 import type { Look, Result } from '@/src/lib/stylist/recommend'
 
@@ -36,18 +37,27 @@ export default function StylistSearch() {
   const [error, setError] = useState('')
   const retry = useRef<{ body: string; key: string } | null>(null)
   const submitting = useRef(false)
-  const changeView = (next: View) => {
-    if (view !== next) { setView(next); setResult(null); setError('') }
-  }
-  function updateQuestion(value: string) {
-    setQuestion(value)
+  const guard = useRef(createRequestGuard())
+  useEffect(() => { const current = guard.current; return () => current.invalidate() }, [])
+  function invalidateInputs() {
+    guard.current.invalidate()
+    submitting.current = false
+    setPending(false)
     setResult(null)
     setError('')
+  }
+  const changeView = (next: View) => {
+    if (view !== next) { invalidateInputs(); setView(next) }
+  }
+  function updateQuestion(value: string) {
+    invalidateInputs()
+    setQuestion(value)
   }
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
     if (submitting.current) return
     submitting.current = true
+    const ticket = guard.current.begin()
     setPending(true)
     setResult(null)
     setError('')
@@ -55,29 +65,30 @@ export default function StylistSearch() {
       const body = JSON.stringify({ view, ...(view === 'ask' ? { question } : {}), collection, budget: budget ? Number(budget) : null })
       if (retry.current?.body !== body) retry.current = { body, key: crypto.randomUUID() }
       const r = await fetch('/api/stylist', {
-        method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': retry.current.key }, body,
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': retry.current.key }, body, signal: ticket.signal,
       })
       const data = await r.json()
+      if (!ticket.isCurrent()) return
       if (!r.ok) { setError(typeof data.error === 'string' ? data.error : 'Could not load the stylist.'); return }
       if (view === 'ask' && data.clarification === 'budget') setShoppingOptionsOpen(true)
       retry.current = null
       setResult(data)
-    } catch { setError('Could not load the stylist. Try again.') }
-    finally { submitting.current = false; setPending(false) }
+    } catch { if (ticket.isCurrent()) setError('Could not load the stylist. Try again.') }
+    finally { if (ticket.isCurrent()) { submitting.current = false; setPending(false) } }
   }
   const panel = 'rounded-3xl border border-[#d8cec2] bg-[#fffdfa] p-5 sm:p-6'
   const shoppingFields = (
     <div className="flex flex-wrap gap-3">
       <label className="text-sm">Shop collection
         <select className={'mt-1 block min-h-11 rounded-xl border border-[#d8cec2] px-3 ' + focus} value={collection} disabled={pending}
-          onChange={(e) => { setCollection(e.target.value as Collection); setResult(null) }}>
+          onChange={(e) => { invalidateInputs(); setCollection(e.target.value as Collection) }}>
           <option value="masculine">Men’s</option><option value="feminine">Women’s</option>
         </select>
       </label>
       <label className="text-sm">Budget in EGP (optional)
         <input className={'mt-1 block min-h-11 w-full max-w-44 rounded-xl border border-[#d8cec2] px-3 ' + focus} type="number"
           min={1} max={100000} step={1} value={budget} disabled={pending}
-          onChange={(e) => { setBudget(e.target.value); setResult(null) }} />
+          onChange={(e) => { invalidateInputs(); setBudget(e.target.value) }} />
       </label>
     </div>
   )
@@ -135,7 +146,7 @@ export default function StylistSearch() {
           <p className="my-3 text-sm text-[#6d6257]">Two ways to wear it with pieces you own.</p>
           <div className="grid gap-2 sm:grid-cols-2">{result.suggestion.looks.map((look, i) => <LookCard key={i} look={look} />)}</div>
           <a className={'mt-4 inline-flex min-h-11 items-center rounded-full border border-[#d8cec2] px-4 text-sm ' + focus} href={result.suggestion.product.url} target="_blank" rel="noopener noreferrer">View at {result.suggestion.product.brand} ↗</a>
-          <p className="mt-2 text-xs text-[#6d6257]">Checked {result.suggestion.product.checkedAt.slice(0, 10)}. Confirm price, size and availability at the retailer.</p>
+          <p className="mt-2 text-xs text-[#6d6257]">Catalog recorded {result.suggestion.product.checkedAt.slice(0, 10)}. Not live-verified. Confirm price, size and availability at the retailer.</p>
         </section>}
       </div>
     </div>
