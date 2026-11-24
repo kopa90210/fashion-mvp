@@ -170,3 +170,27 @@ describe('stylist HTTP boundary', () => {
     expect(calls.reserve).not.toHaveBeenCalled()
   })
 })
+
+describe('P0-05 request metrics', () => {
+  it('logs provider fallback without question, identifiers or credentials', async () => {
+    const log = vi.spyOn(console, 'info').mockImplementation(() => {})
+    try {
+      calls.classify.mockResolvedValueOnce(null)
+      expect((await POST(request({ view: 'ask', collection: 'masculine', question: 'What can I wear? private marker' }))).status).toBe(200)
+      expect(log).toHaveBeenCalledTimes(1)
+      const raw = String(log.mock.calls[0][0])
+      expect(JSON.parse(raw)).toMatchObject({ event: 'stylist.request', status: 200, outcome: 'success', aiPath: 'provider_fallback' })
+      for (const value of ['private marker', 'current-user', requestId, 'test-only']) expect(raw).not.toContain(value)
+    } finally { log.mockRestore() }
+  })
+  it('classifies quota dependency failure without raw exception text', async () => {
+    const log = vi.spyOn(console, 'info').mockImplementation(() => {})
+    try {
+      calls.reserve.mockRejectedValueOnce(new Error('private dependency detail'))
+      expect((await POST(request({ view: 'daily', collection: 'masculine' }))).status).toBe(503)
+      const raw = String(log.mock.calls[0][0])
+      expect(JSON.parse(raw)).toMatchObject({ status: 503, outcome: 'failure', failureStage: 'api_quota' })
+      expect(raw).not.toContain('private dependency detail')
+    } finally { log.mockRestore() }
+  })
+})
