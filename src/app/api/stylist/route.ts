@@ -1,3 +1,4 @@
+import type { AiTelemetry } from '@/src/lib/stylist/telemetry'
 import { createHash } from 'node:crypto'
 import { createClient } from '@/src/lib/supabase/server'
 import { readCatalog } from '@/src/lib/stylist/catalog'
@@ -70,15 +71,18 @@ export async function POST(request: Request) {
     let model: Intent | null = null
     if (!daily && context.items.length && key && requestId) {
       const fingerprint = createHash('sha256').update(JSON.stringify([question, collection, budget])).digest('hex')
-      const claim = await beginStylistAi(user.id, requestId, fingerprint)
+      const providerModel = process.env.GEMINI_STYLIST_MODEL ?? 'gemini-3.1-flash-lite'
+      if (!/^[a-z0-9][a-z0-9.-]{0,79}$/i.test(providerModel)) return json({ error: 'Stylist provider configuration unavailable' }, 503)
+      const claim = await beginStylistAi(user.id, requestId, fingerprint, providerModel)
       if (claim.status === 'busy') return json({ error: 'A styling request is still processing. Try again shortly.', code: 'STYLIST_BUSY' }, 409)
       if (claim.status === 'conflict') return json({ error: 'Request identifier was already used for different inputs.', code: 'STYLIST_KEY_CONFLICT' }, 409)
       if (claim.status === 'completed') model = claim.intent
       if (claim.status === 'claimed') {
+        let usage: AiTelemetry = { status: 'network_error', input: null, output: null, thought: null, latency: 0 }
         model = await classifyWithGemini(question, {
-          key, model: process.env.GEMINI_STYLIST_MODEL ?? 'gemini-3.1-flash-lite',
+          key, model: providerModel, onTelemetry: value => { usage = value },
         })
-        await finishStylistAi(user.id, requestId, claim.token, model)
+        await finishStylistAi(user.id, requestId, claim.token, model, providerModel, usage)
       }
     }
     const resolved = resolveIntent(question, model)
