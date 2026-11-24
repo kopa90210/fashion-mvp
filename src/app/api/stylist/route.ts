@@ -1,3 +1,4 @@
+import { createStylistMetrics, type Outcome } from '@/src/lib/stylist/observability'
 import type { AiTelemetry } from '@/src/lib/stylist/telemetry'
 import { createHash } from 'node:crypto'
 import { createClient } from '@/src/lib/supabase/server'
@@ -36,60 +37,72 @@ async function readInput(request: Request): Promise<Record<string, unknown> | nu
 }
 
 export async function POST(request: Request) {
-  if (process.env.ENABLE_STYLIST !== 'true') return json({ error: 'Stylist is not enabled' }, 404)
+  const metrics = createStylistMetrics()
+  const respond = (data: unknown, status: number, outcome: Outcome) => { metrics.finish(status, outcome); return json(data, status) }
+  try {
+  if (process.env.ENABLE_STYLIST !== 'true') return respond({ error: 'Stylist is not enabled' }, 404, 'disabled')
   const origin = request.headers.get('origin')
   const url = new URL(request.url)
   // Next can normalize the hostname in request.url to localhost in development.
   const host = request.headers.get('host') ?? url.host
   if (request.headers.get('sec-fetch-site') === 'cross-site' ||
-      (origin && origin !== url.protocol + '//' + host)) return json({ error: 'Request origin is not allowed' }, 403)
+      (origin && origin !== url.protocol + '//' + host)) return respond({ error: 'Request origin is not allowed' }, 403, 'origin_denied')
   const input = await readInput(request)
   if (!input || (input.view !== 'ask' && input.view !== 'daily') ||
-      (input.collection !== 'masculine' && input.collection !== 'feminine')) return json({ error: 'Invalid request' }, 400)
+      (input.collection !== 'masculine' && input.collection !== 'feminine')) return respond({ error: 'Invalid request' }, 400, 'invalid_input')
   const collection: Collection = input.collection
   const daily = input.view === 'daily'
+  metrics.view(input.view)
   const question = typeof input.question === 'string' ? input.question.trim() : ''
-  if (!daily && (!question || question.length > 280)) return json({ error: 'Enter a question of up to 280 characters' }, 400)
+  if (!daily && (!question || question.length > 280)) return respond({ error: 'Enter a question of up to 280 characters' }, 400, 'invalid_input')
   const budget = input.budget ?? null
   if (budget !== null && (typeof budget !== 'number' || !Number.isInteger(budget) || budget < 1 || budget > 100_000)) {
-    return json({ error: 'Enter a whole EGP budget between 1 and 100,000' }, 400)
+    return respond({ error: 'Enter a whole EGP budget between 1 and 100,000' }, 400, 'invalid_input')
   }
   const requestId = request.headers.get('Idempotency-Key')
   if (!daily && (!requestId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(requestId))) {
-    return json({ error: 'A valid Idempotency-Key is required' }, 400)
+    return respond({ error: 'A valid Idempotency-Key is required' }, 400, 'invalid_input')
   }
-  try {
+    metrics.stage('auth')
     const supabase = await createClient()
     const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return json({ error: 'Sign in to use your wardrobe' }, 401)
+    if (!user) return respond({ error: 'Sign in to use your wardrobe' }, 401, 'unauthenticated')
+    metrics.stage('api_quota')
     if (!await reserveStylistQuota(user.id, 'api_hourly')) {
-      return json({ error: 'Stylist hourly limit reached. Try again later.', code: 'STYLIST_RATE_LIMIT' }, 429)
+      return respond({ error: 'Stylist hourly limit reached. Try again later.', code: 'STYLIST_RATE_LIMIT' }, 429, 'rate_limited')
     }
+    metrics.stage('wardrobe')
     const context = await loadStylistWardrobe(supabase, user.id)
     const key = process.env.GEMINI_STYLIST_API_KEY
     // Never send the wardrobe, Style DNA, item IDs, or product data to Gemini.
     let model: Intent | null = null
+    metrics.aiPath(daily ? 'daily_rules' : !context.items.length ? 'empty_wardrobe' : !key ? 'missing_key' : 'not_evaluated')
     if (!daily && context.items.length && key && requestId) {
+      metrics.stage('ai_claim')
       const fingerprint = createHash('sha256').update(JSON.stringify([question, collection, budget])).digest('hex')
       const providerModel = process.env.GEMINI_STYLIST_MODEL ?? 'gemini-3.1-flash-lite'
-      if (!/^[a-z0-9][a-z0-9.-]{0,79}$/i.test(providerModel)) return json({ error: 'Stylist provider configuration unavailable' }, 503)
+      if (!/^[a-z0-9][a-z0-9.-]{0,79}$/i.test(providerModel)) { metrics.aiPath('invalid_model'); return respond({ error: 'Stylist provider configuration unavailable' }, 503, 'configuration_error') }
       const claim = await beginStylistAi(user.id, requestId, fingerprint, providerModel)
-      if (claim.status === 'busy') return json({ error: 'A styling request is still processing. Try again shortly.', code: 'STYLIST_BUSY' }, 409)
-      if (claim.status === 'conflict') return json({ error: 'Request identifier was already used for different inputs.', code: 'STYLIST_KEY_CONFLICT' }, 409)
-      if (claim.status === 'completed') model = claim.intent
+      if (claim.status === 'busy') { metrics.aiPath('busy'); return respond({ error: 'A styling request is still processing. Try again shortly.', code: 'STYLIST_BUSY' }, 409, 'busy') }
+      if (claim.status === 'conflict') { metrics.aiPath('conflict'); return respond({ error: 'Request identifier was already used for different inputs.', code: 'STYLIST_KEY_CONFLICT' }, 409, 'conflict') }
+      if (claim.status === 'completed') { model = claim.intent; metrics.aiPath(model ? 'cached_intent' : 'cached_null_or_quota') }
       if (claim.status === 'claimed') {
+        metrics.stage('provider')
         let usage: AiTelemetry = { status: 'network_error', input: null, output: null, thought: null, latency: 0 }
         model = await classifyWithGemini(question, {
           key, model: providerModel, onTelemetry: value => { usage = value },
         })
+        metrics.aiPath(model ? 'provider_success' : 'provider_fallback')
+        metrics.stage('ai_finish')
         await finishStylistAi(user.id, requestId, claim.token, model, providerModel, usage)
       }
     }
+    metrics.stage('recommendation')
     const resolved = resolveIntent(question, model)
     const intent: Intent = daily ? { mode: 'shop', occasion: context.signals?.primaryOccasion === 'work-university' ? 'work' : context.signals?.primaryOccasion === 'going-out' ? 'going-out' : 'everyday', role: null, budget }
       : { ...resolved, budget: resolved.budget === null ? budget : budget === null ? resolved.budget : Math.min(resolved.budget, budget) }
-    return json({ ...recommendations(context, readCatalog(process.env.STYLIST_CATALOG_JSON), intent, collection, daily), source: model ? 'gemini' : 'rules' })
+    return respond({ ...recommendations(context, readCatalog(process.env.STYLIST_CATALOG_JSON), intent, collection, daily), source: model ? 'gemini' : 'rules' }, 200, 'success')
   } catch {
-    return json({ error: 'Could not load your styling recommendations. Try again.' }, 503)
+    return respond({ error: 'Could not load your styling recommendations. Try again.' }, 503, 'failure')
   }
 }
