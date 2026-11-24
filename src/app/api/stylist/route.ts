@@ -3,6 +3,7 @@ import { readCatalog } from '@/src/lib/stylist/catalog'
 import { classifyWithGemini } from '@/src/lib/stylist/gemini'
 import { resolveIntent, type Collection, type Intent } from '@/src/lib/stylist/intent'
 import { recommendations } from '@/src/lib/stylist/recommend'
+import { reserveStylistQuota } from '@/src/lib/stylist/quota'
 import { loadStylistWardrobe } from '@/src/lib/stylist/wardrobe'
 
 const MAX_BYTES = 4096
@@ -55,10 +56,13 @@ export async function POST(request: Request) {
     const supabase = await createClient()
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return json({ error: 'Sign in to use your wardrobe' }, 401)
+    if (!await reserveStylistQuota(user.id, 'api_hourly')) {
+      return json({ error: 'Stylist hourly limit reached. Try again later.', code: 'STYLIST_RATE_LIMIT' }, 429)
+    }
     const context = await loadStylistWardrobe(supabase, user.id)
     const key = process.env.GEMINI_STYLIST_API_KEY
     // Never send the wardrobe, Style DNA, item IDs, or product data to Gemini.
-    const model = !daily && context.items.length && key ? await classifyWithGemini(question, {
+    const model = !daily && context.items.length && key && await reserveStylistQuota(user.id, 'gemini_daily') ? await classifyWithGemini(question, {
       key, model: process.env.GEMINI_STYLIST_MODEL ?? 'gemini-3.1-flash-lite',
     }) : null
     const resolved = resolveIntent(question, model)
