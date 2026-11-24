@@ -6,6 +6,13 @@ const shops = {
   'www.defacto.com.eg': 'DeFacto',
   'concrete.store': 'Concrete',
 } as const
+// Reject obvious navigation, account and redirect paths; this is not live verification.
+function validProductUrl(url: URL): boolean {
+  return url.protocol === 'https:' && !url.port && !url.username && !url.password &&
+    !url.search && !url.hash && Object.hasOwn(shops, url.hostname) &&
+    url.pathname !== '/' && !/%(?:2f|5c|00|2e)/i.test(url.pathname) &&
+    !/(?:^|\/)(?:redirect|login|account|cart|checkout|search|collections|category|categories)(?:\/|$)/i.test(url.pathname)
+}
 const MAX_AGE_MS = 48 * 60 * 60 * 1000
 export type Product = {
   id: string; title: string; brand: (typeof shops)[keyof typeof shops]; url: string; priceEgp: number
@@ -34,8 +41,7 @@ export function readCatalog(json: string | undefined, now = Date.now()): Product
     if (!Number.isFinite(age) || age < 0 || age > MAX_AGE_MS) continue
     let url: URL
     try { url = new URL(p.url) } catch { continue }
-    if (url.protocol !== 'https:' || url.port || url.username || url.password || url.search || url.hash ||
-        !Object.hasOwn(shops, url.hostname) || url.pathname === '/' || urls.has(url.href)) continue
+    if (!validProductUrl(url) || urls.has(url.href)) continue
     const brand = shops[url.hostname as keyof typeof shops]
     const styleTags: Partial<StyleVector> = {}
     if (p.styleTags && typeof p.styleTags === 'object') {
@@ -51,7 +57,7 @@ export function readCatalog(json: string | undefined, now = Date.now()): Product
 }
 
 export function searchCatalog(catalog: Product[], intent: Intent, collection: Collection): Product[] {
-  if (!intent.role || intent.budget === null || intent.budget < 1) return []
+  if (!intent.role || intent.budget === null || !Number.isFinite(intent.budget) || intent.budget < 1) return []
   const budget = intent.budget
   return catalog.filter((p) => (p.collection === 'shared' || p.collection === collection) &&
       p.priceEgp <= budget && p.role === intent.role && p.occasions.includes(intent.occasion))
