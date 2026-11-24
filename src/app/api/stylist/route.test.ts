@@ -88,11 +88,12 @@ describe('stylist HTTP boundary', () => {
     expect(calls.classify).not.toHaveBeenCalled()
   })
 
-  it('uses deterministic styling when Gemini quota is exhausted', async () => {
+  it.each(['individual daily', 'global daily', 'global monthly'])('uses deterministic styling when %s Gemini quota is exhausted', async () => {
     calls.reserve.mockResolvedValueOnce(true).mockResolvedValueOnce(false)
     const r = await POST(request({ view: 'ask', collection: 'masculine', question: 'What can I wear?' }))
     expect(r.status).toBe(200)
     expect(await r.json()).toMatchObject({ source: 'rules', status: 'restyle' })
+    expect(calls.reserve.mock.calls).toEqual([['current-user', 'api_hourly'], ['current-user', 'gemini_daily']])
     expect(calls.classify).not.toHaveBeenCalled()
   })
 
