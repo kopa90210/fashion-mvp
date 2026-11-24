@@ -5,9 +5,12 @@ on:
     branches: [ main ]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   ci:
-    name: Lint & Test
+    name: Typecheck, Lint, Test & Build
     runs-on: ubuntu-latest
 
     steps:
@@ -23,8 +26,17 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Typecheck
+        run: npx tsc --noEmit
+
       - name: Run lint
         run: npm run lint
 
       - name: Run tests
         run: npm test
+
+      - name: Production build (no deployment)
+        run: npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://ci-placeholder.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-placeholder-not-a-secret
