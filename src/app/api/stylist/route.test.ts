@@ -28,6 +28,7 @@ function request(body: object, origin = 'https://style.example') {
 beforeEach(() => {
   vi.resetAllMocks()
   vi.stubEnv('ENABLE_STYLIST', 'true')
+  vi.stubEnv('GEMINI_STYLIST_MODEL', 'gemini-3.1-flash-lite')
   vi.stubEnv('GEMINI_STYLIST_API_KEY', 'test-only')
   vi.stubEnv('STYLIST_CATALOG_JSON', '')
   calls.reserve.mockResolvedValue(true)
@@ -70,7 +71,7 @@ describe('stylist HTTP boundary', () => {
     expect(result.headers.get('Cache-Control')).toBe('private, no-store')
     expect(calls.loadWardrobe).toHaveBeenCalledWith(expect.anything(), 'current-user')
     expect(calls.reserve.mock.calls).toEqual([['current-user', 'api_hourly']])
-    expect(calls.begin).toHaveBeenCalledWith('current-user', requestId, expect.stringMatching(/^[0-9a-f]{64}$/))
+    expect(calls.begin).toHaveBeenCalledWith('current-user', requestId, expect.stringMatching(/^[0-9a-f]{64}$/), 'gemini-3.1-flash-lite')
     expect(calls.classify).toHaveBeenCalledWith(question, expect.objectContaining({ key: 'test-only' }))
     expect(await result.json()).toMatchObject({ status: 'restyle', source: 'rules' })
   })
@@ -99,7 +100,7 @@ describe('stylist HTTP boundary', () => {
     expect(r.status).toBe(200)
     expect(await r.json()).toMatchObject({ source: 'rules', status: 'restyle' })
     expect(calls.reserve.mock.calls).toEqual([['current-user', 'api_hourly']])
-    expect(calls.begin).toHaveBeenCalledWith('current-user', requestId, expect.stringMatching(/^[0-9a-f]{64}$/))
+    expect(calls.begin).toHaveBeenCalledWith('current-user', requestId, expect.stringMatching(/^[0-9a-f]{64}$/), 'gemini-3.1-flash-lite')
     expect(calls.classify).not.toHaveBeenCalled()
   })
 
@@ -127,9 +128,9 @@ describe('stylist HTTP boundary', () => {
     const r = await POST(request({ view: 'ask', collection: 'masculine', question: 'What can I wear?' }))
     expect(await r.json()).toMatchObject({ source: 'rules' })
     expect(calls.classify).toHaveBeenCalledTimes(1)
-    expect(calls.finish).toHaveBeenCalledWith('current-user', requestId, token, null)
+    expect(calls.finish).toHaveBeenCalledWith('current-user', requestId, token, null, 'gemini-3.1-flash-lite', expect.objectContaining({ status: 'network_error' }))
     expect(calls.reserve.mock.calls).toEqual([['current-user', 'api_hourly']])
-    expect(calls.begin).toHaveBeenCalledWith('current-user', requestId, expect.stringMatching(/^[0-9a-f]{64}$/))
+    expect(calls.begin).toHaveBeenCalledWith('current-user', requestId, expect.stringMatching(/^[0-9a-f]{64}$/), 'gemini-3.1-flash-lite')
   })
 
   it.each(['busy', 'conflict'])('rejects %s claims without Gemini or completion', async (status) => {
