@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { WardrobeItem } from '@/src/lib/outfit/engine'
 
 const calls = vi.hoisted(() => ({
-  getUser: vi.fn(), loadWardrobe: vi.fn(), classify: vi.fn(), reserve: vi.fn(),
+  getUser: vi.fn(), loadWardrobe: vi.fn(), classify: vi.fn(), reserve: vi.fn(), begin: vi.fn(), finish: vi.fn(),
 }))
 vi.mock('@/src/lib/supabase/server', () => ({
   createClient: vi.fn(async () => ({ auth: { getUser: calls.getUser } })),
@@ -10,16 +10,18 @@ vi.mock('@/src/lib/supabase/server', () => ({
 vi.mock('@/src/lib/stylist/wardrobe', () => ({ loadStylistWardrobe: calls.loadWardrobe }))
 vi.mock('@/src/lib/stylist/gemini', () => ({ classifyWithGemini: calls.classify }))
 
-vi.mock('@/src/lib/stylist/quota', () => ({ reserveStylistQuota: calls.reserve }))
+vi.mock('@/src/lib/stylist/quota', () => ({ reserveStylistQuota: calls.reserve, beginStylistAi: calls.begin, finishStylistAi: calls.finish }))
 
 import { POST } from './route'
 
 const piece = (name: string, layer_role: WardrobeItem['layer_role']) => ({
   id: name, display_name: name, layer_role, style_tags: {}, image_url: null,
 })
+const requestId = '11111111-1111-4111-8111-111111111111'
+const token = '22222222-2222-4222-8222-222222222222'
 function request(body: object, origin = 'https://style.example') {
   return new Request('https://style.example/api/stylist', {
-    method: 'POST', headers: { 'Content-Type': 'application/json', origin }, body: JSON.stringify(body),
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': requestId, origin }, body: JSON.stringify(body),
   })
 }
 
@@ -29,6 +31,8 @@ beforeEach(() => {
   vi.stubEnv('GEMINI_STYLIST_API_KEY', 'test-only')
   vi.stubEnv('STYLIST_CATALOG_JSON', '')
   calls.reserve.mockResolvedValue(true)
+  calls.begin.mockResolvedValue({ status: 'claimed', token })
+  calls.finish.mockResolvedValue(undefined)
   calls.getUser.mockResolvedValue({ data: { user: { id: 'current-user' } } })
   calls.loadWardrobe.mockResolvedValue({ items: [
     piece('Oxford', 'base_layer'), piece('Loafers', 'footwear'), piece('Jeans', 'bottom'),
@@ -65,7 +69,8 @@ describe('stylist HTTP boundary', () => {
     const result = await POST(request({ view: 'ask', collection: 'feminine', question, userId: 'ignored-user' }))
     expect(result.headers.get('Cache-Control')).toBe('private, no-store')
     expect(calls.loadWardrobe).toHaveBeenCalledWith(expect.anything(), 'current-user')
-    expect(calls.reserve.mock.calls).toEqual([['current-user', 'api_hourly'], ['current-user', 'gemini_daily']])
+    expect(calls.reserve.mock.calls).toEqual([['current-user', 'api_hourly']])
+    expect(calls.begin).toHaveBeenCalledWith('current-user', requestId, expect.stringMatching(/^[0-9a-f]{64}$/))
     expect(calls.classify).toHaveBeenCalledWith(question, expect.objectContaining({ key: 'test-only' }))
     expect(await result.json()).toMatchObject({ status: 'restyle', source: 'rules' })
   })
@@ -89,17 +94,18 @@ describe('stylist HTTP boundary', () => {
   })
 
   it.each(['individual daily', 'global daily', 'global monthly'])('uses deterministic styling when %s Gemini quota is exhausted', async () => {
-    calls.reserve.mockResolvedValueOnce(true).mockResolvedValueOnce(false)
+    calls.begin.mockResolvedValueOnce({ status: 'completed', intent: null })
     const r = await POST(request({ view: 'ask', collection: 'masculine', question: 'What can I wear?' }))
     expect(r.status).toBe(200)
     expect(await r.json()).toMatchObject({ source: 'rules', status: 'restyle' })
-    expect(calls.reserve.mock.calls).toEqual([['current-user', 'api_hourly'], ['current-user', 'gemini_daily']])
+    expect(calls.reserve.mock.calls).toEqual([['current-user', 'api_hourly']])
+    expect(calls.begin).toHaveBeenCalledWith('current-user', requestId, expect.stringMatching(/^[0-9a-f]{64}$/))
     expect(calls.classify).not.toHaveBeenCalled()
   })
 
   it.each([0, 1])('fails closed on quota RPC error at stage %s', async (stage) => {
-    if (stage === 1) calls.reserve.mockResolvedValueOnce(true)
-    calls.reserve.mockRejectedValueOnce(new Error('quota unavailable'))
+    if (stage === 1) calls.begin.mockRejectedValueOnce(new Error('quota unavailable'))
+    else calls.reserve.mockRejectedValueOnce(new Error('quota unavailable'))
     const r = await POST(request({ view: 'ask', collection: 'masculine', question: 'What can I wear?' }))
     expect(r.status).toBe(503)
     expect(calls.classify).not.toHaveBeenCalled()
@@ -121,6 +127,45 @@ describe('stylist HTTP boundary', () => {
     const r = await POST(request({ view: 'ask', collection: 'masculine', question: 'What can I wear?' }))
     expect(await r.json()).toMatchObject({ source: 'rules' })
     expect(calls.classify).toHaveBeenCalledTimes(1)
-    expect(calls.reserve.mock.calls).toEqual([['current-user', 'api_hourly'], ['current-user', 'gemini_daily']])
+    expect(calls.finish).toHaveBeenCalledWith('current-user', requestId, token, null)
+    expect(calls.reserve.mock.calls).toEqual([['current-user', 'api_hourly']])
+    expect(calls.begin).toHaveBeenCalledWith('current-user', requestId, expect.stringMatching(/^[0-9a-f]{64}$/))
+  })
+
+  it.each(['busy', 'conflict'])('rejects %s claims without Gemini or completion', async (status) => {
+    calls.begin.mockResolvedValueOnce({ status })
+    const r = await POST(request({ view: 'ask', collection: 'masculine', question: 'What can I wear?' }))
+    expect(r.status).toBe(409)
+    expect(calls.classify).not.toHaveBeenCalled()
+    expect(calls.finish).not.toHaveBeenCalled()
+  })
+
+  it('replays cached intent but loads the current wardrobe on every request', async () => {
+    calls.begin.mockResolvedValue({ status: 'completed', intent: { mode: 'restyle', occasion: 'everyday', role: null, budget: null } })
+    const body = { view: 'ask', collection: 'masculine', question: 'What can I wear?' }
+    expect((await POST(request(body))).status).toBe(200)
+    calls.loadWardrobe.mockResolvedValueOnce({ items: [], dna: {}, signals: null })
+    const r = await POST(request(body))
+    expect(await r.json()).toMatchObject({ status: 'empty' })
+    expect(calls.loadWardrobe).toHaveBeenCalledTimes(2)
+    expect(calls.classify).not.toHaveBeenCalled()
+    expect(calls.finish).not.toHaveBeenCalled()
+  })
+
+  it('fails closed when completion is ambiguous', async () => {
+    calls.classify.mockResolvedValueOnce(null)
+    calls.finish.mockRejectedValueOnce(new Error('completion unavailable'))
+    const r = await POST(request({ view: 'ask', collection: 'masculine', question: 'What can I wear?' }))
+    expect(r.status).toBe(503)
+    expect(calls.classify).toHaveBeenCalledTimes(1)
+  })
+
+  it('rejects missing idempotency key for Ask', async () => {
+    const r = await POST(new Request('https://style.example/api/stylist', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ view: 'ask', collection: 'masculine', question: 'What can I wear?' }),
+    }))
+    expect(r.status).toBe(400)
+    expect(calls.reserve).not.toHaveBeenCalled()
   })
 })
