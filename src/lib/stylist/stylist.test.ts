@@ -3,7 +3,7 @@ import type { WardrobeItem } from '@/src/lib/outfit/engine'
 import { readCatalog, searchCatalog } from './catalog'
 import { classifyWithGemini } from './gemini'
 import { explicitBudget, fallbackIntent, resolveIntent, type Intent } from './intent'
-import { recommendations } from './recommend'
+import { recommendations, incrementalUnlockCount } from './recommend'
 
 const now = Date.parse('2026-11-19T08:00:00Z')
 const row = {
@@ -109,5 +109,36 @@ describe('Gemini provider contract', () => {
       .mockResolvedValueOnce(Response.json({ candidates: [{ finishReason: 'STOP', content: { parts: [{ text: '{"mode":"buy_anything"}' }] } }] }))
     const options = { model: 'gemini-3.1-flash-lite', key: 'test-only', fetcher }
     for (let i = 0; i < 3; i++) expect(await classifyWithGemini('question', options)).toBeNull()
+  })
+})
+
+describe('P0-04 safety regressions', () => {
+  it('uses the lowest recognized budget ceiling', () => {
+    expect(explicitBudget('under 1500 EGP, maximum 800 EGP')).toBe(800)
+    expect(explicitBudget('لحد ١٥٠٠ جنيه وأقل من ٨٠٠ جنيه')).toBe(799)
+  })
+  it('prioritizes explicit occasion and garment role', () => {
+    expect(resolveIntent('buy work trousers under 1000', { ...shop, occasion: 'going-out', role: 'outerwear' })).toMatchObject({ occasion: 'work', role: 'bottom', budget: 999 })
+  })
+  it('filters known formality extremes even without quiz signals', () => {
+    const casual = { ...ctx, items: ctx.items.map(i => ({ ...i, formality_score: 0.1 })) }
+    expect(recommendations(casual, catalog, { ...shop, mode: 'restyle' }, 'masculine').looks).toEqual([])
+  })
+  it('counts incremental structural combinations independently of top-N examples', () => {
+    const items = [...ctx.items, item('second shoe', 'footwear'), item('dress', 'one_piece')]
+    expect(incrementalUnlockCount(items, 'bottom')).toBe(4)
+    expect(incrementalUnlockCount(items, 'footwear')).toBe(3)
+    expect(incrementalUnlockCount(items, 'outerwear')).toBe(6)
+  })
+  it('does not inflate unlock count with duplicate IDs or synthetic owned pieces', () => {
+    const result = recommendations({ ...ctx, items: [...ctx.items, ctx.items[0], item('catalog:fake', 'base_layer')] }, catalog, shop, 'masculine')
+    expect(result.suggestion?.unlockCount).toBe(2)
+    expect(result.looks.flatMap(l => l.pieces).some(p => p.name === 'catalog:fake')).toBe(false)
+  })
+  it('rejects obvious navigation and redirect paths', () => {
+    expect(readCatalog(JSON.stringify(['redirect', 'account', 'collections'].map((s,i) => ({ ...row, id: 'bad'+i, url: 'https://concrete.store/'+s+'/item' }))), now)).toEqual([])
+  })
+  it('rejects non-finite shopping budgets', () => {
+    expect(searchCatalog(catalog, { ...shop, budget: Infinity }, 'masculine')).toEqual([])
   })
 })
