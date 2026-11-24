@@ -1,6 +1,7 @@
 import 'server-only'
 import { createClient } from '@supabase/supabase-js'
 import { parseIntent, type Intent } from './intent'
+import { estimateCost, type AiTelemetry } from './telemetry'
 
 export type StylistQuota = 'api_hourly' | 'gemini_daily'
 
@@ -33,9 +34,9 @@ export type AiClaim =
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
-export async function beginStylistAi(userId: string, requestId: string, fingerprint: string): Promise<AiClaim> {
-  const { data, error } = await quotaClient().rpc('begin_stylist_ai', {
-    p_user_id: userId, p_request_id: requestId, p_fingerprint: fingerprint,
+export async function beginStylistAi(userId: string, requestId: string, fingerprint: string, model: string): Promise<AiClaim> {
+  const { data, error } = await quotaClient().rpc('begin_stylist_ai_metered', {
+    p_user_id: userId, p_request_id: requestId, p_fingerprint: fingerprint, p_model: model,
   }).abortSignal(AbortSignal.timeout(3_000))
   if (error || !data || typeof data !== 'object') throw new Error('Stylist AI claim unavailable')
   if (data.status === 'claimed' && typeof data.token === 'string' && uuid.test(data.token)) {
@@ -50,9 +51,12 @@ export async function beginStylistAi(userId: string, requestId: string, fingerpr
   throw new Error('Stylist AI claim unavailable')
 }
 
-export async function finishStylistAi(userId: string, requestId: string, token: string, intent: Intent | null): Promise<void> {
-  const { data, error } = await quotaClient().rpc('finish_stylist_ai', {
+export async function finishStylistAi(userId: string, requestId: string, token: string, intent: Intent | null, model: string, usage: AiTelemetry): Promise<void> {
+  const estimate = estimateCost(model, usage)
+  const { data, error } = await quotaClient().rpc('finish_stylist_ai_metered', {
     p_user_id: userId, p_request_id: requestId, p_token: token, p_intent: intent,
+    p_status: usage.status, p_input: usage.input, p_output: usage.output, p_thought: usage.thought,
+    p_latency: usage.latency, p_pricing_version: estimate.version, p_cost: estimate.cost,
   }).abortSignal(AbortSignal.timeout(3_000))
   if (error || data !== true) throw new Error('Stylist AI completion unavailable')
 }
