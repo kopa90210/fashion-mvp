@@ -20,6 +20,13 @@ Base: feat/stylist-gemini-search (d03b189). Isolated cloud branch; do not merge 
 
 ## Outstanding release blockers
 - Verify CI results, independent real concurrent DB reservations, API staging E2E and matching deployment environment.
-- Global provider spend ceiling, idempotency, per-user in-flight lease, token/cost telemetry, retention/cleanup of counters.
+- Verified monetary spend ceiling, idempotency, per-user in-flight lease, token/cost telemetry, retention/cleanup of counters.
 - Review existing database advisor findings and dependency audit. Keep production frozen.
 - Rollback: disable ENABLE_STYLIST in staging, revert app changes if needed; leave additive quota table until migration removal is explicitly reviewed.
+
+## P0-02 evidence (2026-11-24)
+- Prior CI run 45411300369 succeeded.
+- Staging migration 20261124143226_stylist_global_quota replaces the existing reservation RPC, preserving its signature. Global UTC day/month caps: 100/3000 attempts. Individual cap: 10/day. API cap unchanged.
+- Month/day/user lock order and exception subtransaction rollback all reservations on quota denial. Unexpected errors propagate; existing API falls back on false and fails closed on RPC errors.
+- Live sequential assertions passed for individual, global daily and global monthly exhaustion, rollback of preceding counters, and independent API availability. All test writes rolled back; zero persisted quota rows. RLS and restricted execution verified.
+- Limits are call-count ceilings for stylist classification only, not a verified billing cap. Existing historical usage is not backfilled; staging had zero prior Gemini quota rows at preflight. Before production, assess cutover accounting, concurrent sessions, idempotency, telemetry and environment isolation. No production migration or merge.
