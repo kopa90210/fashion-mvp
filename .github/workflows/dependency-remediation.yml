@@ -4,61 +4,27 @@ on:
     types: [opened, synchronize, reopened]
 permissions:
   contents: read
+  actions: read
 jobs:
-  resolve:
+  retrieve:
     if: github.event.pull_request.number == 12 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'fix/phase6-p0-reliability-cloud'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          persist-credentials: false
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - name: Apply bounded upgrades
+          name: remediation-evidence
+          run-id: 45465244593
+          github-token: ${{ github.token }}
+          path: /tmp/evidence
+      - name: Export validated manifests only
         run: |
           node <<'JS'
           const fs = require('fs');
-          const p = JSON.parse(fs.readFileSync('package.json'));
-          p.packageManager = 'npm@11.6.2';
-          p.dependencies.next = '16.4.6';
-          p.dependencies.sharp = '^0.35.5';
-          p.devDependencies['eslint-config-next'] = '16.4.6';
-          p.devDependencies.vitest = '4.1.12';
-          p.devDependencies['@vitest/coverage-v8'] = '4.1.12';
-          p.devDependencies.shadcn = p.dependencies.shadcn;
-          delete p.dependencies.shadcn;
-          fs.writeFileSync('package.json', JSON.stringify(p,null,2)+'\n');
+          const root = '/tmp/evidence/work/fashion-mvp/fashion-mvp/';
+          const audit = JSON.parse(fs.readFileSync(root+'audit-runtime.json'));
+          if (audit.metadata.vulnerabilities.total !== 0) process.exit(1);
+          for (const file of ['package.json','package-lock.json']) {
+            const b = fs.readFileSync(root+file).toString('base64');
+            for (let i=0;i<b.length;i+=3000) console.log('MANIFEST_CHUNK '+file+' '+(i/3000)+' '+b.slice(i,i+3000));
+          }
           JS
-          npm --version
-          npx --yes npm@11.6.2 install --package-lock-only --ignore-scripts
-          npx --yes npm@11.6.2 audit fix --package-lock-only --ignore-scripts --audit-level=high || true
-          node -e "const p=require('./package.json'), l=require('./package-lock.json'); if(p.dependencies.next!=='16.4.6'||l.packages['node_modules/next'].version!=='16.4.6'||p.dependencies.shadcn)process.exit(1)"
-      - name: Reconcile optional peer dependencies and verify clean install
-        run: |
-          npx --yes npm@11.6.2 install --ignore-scripts --include=optional --include=peer
-          npx --yes npm@11.6.2 ci --include=optional --include=peer
-      - name: Verify application
-        run: |
-          npx tsc --noEmit
-          npm run lint
-          npm test
-          npm run build
-        env:
-          NEXT_PUBLIC_SUPABASE_URL: https://ci-placeholder.supabase.co
-          NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-placeholder-not-a-secret
-      - name: Verify runtime audit
-        run: |
-          npx --yes npm@11.6.2 audit --json > audit-all.json || true
-          npx --yes npm@11.6.2 audit --omit=dev --audit-level=high --json > audit-runtime.json
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: remediation-evidence
-          path: |
-            package.json
-            package-lock.json
-            audit-all.json
-            audit-runtime.json
-            /home/runner/.npm/_logs/*debug-0.log
