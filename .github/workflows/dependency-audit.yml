@@ -13,10 +13,10 @@ jobs:
           node-version: 22
       - name: Full dependency audit
         run: |
-          npm audit --json > audit-all.json || true
+          npx --yes npm@11.6.2 audit --json > audit-all.json || true
           node -e "const a=require('./audit-all.json'); if(!a.metadata||!a.vulnerabilities) process.exit(1); console.log(JSON.stringify(a.metadata)); for(const [name,v] of Object.entries(a.vulnerabilities)) console.log(name,v.severity,JSON.stringify(v.via),JSON.stringify(v.fixAvailable))"
       - name: Runtime dependency audit
-        run: npm audit --omit=dev --audit-level=high --json > audit-runtime.json
+        run: npx --yes npm@11.6.2 audit --omit=dev --audit-level=high --json > audit-runtime.json
       - name: Upload audit evidence
         if: always()
         uses: actions/upload-artifact@v4
