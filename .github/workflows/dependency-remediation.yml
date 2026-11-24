@@ -30,8 +30,9 @@ jobs:
           delete p.dependencies.shadcn;
           fs.writeFileSync('package.json', JSON.stringify(p,null,2)+'\n');
           JS
-          npm install --package-lock-only --ignore-scripts
-          npm audit fix --package-lock-only --ignore-scripts --audit-level=high || true
+          npm --version
+          npx --yes npm@11.6.2 install --package-lock-only --ignore-scripts
+          npx --yes npm@11.6.2 audit fix --package-lock-only --ignore-scripts --audit-level=high || true
           node -e "const p=require('./package.json'), l=require('./package-lock.json'); if(p.dependencies.next!=='16.4.6'||l.packages['node_modules/next'].version!=='16.4.6'||p.dependencies.shadcn)process.exit(1)"
       - name: Verify reproducible install
         run: npm ci
@@ -57,27 +58,4 @@ jobs:
             package-lock.json
             audit-all.json
             audit-runtime.json
-  publish:
-    needs: resolve
-    if: github.event.pull_request.number == 12 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'fix/phase6-p0-reliability-cloud'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-      - uses: actions/download-artifact@v4
-        with:
-          name: remediation-evidence
-          path: /tmp/remediation
-      - name: Commit verified manifests only
-        env:
-          EXPECTED_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
-          cp /tmp/remediation/package.json /tmp/remediation/package-lock.json .
-          git add package.json package-lock.json
-          if git diff --cached --quiet; then exit 0; fi
-          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'fix(deps): apply verified compatible security upgrades'
-          git push origin HEAD:refs/heads/fix/phase6-p0-reliability-cloud
+            /home/runner/.npm/_logs/*debug-0.log
