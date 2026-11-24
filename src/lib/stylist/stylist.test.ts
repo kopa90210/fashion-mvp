@@ -3,7 +3,7 @@ import type { WardrobeItem } from '@/src/lib/outfit/engine'
 import { readCatalog, searchCatalog } from './catalog'
 import { classifyWithGemini } from './gemini'
 import { explicitBudget, fallbackIntent, resolveIntent, type Intent } from './intent'
-import { recommendations, incrementalUnlockCount } from './recommend'
+import { recommendations, incrementalUnlockCount, redundancyPenalty } from './recommend'
 
 const now = Date.parse('2026-11-19T08:00:00Z')
 const row = {
@@ -140,5 +140,17 @@ describe('P0-04 safety regressions', () => {
   })
   it('rejects non-finite shopping budgets', () => {
     expect(searchCatalog(catalog, { ...shop, budget: Infinity }, 'masculine')).toEqual([])
+  })
+})
+
+describe('P0-04 redundancy', () => {
+  it('penalizes overlapping names only for the same garment role', () => {
+    expect(redundancyPenalty([item('Beige chinos slim', 'bottom')], catalog[0])).toBeCloseTo(2/3)
+    expect(redundancyPenalty([item('Beige chinos slim', 'base_layer')], catalog[0])).toBe(0)
+  })
+  it('prefers a less redundant candidate even when it costs more', () => {
+    const context = { ...ctx, items: [...ctx.items, item('Beige chinos slim', 'bottom')] }
+    const alternative = { ...catalog[0], id: 'alternative', title: 'Charcoal trousers', priceEgp: 999 }
+    expect(recommendations(context, [catalog[0], alternative], shop, 'masculine').suggestion?.product.id).toBe('alternative')
   })
 })
