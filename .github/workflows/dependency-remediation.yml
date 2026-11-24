@@ -1,0 +1,83 @@
+name: Isolated dependency remediation
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+permissions:
+  contents: read
+jobs:
+  resolve:
+    if: github.event.pull_request.number == 12 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'fix/phase6-p0-reliability-cloud'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Apply bounded upgrades
+        run: |
+          node <<'JS'
+          const fs = require('fs');
+          const p = JSON.parse(fs.readFileSync('package.json'));
+          p.dependencies.next = '16.4.6';
+          p.dependencies.sharp = '^0.35.5';
+          p.devDependencies['eslint-config-next'] = '16.4.6';
+          p.devDependencies.vitest = '4.1.12';
+          p.devDependencies['@vitest/coverage-v8'] = '4.1.12';
+          p.devDependencies.shadcn = p.dependencies.shadcn;
+          delete p.dependencies.shadcn;
+          fs.writeFileSync('package.json', JSON.stringify(p,null,2)+'\n');
+          JS
+          npm install --package-lock-only --ignore-scripts
+          npm audit fix --package-lock-only --ignore-scripts --audit-level=high || true
+          node -e "const p=require('./package.json'), l=require('./package-lock.json'); if(p.dependencies.next!=='16.4.6'||l.packages['node_modules/next'].version!=='16.4.6'||p.dependencies.shadcn)process.exit(1)"
+      - name: Verify reproducible install
+        run: npm ci
+      - name: Verify application
+        run: |
+          npx tsc --noEmit
+          npm run lint
+          npm test
+          npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://ci-placeholder.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-placeholder-not-a-secret
+      - name: Verify runtime audit
+        run: |
+          npm audit --json > audit-all.json || true
+          npm audit --omit=dev --audit-level=high --json > audit-runtime.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: remediation-evidence
+          path: |
+            package.json
+            package-lock.json
+            audit-all.json
+            audit-runtime.json
+  publish:
+    needs: resolve
+    if: github.event.pull_request.number == 12 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'fix/phase6-p0-reliability-cloud'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: remediation-evidence
+          path: /tmp/remediation
+      - name: Commit verified manifests only
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          cp /tmp/remediation/package.json /tmp/remediation/package-lock.json .
+          git add package.json package-lock.json
+          if git diff --cached --quiet; then exit 0; fi
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'fix(deps): apply verified compatible security upgrades'
+          git push origin HEAD:refs/heads/fix/phase6-p0-reliability-cloud
