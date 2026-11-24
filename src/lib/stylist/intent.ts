@@ -45,13 +45,16 @@ export function explicitBudget(question: string): number | null {
     .replace(/[۰-۹]/g, (digit) => String(digit.charCodeAt(0) - '۰'.charCodeAt(0)))
     .replace(/[,٬](?=\d{3}(?!\d))/g, '')
     .replace(/٫/g, '.')
-  const match = /(?:under|below|up to|max(?:imum)?|تحت|أقل من|اقل من|حتى|لحد|ميزانيتي|بميزانية)\s*([\d]+)(?:\s*\.(\d+))?/i.exec(text)
-    ?? /([\d]+)(?:\s*\.(\d+))?\s*(?:egp|جنيه)/i.exec(text)
-  if (!match) return null
-  const n = Number(match[1] + (match[2] ? '.' + match[2] : ''))
-  if (!Number.isFinite(n)) return 0
-  const ceiling = /^(under|below|تحت|[أا]قل من)/i.test(match[0]) ? Math.ceil(n) - 1 : Math.floor(n)
-  return Math.max(0, Math.min(100_000, ceiling))
+  const limits = [...text.matchAll(/(?:under|below|up to|max(?:imum)?|تحت|أقل من|اقل من|حتى|لحد|ميزانيتي|بميزانية)\s*([\d]+)(?:\s*\.(\d+))?/gi)]
+  const amounts = [...text.matchAll(/([\d]+)(?:\s*\.(\d+))?\s*(?:egp|جنيه)/gi)]
+  const matches = [...limits, ...amounts]
+  if (!matches.length) return null
+  return Math.min(...matches.map(match => {
+    const n = Number(match[1] + (match[2] ? '.' + match[2] : ''))
+    if (!Number.isFinite(n)) return 0
+    const ceiling = /^(under|below|تحت|[أا]قل من)/i.test(match[0]) ? Math.ceil(n) - 1 : Math.floor(n)
+    return Math.max(0, Math.min(100_000, ceiling))
+  }))
 }
 
 export function resolveIntent(question: string, model: Intent | null): Intent {
