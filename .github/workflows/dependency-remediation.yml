@@ -21,6 +21,7 @@ jobs:
           node <<'JS'
           const fs = require('fs');
           const p = JSON.parse(fs.readFileSync('package.json'));
+          p.packageManager = 'npm@11.6.2';
           p.dependencies.next = '16.4.6';
           p.dependencies.sharp = '^0.35.5';
           p.devDependencies['eslint-config-next'] = '16.4.6';
@@ -38,7 +39,6 @@ jobs:
         run: |
           npx --yes npm@11.6.2 install --ignore-scripts --include=optional --include=peer
           npx --yes npm@11.6.2 ci --include=optional --include=peer
-          npm ci
       - name: Verify application
         run: |
           npx tsc --noEmit
