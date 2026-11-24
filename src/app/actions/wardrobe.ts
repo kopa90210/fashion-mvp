@@ -153,7 +153,7 @@ async function updateWardrobeStatus(itemId: string, status: 'confirmed' | 'rejec
       return { success: true }
     }
   }
-  const { error } = await supabase.from('wardrobe_items').update({ status }).eq('id', itemId)
+  const { error } = await supabase.rpc('set_owned_wardrobe_draft_status', { p_item_id: itemId, p_status: status })
   if (error) throw new Error('Could not update wardrobe item')
   revalidateOwnedWardrobeExperience()
   return { success: true }
