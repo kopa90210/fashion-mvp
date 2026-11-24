@@ -67,18 +67,18 @@ describe('idempotent AI RPC', () => {
   const token = '22222222-2222-4222-8222-222222222222'
   it('validates a claimed token and forwards the fingerprint', async () => {
     mocks.abortSignal.mockResolvedValue({ data: { status: 'claimed', token }, error: null })
-    await expect(beginStylistAi('user-a', 'request-a', 'a'.repeat(64))).resolves.toEqual({ status: 'claimed', token })
-    expect(mocks.rpc).toHaveBeenCalledExactlyOnceWith('begin_stylist_ai', {
-      p_user_id: 'user-a', p_request_id: 'request-a', p_fingerprint: 'a'.repeat(64),
+    await expect(beginStylistAi('user-a', 'request-a', 'a'.repeat(64), 'test-model')).resolves.toEqual({ status: 'claimed', token })
+    expect(mocks.rpc).toHaveBeenCalledExactlyOnceWith('begin_stylist_ai_metered', {
+      p_user_id: 'user-a', p_request_id: 'request-a', p_fingerprint: 'a'.repeat(64), p_model: 'test-model',
     })
   })
   it('rejects malformed cached intent', async () => {
     mocks.abortSignal.mockResolvedValue({ data: { status: 'completed', intent: { mode: 'invalid' } }, error: null })
-    await expect(beginStylistAi('user-a', 'request-a', 'a'.repeat(64))).rejects.toThrow('claim unavailable')
+    await expect(beginStylistAi('user-a', 'request-a', 'a'.repeat(64), 'test-model')).rejects.toThrow('claim unavailable')
   })
   it('rejects a lost completion claim without retry', async () => {
     mocks.abortSignal.mockResolvedValue({ data: false, error: null })
-    await expect(finishStylistAi('user-a', 'request-a', token, null)).rejects.toThrow('completion unavailable')
+    await expect(finishStylistAi('user-a', 'request-a', token, null, 'test-model', { status: 'timeout', input: null, output: null, thought: null, latency: 5000 })).rejects.toThrow('completion unavailable')
     expect(mocks.rpc).toHaveBeenCalledTimes(1)
   })
 })
