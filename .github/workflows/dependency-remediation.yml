@@ -34,8 +34,11 @@ jobs:
           npx --yes npm@11.6.2 install --package-lock-only --ignore-scripts
           npx --yes npm@11.6.2 audit fix --package-lock-only --ignore-scripts --audit-level=high || true
           node -e "const p=require('./package.json'), l=require('./package-lock.json'); if(p.dependencies.next!=='16.4.6'||l.packages['node_modules/next'].version!=='16.4.6'||p.dependencies.shadcn)process.exit(1)"
-      - name: Verify reproducible install
-        run: npm ci
+      - name: Reconcile optional peer dependencies and verify clean install
+        run: |
+          npx --yes npm@11.6.2 install --ignore-scripts --include=optional --include=peer
+          npx --yes npm@11.6.2 ci --include=optional --include=peer
+          npm ci
       - name: Verify application
         run: |
           npx tsc --noEmit
@@ -47,8 +50,8 @@ jobs:
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-placeholder-not-a-secret
       - name: Verify runtime audit
         run: |
-          npm audit --json > audit-all.json || true
-          npm audit --omit=dev --audit-level=high --json > audit-runtime.json
+          npx --yes npm@11.6.2 audit --json > audit-all.json || true
+          npx --yes npm@11.6.2 audit --omit=dev --audit-level=high --json > audit-runtime.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
