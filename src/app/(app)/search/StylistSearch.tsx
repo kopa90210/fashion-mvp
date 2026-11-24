@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, type FormEvent } from 'react'
+import { useRef, useState, type FormEvent } from 'react'
 import Link from 'next/link'
 import type { Collection } from '@/src/lib/stylist/intent'
 import type { Look, Result } from '@/src/lib/stylist/recommend'
@@ -34,6 +34,8 @@ export default function StylistSearch() {
   const [result, setResult] = useState<Result | null>(null)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState('')
+  const retry = useRef<{ body: string; key: string } | null>(null)
+  const submitting = useRef(false)
   const changeView = (next: View) => {
     if (view !== next) { setView(next); setResult(null); setError('') }
   }
@@ -44,21 +46,24 @@ export default function StylistSearch() {
   }
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
-    if (pending) return
+    if (submitting.current) return
+    submitting.current = true
     setPending(true)
     setResult(null)
     setError('')
     try {
+      const body = JSON.stringify({ view, ...(view === 'ask' ? { question } : {}), collection, budget: budget ? Number(budget) : null })
+      if (retry.current?.body !== body) retry.current = { body, key: crypto.randomUUID() }
       const r = await fetch('/api/stylist', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ view, ...(view === 'ask' ? { question } : {}), collection, budget: budget ? Number(budget) : null }),
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': retry.current.key }, body,
       })
       const data = await r.json()
       if (!r.ok) { setError(typeof data.error === 'string' ? data.error : 'Could not load the stylist.'); return }
       if (view === 'ask' && data.clarification === 'budget') setShoppingOptionsOpen(true)
+      retry.current = null
       setResult(data)
     } catch { setError('Could not load the stylist. Try again.') }
-    finally { setPending(false) }
+    finally { submitting.current = false; setPending(false) }
   }
   const panel = 'rounded-3xl border border-[#d8cec2] bg-[#fffdfa] p-5 sm:p-6'
   const shoppingFields = (
