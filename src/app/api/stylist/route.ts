@@ -73,6 +73,14 @@ export async function POST(request: Request) {
     }
     metrics.stage('wardrobe')
     const context = await loadStylistWardrobe(supabase, user.id)
+    if (!daily && requestId && context.items.length && process.env.ENABLE_METERED_STYLIST_AI === 'true') {
+      metrics.stage('provider')
+      const { meteredStylist } = await import('@/src/lib/stylist/metered-stylist')
+      const result = await meteredStylist({ userId: user.id, requestId, question, collection, budget, context, catalog: readCatalog(process.env.STYLIST_CATALOG_JSON) })
+      if (!result) return respond({ error: 'Styling decision unavailable or still processing. Try again shortly.', code: 'STYLIST_BUSY' }, 409, 'busy')
+      metrics.stage('recommendation')
+      return respond(result, 200, 'success')
+    }
     const key = process.env.GEMINI_STYLIST_API_KEY
     // Never send the wardrobe, Style DNA, item IDs, or product data to Gemini.
     let model: Intent | null = null
