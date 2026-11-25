@@ -9,6 +9,9 @@ export type Result = {
   status: 'restyle' | 'shop' | 'clarify' | 'no-match' | 'empty'
   looks: Look[]
   source?: 'gemini' | 'rules'
+  provenance?: import('./metered-stylist').StylistProvenance
+  explanation?: string[]
+  stylingTip?: string | null
   suggestion?: { product: Product; looks: Look[]; unlockCount: number }
   clarification?: 'category' | 'budget' | 'intent'
 }
