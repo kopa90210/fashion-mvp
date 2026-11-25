@@ -155,7 +155,7 @@ export default function StylistSearch() {
         {result?.shoppingTrace && <details className={panel}>
           <summary className="cursor-pointer text-sm font-medium">Shopping generation trace</summary>
           {([['Product selection',result.shoppingTrace.product],['Compatibility review',result.shoppingTrace.compatibility]] as const).map(([label,trace])=><section key={label} className="mt-3 text-xs">
-            <h4 className="font-medium">{label}: {trace?.source.replaceAll('_',' ') ?? 'Not executed'}</h4>
+            <h4 className="font-medium">{label}: {trace?.source.replaceAll('_',' ') ?? 'Not executed'}{trace?.cached?' · Cached review (no new compatibility calls)':''}</h4>
             {trace?.attempts.map((a,i)=><p key={i}>{a.provider} · {a.model} · {a.outcome} · {a.latencyMs} ms</p>)}
           </section>)}
           <p className="mt-3 text-xs">Unlock count: deterministic calculation of unique sampled outfits.</p>
