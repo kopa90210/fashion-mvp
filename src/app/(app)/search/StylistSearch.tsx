@@ -140,6 +140,18 @@ export default function StylistSearch() {
           ? 'No checked product matched your request and formed two looks with your pieces.'
           : 'No complete look matched. Add more pieces to your wardrobe and try again.'}</p>}
         {!!result?.looks.length && <section className={panel}><h3 className="mb-3 font-serif text-2xl">Restyle what you own</h3>{result.looks.map((look, i) => <LookCard key={i} look={look} />)}</section>}
+        {result?.provenance && <details className={panel}>
+          <summary className="cursor-pointer text-sm font-medium">Generation Inspector</summary>
+          <div className="mt-3 space-y-3 text-xs text-[#6d6257]">
+            {([['Intent',result.provenance.intent],['Outfit selection',result.provenance.selection]] as const).map(([label,trace])=><section key={label}>
+              <h4 className="font-medium">{label}: {trace ? trace.source.replaceAll('_',' ') : 'Not executed'}</h4>
+              {trace?.model && <p>{trace.provider} · {trace.model}</p>}
+              {trace?.attempts.map((a,i)=><p key={i}>{a.provider} · {a.model} · {a.outcome} · {a.latencyMs} ms</p>)}
+            </section>)}
+            {result.suggestion && <p>Product ranking and unlock count: deterministic</p>}
+          </div>
+        </details>}
+        {!!result?.explanation?.length && <section className={panel}><h3 className="font-medium">Why this works</h3><ul className="mt-2 space-y-1 text-sm">{result.explanation.map((reason,i)=><li key={i} dir="auto">{reason}</li>)}</ul>{result.stylingTip && <p className="mt-3 text-sm" dir="auto">{result.stylingTip}</p>}</section>}
         {result?.suggestion && <section className={panel}><h3 className="font-serif text-2xl">One piece worth adding</h3>
           <h4 dir="auto" className="mt-2 font-medium">{result.suggestion.product.title}</h4>
           <p className="mt-2 text-sm">{result.suggestion.product.brand} · {Intl.NumberFormat('en-EG', { style: 'currency', currency: 'EGP' }).format(result.suggestion.product.priceEgp)}</p>
