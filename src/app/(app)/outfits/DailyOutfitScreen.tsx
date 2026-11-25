@@ -243,6 +243,12 @@ export default function DailyOutfitScreen({
               </p>
             </>
           )}
+          {currentOutfit.provenance && (
+            <details className="mt-3 text-xs text-[#6d6257]">
+              <summary className="cursor-pointer">Generation: {currentOutfit.provenance.source.replaceAll('_',' ')}{currentOutfit.provenance.model ? ` · ${currentOutfit.provenance.model}` : ''}</summary>
+              <ul className="mt-2 space-y-1">{currentOutfit.provenance.attempts.map((a,i)=><li key={i}>{a.provider} · {a.model} · {a.outcome} · {a.latencyMs} ms</li>)}</ul>
+            </details>
+          )}
         </header>
 
         <AnimatePresence mode="wait">
