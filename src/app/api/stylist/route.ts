@@ -60,7 +60,7 @@ export async function POST(request: Request) {
     return respond({ error: 'Enter a whole EGP budget between 1 and 100,000' }, 400, 'invalid_input')
   }
   const requestId = request.headers.get('Idempotency-Key')
-  if (!daily && (!requestId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(requestId))) {
+  if ((!daily || process.env.ENABLE_METERED_SHOPPER_AI === 'true') && (!requestId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(requestId))) {
     return respond({ error: 'A valid Idempotency-Key is required' }, 400, 'invalid_input')
   }
     metrics.stage('auth')
@@ -73,6 +73,15 @@ export async function POST(request: Request) {
     }
     metrics.stage('wardrobe')
     const context = await loadStylistWardrobe(supabase, user.id)
+    if (daily && requestId && context.items.length && process.env.ENABLE_METERED_SHOPPER_AI === 'true') {
+      metrics.stage('provider')
+      const { meteredShopper } = await import('@/src/lib/stylist/metered-shopper')
+      const intent: Intent = { mode: 'shop', occasion: context.signals?.primaryOccasion === 'work-university' ? 'work' : context.signals?.primaryOccasion === 'going-out' ? 'going-out' : 'everyday', role: null, budget }
+      const result = await meteredShopper({userId:user.id,requestId,context,catalog:readCatalog(process.env.STYLIST_CATALOG_JSON),intent,collection,daily:true})
+      if (!result) return respond({error:'Shopping decision unavailable or still processing. Try again shortly.',code:'STYLIST_BUSY'},409,'busy')
+      metrics.stage('recommendation')
+      return respond(result,200,'success')
+    }
     if (!daily && requestId && context.items.length && process.env.ENABLE_METERED_STYLIST_AI === 'true') {
       metrics.stage('provider')
       const { meteredStylist } = await import('@/src/lib/stylist/metered-stylist')
