@@ -12,10 +12,13 @@ import {
 import { readQuizSignals, type QuizSignals, type StyleVector } from '@/src/lib/quiz/scoring'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { normalizeWardrobeItem } from '@/src/lib/wardrobe/normalize'
+import { generateMeteredDaily } from '@/src/lib/outfit/metered-daily'
+import type { Provenance } from '@/src/lib/ai/orchestrator'
 import type { GeneratedDailyOutfit } from '@/src/lib/outfit/ai-service'
 import { signedOwnedPrivateUrl } from '@/src/lib/media/private-media'
 
 export type DailyOutfit = Outfit & {
+  provenance?: Provenance
   id: string
   vector: StyleVector
   reasons: string[]
@@ -600,6 +603,26 @@ export async function getDailyOutfit(): Promise<DailyOutfit | null> {
   const tData = performance.now() - t0
 
   const scheduledFor = localCalendarDate(timezone)
+
+  if (process.env.ENABLE_METERED_DAILY_AI === 'true') {
+    const candidates = recommendOutfits(items, dna, { topN: 10, signals })
+    const fallback = candidates[0]
+    if (!fallback) return null
+    // The ledger is the authoritative result; legacy async enqueue is bypassed.
+    const decision = await generateMeteredDaily(userId, scheduledFor, dna, signals, items, {
+      item_ids: fallback.items.map(i => i.id), reasoning: buildReasons(fallback, dna), styling_tip: null,
+    })
+    if (!decision?.value) return null
+    const pool = new Map(items.map(i => [i.id,i]))
+    const selected = decision.value.item_ids.map(id => pool.get(id)!)
+    const outfit = { items: selected, score: scoreOutfit(selected,dna,signals) }
+    // Persist through existing ownership-checked RPC. Engine rows deliberately
+    // avoid collision with legacy scheduled AI jobs until atomic linking is added.
+    const id = await persistOutfit(supabase, outfit, 'engine', decision.value.reasoning, null, {
+      metered_daily: true, generation_provenance: decision.provenance,
+    })
+    return { ...outfit,id,vector:dna,reasons:decision.value.reasoning,provenance:decision.provenance }
+  }
 
   if (process.env.ENABLE_AI_DAILY_OUTFITS === 'true') {
     const { data: selection } = await supabase.from('onboarding_owned_selections')
