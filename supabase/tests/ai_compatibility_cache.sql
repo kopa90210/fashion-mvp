@@ -1,0 +1,41 @@
+begin;
+insert into auth.users(id,email) values ('c7070000-0000-4000-8000-000000000001','g7-cache-test@security-test.invalid'),('c7070000-0000-4000-8000-000000000002','g7-cache-other@security-test.invalid');
+set local role service_role;
+do $$
+declare u uuid:='c7070000-0000-4000-8000-000000000001'; other uuid:='c7070000-0000-4000-8000-000000000002'; r uuid:=gen_random_uuid(); hit uuid:=gen_random_uuid(); t uuid; c jsonb; exp timestamptz:=clock_timestamp()+interval '1 hour'; fp text:=repeat('a',64); fallback_id uuid:=gen_random_uuid();
+begin
+ c:=public.begin_cached_compatibility(u,r,fp,exp);
+ if c->>'status'<>'claimed' then raise exception 'miss';end if;
+ t:=(c->>'token')::uuid;
+ if not public.reserve_ai_attempt(u,r,'unlock_compatibility',t,1::smallint,'groq','test-model') then raise exception 'reservation';end if;
+ if not public.finish_ai_attempt(u,r,'unlock_compatibility',t,1::smallint,'accepted',100,20,5,45,'fixture-v1',0.000012) then raise exception 'usage';end if;
+ if public.finish_ai_decision(u,r,'unlock_compatibility',t,'{"look_ids":["look-0","look-1"]}') is distinct from 'PRIMARY_AI' then raise exception 'source';end if;
+ c:=public.begin_cached_compatibility(u,hit,fp,exp);
+ if c->>'cached' is distinct from 'true' or c->>'source' is distinct from 'PRIMARY_AI' or c->'result' is distinct from '{"look_ids":["look-0","look-1"]}'::jsonb or c->'attempts'->0->>'model' is distinct from 'test-model' then raise exception 'cached provenance';end if;
+ if exists(select 1 from public.ai_provider_attempts where user_id=u and request_id=hit) then raise exception 'cache charged';end if;
+ c:=public.begin_cached_compatibility(u,hit,fp,exp);
+ if c->>'cached' is distinct from 'true' then raise exception 'replay';end if;
+ c:=public.begin_cached_compatibility(other,gen_random_uuid(),fp,exp);
+ if c->>'status'<>'claimed' then raise exception 'cross-user reuse';end if;
+ c:=public.begin_cached_compatibility(u,gen_random_uuid(),repeat('b',64),exp);
+ if c->>'status'<>'claimed' then raise exception 'changed input reuse';end if;
+ c:=public.begin_cached_compatibility(u,gen_random_uuid(),fp,clock_timestamp()-interval '1 second');
+ if c->>'status'<>'expired' then raise exception 'expired catalog';end if;
+ c:=public.begin_cached_compatibility(u,fallback_id,repeat('c',64),exp);
+ t:=(c->>'token')::uuid;
+ perform public.finish_ai_decision(u,fallback_id,'unlock_compatibility',t,'{"look_ids":[]}');
+ c:=public.begin_cached_compatibility(u,gen_random_uuid(),repeat('c',64),exp);
+ if c->>'status'<>'claimed' then raise exception 'fallback cached';end if;
+ update public.ai_decisions set completed_at=clock_timestamp()-interval '25 hours' where user_id=u and request_id=r;
+ c:=public.begin_cached_compatibility(u,gen_random_uuid(),fp,exp);
+ if c->>'status'<>'claimed' then raise exception 'TTL renewed';end if;
+ c:=public.begin_cached_compatibility(u,hit,fp,exp);
+ if c->>'status'<>'expired' then raise exception 'stale cache replay';end if;
+ if not exists(select 1 from public.ai_provider_attempts where user_id=u and request_id=r and pricing_version='fixture-v1' and estimated_cost_usd=0.000012 and latency_ms=45) then raise exception 'telemetry persistence';end if;
+end $$;
+reset role;
+do $$ begin
+ if has_function_privilege('authenticated','public.begin_cached_compatibility(uuid,uuid,text,timestamptz)','execute') or has_function_privilege('anon','public.begin_cached_compatibility(uuid,uuid,text,timestamptz)','execute') then raise exception 'RPC exposed';end if;
+end $$;
+select 'G7 compatibility cache and cost persistence rollback assertions passed' as result;
+rollback;
