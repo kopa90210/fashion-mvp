@@ -1,5 +1,6 @@
 import 'server-only'
 import { createHash } from 'node:crypto'
+import { persistMeteredDaily } from '@/src/lib/ai/ledger'
 import { decidePersisted } from '@/src/lib/ai/persisted'
 import { outfitAdapter } from '@/src/lib/ai/outfit-adapters'
 import { isValidOutfitStructure, type WardrobeItem } from './engine'
@@ -26,7 +27,10 @@ export async function generateMeteredDaily(userId:string,date:string,dna:StyleVe
   const hash=createHash('sha256').update(JSON.stringify(['daily-v1',date,prompt])).digest('hex')
   // Stable per local day and context, including wardrobe/style changes.
   const id=hash.slice(0,8)+'-'+hash.slice(8,12)+'-4'+hash.slice(13,16)+'-8'+hash.slice(17,20)+'-'+hash.slice(20,32)
-  return decidePersisted({key:{userId,requestId:id,component:'daily_outfit'},fingerprint:hash,
+  const decision = await decidePersisted({key:{userId,requestId:id,component:'daily_outfit'},fingerprint:hash,
     primary:outfitAdapter('groq',prompt),secondary:outfitAdapter('gemini',prompt),
     validate:v=>validateSelection(v,items),fallback:()=>fallback})
+  if (!decision?.value) return null
+  const outfitId=await persistMeteredDaily(userId,id,date)
+  return {...decision,outfitId}
 }
