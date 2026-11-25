@@ -45,7 +45,11 @@ export async function meteredStylist(args:{userId:string;requestId:string;questi
  const intent:Intent={...resolved,budget:resolved.budget===null?budget:budget===null?resolved.budget:Math.min(resolved.budget,budget)}
  const base=recommendations(context,catalog,intent,collection)
  const provenance:StylistProvenance={intent:parsed.provenance,selection:null,shopping:'DETERMINISTIC_ONLY',unlock:'DETERMINISTIC_ONLY'}
- // Shopping selection and arithmetic remain unchanged until G5.
+ if(intent.mode==='shop'&&intent.role&&intent.budget!==null&&process.env.ENABLE_METERED_SHOPPER_AI==='true') {
+  const {meteredShopper}=await import('./metered-shopper')
+  const result=await meteredShopper({userId,requestId,context,catalog,intent,collection,daily:false})
+  return result?{...result,provenance}:null
+ }
  if(intent.mode!=='restyle'||!context.items.length)return {...base,provenance}
  const items=eligibleStylistItems(context.items,intent)
  const occasion={work:'work-university','going-out':'going-out',everyday:'everyday-errands'} as const
