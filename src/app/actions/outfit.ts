@@ -616,12 +616,7 @@ export async function getDailyOutfit(): Promise<DailyOutfit | null> {
     const pool = new Map(items.map(i => [i.id,i]))
     const selected = decision.value.item_ids.map(id => pool.get(id)!)
     const outfit = { items: selected, score: scoreOutfit(selected,dna,signals) }
-    // Persist through existing ownership-checked RPC. Engine rows deliberately
-    // avoid collision with legacy scheduled AI jobs until atomic linking is added.
-    const id = await persistOutfit(supabase, outfit, 'engine', decision.value.reasoning, null, {
-      metered_daily: true, generation_provenance: decision.provenance,
-    })
-    return { ...outfit,id,vector:dna,reasons:decision.value.reasoning,provenance:decision.provenance }
+    return { ...outfit,id:decision.outfitId,vector:dna,reasons:decision.value.reasoning,provenance:decision.provenance }
   }
 
   if (process.env.ENABLE_AI_DAILY_OUTFITS === 'true') {
