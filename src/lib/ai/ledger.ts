@@ -17,12 +17,15 @@ function client() {
 }
 function args(k: DecisionKey) { return {p_user_id:k.userId,p_request_id:k.requestId,p_component:k.component} }
 function deadline(signal?: AbortSignal) { const timeout=AbortSignal.timeout(3000); return signal ? AbortSignal.any([timeout,signal]) : timeout }
-export async function beginDecision(k: DecisionKey,fingerprint: string) {
-  const {data,error}=await client().rpc('begin_ai_decision',{...args(k),p_fingerprint:fingerprint}).abortSignal(deadline())
+export async function beginDecision(k: DecisionKey,fingerprint: string,catalogExpiresAt?: string) {
+  const rpc=catalogExpiresAt&&k.component==='unlock_compatibility'
+    ? client().rpc('begin_cached_compatibility',{p_user_id:k.userId,p_request_id:k.requestId,p_fingerprint:fingerprint,p_catalog_expires_at:catalogExpiresAt})
+    : client().rpc('begin_ai_decision',{...args(k),p_fingerprint:fingerprint})
+  const {data,error}=await rpc.abortSignal(deadline())
   if(error || !data || typeof data !== 'object') throw new Error('AI decision claim unavailable')
   if(data.status==='claimed' && typeof data.token==='string' && uuid.test(data.token)) return {status:'claimed' as const,token:data.token}
   if(data.status==='busy'||data.status==='conflict'||data.status==='expired') return {status:data.status as 'busy'|'conflict'|'expired'}
-  if(data.status==='completed' && sources.has(data.source) && Array.isArray(data.attempts)) return {status:'completed' as const,source:data.source as Source,result:data.result as unknown,attempts:data.attempts as unknown[]}
+  if(data.status==='completed' && sources.has(data.source) && Array.isArray(data.attempts)) return {status:'completed' as const,source:data.source as Source,result:data.result as unknown,attempts:data.attempts as unknown[],cached:data.cached===true}
   throw new Error('AI decision claim invalid')
 }
 export async function reserveAttempt(k: DecisionKey,token: string,slot: 1|2,provider: Provider,model: string,signal?: AbortSignal): Promise<boolean> {
