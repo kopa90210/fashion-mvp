@@ -5,6 +5,7 @@ export type Provenance = {
   source: 'PRIMARY_AI' | 'SECONDARY_AI' | 'DETERMINISTIC_FALLBACK' | 'DETERMINISTIC_ONLY' | 'UNAVAILABLE'
   provider: Provider | null
   model: string | null
+  cached?: boolean
   attempts: Attempt[]
 }
 export type Candidate = {
