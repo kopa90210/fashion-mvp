@@ -12,7 +12,8 @@ export type Result = {
   provenance?: import('./metered-stylist').StylistProvenance
   explanation?: string[]
   stylingTip?: string | null
-  suggestion?: { product: Product; looks: Look[]; unlockCount: number }
+  shoppingTrace?: import('./metered-shopper').ShoppingTrace
+  suggestion?: { product: Product; looks: Look[]; unlockCount: number; unlockBasis?: 'ai_reviewed_sample' | 'structural_sample'; evaluatedCount?: number }
   clarification?: 'category' | 'budget' | 'intent'
 }
 const look = (o: Outfit, candidate?: string): Look => ({
