@@ -4,10 +4,10 @@ import { beginDecision, reserveAttempt, finishAttempt, finishDecision, type Deci
 
 export type Adapter = { provider: Provider; model: string; generate: (signal: AbortSignal, capture: (usage: Omit<Usage,'latency'>) => void) => Promise<unknown> }
 export async function decidePersisted<T>(options: {
-  key: DecisionKey; fingerprint: string; primary: Adapter | null; secondary: Adapter | null
+  key: DecisionKey; fingerprint: string; catalogExpiresAt?: string; primary: Adapter | null; secondary: Adapter | null
   validate: (value: unknown) => T | null; fallback: () => T | null
 }): Promise<Decision<T> | null> {
-  const claim = await beginDecision(options.key, options.fingerprint)
+  const claim = options.catalogExpiresAt ? await beginDecision(options.key, options.fingerprint, options.catalogExpiresAt) : await beginDecision(options.key, options.fingerprint)
   if (claim.status === 'completed') {
     const value = options.validate(claim.result)
     if (value === null) return null
@@ -19,7 +19,7 @@ export async function decidePersisted<T>(options: {
       return [{provider:a.provider,model:a.model,outcome:a.status,latencyMs:typeof a.latencyMs==='number'?a.latencyMs:0}] as Decision<T>['provenance']['attempts']
     })
     const accepted = attempts.find(a => a.outcome === 'accepted')
-    return {value,provenance:{source:claim.source,provider:accepted?.provider??null,model:accepted?.model??null,attempts}}
+    return {value,provenance:{source:claim.source,provider:accepted?.provider??null,model:accepted?.model??null,attempts,...(claim.cached?{cached:true}:{})}}
   }
   if (claim.status !== 'claimed') return null
   const token = claim.token
