@@ -1,4 +1,5 @@
 import 'server-only'
+import { providerCost } from './pricing'
 import { tokenCount } from '@/src/lib/stylist/telemetry'
 import type { Adapter } from '@/src/lib/ai/persisted'
 import type { Provider } from '@/src/lib/ai/orchestrator'
@@ -17,7 +18,8 @@ export function outfitAdapter(provider: Provider, prompt: string, system = 'Sele
     if(!response.ok) throw new Error('Provider request failed')
     const data=await response.json()
     const u=groq?data.usage:data.usageMetadata
-    capture({input:tokenCount(groq?u?.prompt_tokens:u?.promptTokenCount),output:tokenCount(groq?u?.completion_tokens:u?.candidatesTokenCount),thought:tokenCount(groq?u?.completion_tokens_details?.reasoning_tokens:u?.thoughtsTokenCount),pricingVersion:null,cost:null})
+    const usage={input:tokenCount(groq?u?.prompt_tokens:u?.promptTokenCount),output:tokenCount(groq?u?.completion_tokens:u?.candidatesTokenCount),thought:tokenCount(groq?u?.completion_tokens_details?.reasoning_tokens:u?.thoughtsTokenCount)}
+    capture({...usage,...providerCost(provider,model,usage)})
     const raw=groq?(data.choices?.[0]?.finish_reason==='stop'?data.choices[0].message?.content:null):(data.candidates?.[0]?.finishReason==='STOP'?data.candidates[0].content?.parts?.filter((p:{thought?:boolean})=>!p.thought).map((p:{text?:string})=>p.text??'').join(''):null)
     if(typeof raw!=='string'||raw.length>8192) return null
     try{return JSON.parse(raw)}catch{return null}
