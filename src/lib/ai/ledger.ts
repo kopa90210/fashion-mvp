@@ -39,3 +39,9 @@ export async function finishDecision(k: DecisionKey,token: string,result: unknow
   if(error || !sources.has(data)) throw new Error('AI decision completion unavailable')
   return data as Source
 }
+
+export async function persistMeteredDaily(userId:string,requestId:string,date:string): Promise<string> {
+  const {data,error}=await client().rpc('persist_metered_daily_outfit',{p_user_id:userId,p_request_id:requestId,p_scheduled_for:date}).abortSignal(deadline())
+  if(error||typeof data!=='string'||!uuid.test(data)) throw new Error('Daily outfit persistence unavailable')
+  return data
+}
