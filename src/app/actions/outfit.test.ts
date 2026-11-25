@@ -15,6 +15,7 @@ const mediaMocks = vi.hoisted(() => ({
   signedOwnedPrivateUrl: vi.fn(async (_client: unknown, id: string) => `https://signed.test/${id}`),
 }))
 vi.mock('@/src/lib/media/private-media', () => mediaMocks)
+vi.mock('@/src/lib/outfit/metered-daily', () => ({ generateMeteredDaily: vi.fn() }))
 
 // ---------------------------------------------------------------------------
 // Supabase mock setup
@@ -198,6 +199,7 @@ beforeEach(() => {
   rpcResponse = { data: 'saved', error: null }
   rpcResponseSequence = []
   queryBuilders = []
+  delete process.env.ENABLE_METERED_DAILY_AI
   delete process.env.ENABLE_AI_DAILY_OUTFITS
   vi.stubEnv('AI_OUTFIT_SERVICE_URL', '')
 })
