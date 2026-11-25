@@ -13,6 +13,7 @@ export type Candidate = {
   // Must reserve one durable, idempotent provider-call allowance before each attempt.
   reserve: (signal: AbortSignal) => Promise<boolean>
   generate: (signal: AbortSignal) => Promise<unknown>
+  complete?: (attempt: Attempt) => Promise<void>
 }
 export type Decision<T> = { value: T | null; provenance: Provenance }
 
@@ -42,6 +43,7 @@ export async function decide<T>(options: {
     const controller = new AbortController()
     let timer: ReturnType<typeof setTimeout> | undefined
     let outcome: Attempt['outcome'] = 'provider_error'
+    let accepted: T | null = null
     try {
       const task = async () => {
         if (!await candidate.reserve(controller.signal)) {
@@ -63,16 +65,18 @@ export async function decide<T>(options: {
         }),
       ])
       if (controller.signal.aborted) outcome = 'timeout'
-      attempts.push({ provider: candidate.provider, model: candidate.model, outcome, latencyMs: Math.max(0, Math.round(performance.now() - start)) })
-      if (result !== null && !controller.signal.aborted) {
-        return { value: result, provenance: { source: index === 0 ? 'PRIMARY_AI' : 'SECONDARY_AI', provider: candidate.provider, model: candidate.model, attempts } }
-      }
+      accepted = !controller.signal.aborted ? result : null
     } catch {
-      attempts.push({ provider: candidate.provider, model: candidate.model, outcome: controller.signal.aborted ? 'timeout' : 'provider_error', latencyMs: Math.max(0, Math.round(performance.now() - start)) })
+      outcome = controller.signal.aborted ? 'timeout' : 'provider_error'
     } finally {
       if (timer !== undefined) clearTimeout(timer)
       controller.abort()
     }
+    const attempt: Attempt = { provider: candidate.provider, model: candidate.model, outcome, latencyMs: Math.max(0, Math.round(performance.now() - start)) }
+    // Persist the outcome before advancing. An ambiguous ledger write must stop the cascade.
+    await candidate.complete?.(attempt)
+    attempts.push(attempt)
+    if (accepted !== null) return { value: accepted, provenance: { source: index === 0 ? 'PRIMARY_AI' : 'SECONDARY_AI', provider: candidate.provider, model: candidate.model, attempts } }
   }
   const value = options.fallback()
   return { value, provenance: { source: value === null ? 'UNAVAILABLE' : invoked ? 'DETERMINISTIC_FALLBACK' : 'DETERMINISTIC_ONLY', provider: null, model: null, attempts } }
