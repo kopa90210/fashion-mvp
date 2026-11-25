@@ -148,13 +148,22 @@ export default function StylistSearch() {
               {trace?.model && <p>{trace.provider} · {trace.model}</p>}
               {trace?.attempts.map((a,i)=><p key={i}>{a.provider} · {a.model} · {a.outcome} · {a.latencyMs} ms</p>)}
             </section>)}
-            {result.suggestion && <p>Product ranking and unlock count: deterministic</p>}
+            {result.suggestion && !result.shoppingTrace && <p>Product ranking and unlock count: deterministic</p>}
           </div>
         </details>}
         {!!result?.explanation?.length && <section className={panel}><h3 className="font-medium">Why this works</h3><ul className="mt-2 space-y-1 text-sm">{result.explanation.map((reason,i)=><li key={i} dir="auto">{reason}</li>)}</ul>{result.stylingTip && <p className="mt-3 text-sm" dir="auto">{result.stylingTip}</p>}</section>}
+        {result?.shoppingTrace && <details className={panel}>
+          <summary className="cursor-pointer text-sm font-medium">Shopping generation trace</summary>
+          {([['Product selection',result.shoppingTrace.product],['Compatibility review',result.shoppingTrace.compatibility]] as const).map(([label,trace])=><section key={label} className="mt-3 text-xs">
+            <h4 className="font-medium">{label}: {trace?.source.replaceAll('_',' ') ?? 'Not executed'}</h4>
+            {trace?.attempts.map((a,i)=><p key={i}>{a.provider} · {a.model} · {a.outcome} · {a.latencyMs} ms</p>)}
+          </section>)}
+          <p className="mt-3 text-xs">Unlock count: deterministic calculation of unique sampled outfits.</p>
+        </details>}
         {result?.suggestion && <section className={panel}><h3 className="font-serif text-2xl">One piece worth adding</h3>
           <h4 dir="auto" className="mt-2 font-medium">{result.suggestion.product.title}</h4>
           <p className="mt-2 text-sm">{result.suggestion.product.brand} · {Intl.NumberFormat('en-EG', { style: 'currency', currency: 'EGP' }).format(result.suggestion.product.priceEgp)}</p>
+          {result.suggestion.unlockBasis && <p className="mt-3 text-sm">{result.suggestion.unlockCount} {result.suggestion.unlockBasis==='ai_reviewed_sample'?'AI-reviewed compatible':'structurally valid'} looks among {result.suggestion.evaluatedCount} sampled combinations. Not a total wardrobe unlock estimate.</p>}
           <p className="my-3 text-sm text-[#6d6257]">Two ways to wear it with pieces you own.</p>
           <div className="grid gap-2 sm:grid-cols-2">{result.suggestion.looks.map((look, i) => <LookCard key={i} look={look} />)}</div>
           <a className={'mt-4 inline-flex min-h-11 items-center rounded-full border border-[#d8cec2] px-4 text-sm ' + focus} href={result.suggestion.product.url} target="_blank" rel="noopener noreferrer">View at {result.suggestion.product.brand} ↗</a>
