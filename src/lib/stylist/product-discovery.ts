@@ -27,7 +27,7 @@ export function normalizeLeads(raw:unknown):RetailerLead[] {
  }
  return [...found.values()].slice(0,5)
 }
-export function discoveryEnabled(env:NodeJS.ProcessEnv=process.env):boolean {
+export function discoveryEnabled(env:Readonly<Record<string,string|undefined>>=process.env):boolean {
  return env.VERCEL_ENV==='preview'&&env.VERCEL_GIT_COMMIT_REF==='fix/phase6-p0-reliability-cloud'&&env.NEXT_PUBLIC_SUPABASE_URL==='https://xaxwzncbvmxicbnvjfad.supabase.co'&&!!env.TAVILY_API_KEY
 }
 export async function discoverRetailerLeads(intent:Intent,collection:Collection,fetcher:typeof fetch=fetch):Promise<Discovery>{
