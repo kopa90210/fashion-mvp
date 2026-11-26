@@ -19,15 +19,20 @@ export type Product = {
   checkedAt: string; collection: Collection | 'shared'; role: Gap; occasions: Occasion[]; styleTags: Partial<StyleVector>
 }
 
-export function readCatalog(json: string | undefined, now = Date.now()): Product[] {
-  if (!json || json.length > 120_000) return []
+export type CatalogDiagnostics = { input: 'missing' | 'invalid' | 'ok'; total: number; accepted: number; invalidFields: number; staleOrInvalidDate: number; invalidOrDuplicateUrl: number }
+export function inspectCatalog(json: string | undefined, now = Date.now()): { products: Product[]; diagnostics: CatalogDiagnostics } {
+  const diagnostics: CatalogDiagnostics = {input:'missing',total:0,accepted:0,invalidFields:0,staleOrInvalidDate:0,invalidOrDuplicateUrl:0}
+  if (!json) return {products:[],diagnostics}
+  diagnostics.input='invalid'
+  if (json.length > 120_000) return {products:[],diagnostics}
   let entries: unknown
-  try { entries = JSON.parse(json) } catch { return [] }
-  if (!Array.isArray(entries) || entries.length > 250) return []
+  try { entries = JSON.parse(json) } catch { return {products:[],diagnostics} }
+  if (!Array.isArray(entries) || entries.length > 250) return {products:[],diagnostics}
+  diagnostics.input='ok'; diagnostics.total=entries.length
   const result = new Map<string, Product>()
   const urls = new Set<string>()
   for (const raw of entries) {
-    if (!raw || typeof raw !== 'object') continue
+    if (!raw || typeof raw !== 'object') { diagnostics.invalidFields++; continue }
     const p = raw as Partial<Product> & { stock?: unknown; currency?: unknown }
     if (typeof p.id !== 'string' || !/^[a-zA-Z0-9_-]{1,64}$/.test(p.id) || result.has(p.id) ||
         typeof p.title !== 'string' || !p.title.trim() || p.title.length > 100 ||
@@ -36,12 +41,12 @@ export function readCatalog(json: string | undefined, now = Date.now()): Product
         p.currency !== 'EGP' || p.stock !== 'in_stock' ||
         typeof p.checkedAt !== 'string' || !p.role || !gaps.includes(p.role) ||
         !(p.collection === 'masculine' || p.collection === 'feminine' || p.collection === 'shared') ||
-        !Array.isArray(p.occasions) || !p.occasions.length || !p.occasions.every((value) => occasions.includes(value))) continue
+        !Array.isArray(p.occasions) || !p.occasions.length || !p.occasions.every((value) => occasions.includes(value))) { diagnostics.invalidFields++; continue }
     const age = now - Date.parse(p.checkedAt)
-    if (!Number.isFinite(age) || age < 0 || age > MAX_AGE_MS) continue
+    if (!Number.isFinite(age) || age < 0 || age > MAX_AGE_MS) { diagnostics.staleOrInvalidDate++; continue }
     let url: URL
-    try { url = new URL(p.url) } catch { continue }
-    if (!validProductUrl(url) || urls.has(url.href)) continue
+    try { url = new URL(p.url) } catch { diagnostics.invalidOrDuplicateUrl++; continue }
+    if (!validProductUrl(url) || urls.has(url.href)) { diagnostics.invalidOrDuplicateUrl++; continue }
     const brand = shops[url.hostname as keyof typeof shops]
     const styleTags: Partial<StyleVector> = {}
     if (p.styleTags && typeof p.styleTags === 'object') {
@@ -53,7 +58,16 @@ export function readCatalog(json: string | undefined, now = Date.now()): Product
     result.set(p.id, { id: p.id, title: p.title.trim(), url: url.href, brand, priceEgp: p.priceEgp, checkedAt: p.checkedAt, collection: p.collection, role: p.role, occasions: p.occasions, styleTags })
     urls.add(url.href)
   }
-  return [...result.values()]
+  diagnostics.accepted=result.size
+  return {products:[...result.values()],diagnostics}
+}
+
+export function readCatalog(json: string | undefined, now = Date.now()): Product[] {
+  const {products,diagnostics}=inspectCatalog(json,now)
+  if(process.env.VERCEL_ENV==='preview' && process.env.NEXT_PUBLIC_SUPABASE_URL==='https://xaxwzncbvmxicbnvjfad.supabase.co') {
+    console.info(JSON.stringify({event:'stylist.catalog_eligibility',...diagnostics}))
+  }
+  return products
 }
 
 export function searchCatalog(catalog: Product[], intent: Intent, collection: Collection): Product[] {
