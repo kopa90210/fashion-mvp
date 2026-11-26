@@ -136,9 +136,19 @@ export default function StylistSearch() {
           category: 'Which piece are you looking for? Try a shirt, trousers, shoes, a dress, or a jacket.',
           budget: 'What is your maximum budget in EGP?',
         }[result.clarification ?? 'intent']}</p>}
-        {result?.status === 'no-match' && <p className={panel}>{result.looks.length
+        {result?.status === 'no-match' && !result.discovery?.leads.length && <p className={panel}>{result.looks.length
           ? 'No checked product matched your request and formed two looks with your pieces.'
           : 'No complete look matched. Add more pieces to your wardrobe and try again.'}</p>}
+        {result?.discovery && <section className={panel}>
+          <h3 className="font-serif text-2xl">Retailer search results</h3>
+          <p className="mt-2 text-sm text-[#6d6257]">Discovered product pages, not verified shopping recommendations. Check current price, availability and suitability at the retailer.</p>
+          {result.discovery.status==='unavailable' && <p className="mt-3 text-sm">Retailer search is temporarily unavailable or the testing allowance is exhausted.</p>}
+          {result.discovery.status==='ok' && !result.discovery.leads.length && <p className="mt-3 text-sm">No eligible retailer links were found.</p>}
+          <ul className="mt-3 space-y-3">{result.discovery.leads.map(lead=><li key={lead.url} className="rounded-xl border border-[#d8cec2] p-3">
+            <p className="font-medium" dir="auto">{lead.title}</p><p className="text-xs text-[#6d6257]">{lead.retailer}</p>
+            <a href={lead.url} target="_blank" rel="noopener noreferrer" className={'mt-2 inline-flex min-h-11 items-center underline '+focus}>View retailer page ↗</a>
+          </li>)}</ul>
+        </section>}
         {!!result?.looks.length && <section className={panel}><h3 className="mb-3 font-serif text-2xl">Restyle what you own</h3>{result.looks.map((look, i) => <LookCard key={i} look={look} />)}</section>}
         {result?.provenance && <details className={panel}>
           <summary className="cursor-pointer text-sm font-medium">Generation Inspector</summary>
