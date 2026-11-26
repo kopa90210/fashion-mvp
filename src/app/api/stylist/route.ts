@@ -5,6 +5,7 @@ import { createClient } from '@/src/lib/supabase/server'
 import { readCatalog } from '@/src/lib/stylist/catalog'
 import { classifyWithGemini } from '@/src/lib/stylist/gemini'
 import { resolveIntent, type Collection, type Intent } from '@/src/lib/stylist/intent'
+import { discoveryEnabled, discoverRetailerLeads } from '@/src/lib/stylist/product-discovery'
 import { recommendations } from '@/src/lib/stylist/recommend'
 import { reserveStylistQuota, beginStylistAi, finishStylistAi } from '@/src/lib/stylist/quota'
 import { loadStylistWardrobe } from '@/src/lib/stylist/wardrobe'
@@ -73,11 +74,27 @@ export async function POST(request: Request) {
     }
     metrics.stage('wardrobe')
     const context = await loadStylistWardrobe(supabase, user.id)
+    const catalog = readCatalog(process.env.STYLIST_CATALOG_JSON)
+    // Empty-catalog discovery is a separate, deterministic lead-only path.
+    // No model calls occur on this path; charge the shared durable daily quota before search.
+    const explicit = resolveIntent(question, null)
+    const discoveryIntent: Intent = daily
+      ? {mode:'shop',occasion:context.signals?.primaryOccasion==='work-university'?'work':context.signals?.primaryOccasion==='going-out'?'going-out':'everyday',role:null,budget}
+      : {...explicit,budget:explicit.budget===null?budget:budget===null?explicit.budget:Math.min(explicit.budget,budget)}
+    if (requestId && context.items.length && catalog.length===0 && discoveryEnabled() &&
+        process.env.ENABLE_METERED_SHOPPER_AI==='true' && discoveryIntent.mode==='shop' &&
+        (daily||discoveryIntent.role!==null) && discoveryIntent.budget!==null && discoveryIntent.budget>0) {
+      metrics.stage('provider')
+      const allowed=await reserveStylistQuota(user.id,'gemini_daily')
+      const discovery=allowed?await discoverRetailerLeads(discoveryIntent,collection):{status:'unavailable' as const,leads:[]}
+      metrics.stage('recommendation')
+      return respond({...recommendations(context,catalog,discoveryIntent,collection,daily),discovery},200,'success')
+    }
     if (daily && requestId && context.items.length && process.env.ENABLE_METERED_SHOPPER_AI === 'true') {
       metrics.stage('provider')
       const { meteredShopper } = await import('@/src/lib/stylist/metered-shopper')
       const intent: Intent = { mode: 'shop', occasion: context.signals?.primaryOccasion === 'work-university' ? 'work' : context.signals?.primaryOccasion === 'going-out' ? 'going-out' : 'everyday', role: null, budget }
-      const result = await meteredShopper({userId:user.id,requestId,context,catalog:readCatalog(process.env.STYLIST_CATALOG_JSON),intent,collection,daily:true})
+      const result = await meteredShopper({userId:user.id,requestId,context,catalog,intent,collection,daily:true})
       if (!result) return respond({error:'Shopping decision unavailable or still processing. Try again shortly.',code:'STYLIST_BUSY'},409,'busy')
       metrics.stage('recommendation')
       return respond(result,200,'success')
@@ -85,7 +102,7 @@ export async function POST(request: Request) {
     if (!daily && requestId && context.items.length && process.env.ENABLE_METERED_STYLIST_AI === 'true') {
       metrics.stage('provider')
       const { meteredStylist } = await import('@/src/lib/stylist/metered-stylist')
-      const result = await meteredStylist({ userId: user.id, requestId, question, collection, budget, context, catalog: readCatalog(process.env.STYLIST_CATALOG_JSON) })
+      const result = await meteredStylist({ userId: user.id, requestId, question, collection, budget, context, catalog })
       if (!result) return respond({ error: 'Styling decision unavailable or still processing. Try again shortly.', code: 'STYLIST_BUSY' }, 409, 'busy')
       metrics.stage('recommendation')
       return respond(result, 200, 'success')
@@ -118,7 +135,7 @@ export async function POST(request: Request) {
     const resolved = resolveIntent(question, model)
     const intent: Intent = daily ? { mode: 'shop', occasion: context.signals?.primaryOccasion === 'work-university' ? 'work' : context.signals?.primaryOccasion === 'going-out' ? 'going-out' : 'everyday', role: null, budget }
       : { ...resolved, budget: resolved.budget === null ? budget : budget === null ? resolved.budget : Math.min(resolved.budget, budget) }
-    return respond({ ...recommendations(context, readCatalog(process.env.STYLIST_CATALOG_JSON), intent, collection, daily), source: model ? 'gemini' : 'rules' }, 200, 'success')
+    return respond({ ...recommendations(context, catalog, intent, collection, daily), source: model ? 'gemini' : 'rules' }, 200, 'success')
   } catch {
     return respond({ error: 'Could not load your styling recommendations. Try again.' }, 503, 'failure')
   }
