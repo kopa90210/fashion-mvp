@@ -1,6 +1,6 @@
 import { describe,expect,it } from 'vitest'
 import {shopCandidates,validateProductChoice,validateCompatibility,materializeLooks} from './shop-candidates'
-import {readCatalog} from './catalog'
+import {readCatalog,inspectCatalog} from './catalog'
 import type {WardrobeItem} from '@/src/lib/outfit/engine'
 const items:WardrobeItem[]=[
  {id:'t1',display_name:'White shirt',image_url:null,layer_role:'base_layer',style_tags:{}},
@@ -22,4 +22,19 @@ describe('bounded shopping candidates',()=>{
  it('accepts zero compatible looks without inventing a count',()=>expect(validateCompatibility({look_ids:[]},candidates()[0])).toEqual({look_ids:[]}))
  it('materializes only sampled combinations with one new product',()=>{const c=candidates()[0];const result=materializeLooks(c,[c.looks[0].id]);expect(result).toHaveLength(1);expect(result[0].pieces.filter(p=>!p.owned)).toHaveLength(1)})
  it('does not recommend without a budget',()=>expect(shopCandidates({items,dna:{},signals:null},catalog,{...intent,budget:null},'masculine')).toEqual([]))
+})
+
+describe('catalog aggregate diagnostics',()=>{
+ it('distinguishes missing and malformed catalog input',()=>{
+  expect(inspectCatalog(undefined,now).diagnostics.input).toBe('missing')
+  expect(inspectCatalog('{',now).diagnostics.input).toBe('invalid')
+ })
+ it('counts accepted and rejected entries without relaxing freshness or stock checks',()=>{
+  const entries=[raw,{...raw,id:'expired',checkedAt:new Date(now-49*3600000).toISOString()},
+   {...raw,id:'unavailable',stock:'out_of_stock'},{...raw,id:'duplicate'},
+   {...raw,id:'unsafe',url:'https://example.com/product'},null]
+  const result=inspectCatalog(JSON.stringify(entries),now)
+  expect(result.products.map(p=>p.id)).toEqual(['p1'])
+  expect(result.diagnostics).toEqual({input:'ok',total:6,accepted:1,invalidFields:2,staleOrInvalidDate:1,invalidOrDuplicateUrl:2})
+ })
 })
