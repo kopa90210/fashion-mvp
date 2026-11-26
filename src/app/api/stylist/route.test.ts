@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { WardrobeItem } from '@/src/lib/outfit/engine'
 
+vi.mock('server-only', () => ({}))
+
 const calls = vi.hoisted(() => ({
   getUser: vi.fn(), loadWardrobe: vi.fn(), classify: vi.fn(), reserve: vi.fn(), begin: vi.fn(), finish: vi.fn(),
 }))
