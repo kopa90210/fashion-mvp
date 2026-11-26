@@ -12,6 +12,7 @@ export type Result = {
   provenance?: import('./metered-stylist').StylistProvenance
   explanation?: string[]
   stylingTip?: string | null
+  discovery?: import('./product-discovery').Discovery
   shoppingTrace?: import('./metered-shopper').ShoppingTrace
   suggestion?: { product: Product; looks: Look[]; unlockCount: number; unlockBasis?: 'ai_reviewed_sample' | 'structural_sample'; evaluatedCount?: number }
   clarification?: 'category' | 'budget' | 'intent'
