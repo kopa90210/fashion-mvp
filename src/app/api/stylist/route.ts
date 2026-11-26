@@ -5,6 +5,7 @@ import { createClient } from '@/src/lib/supabase/server'
 import { readCatalog } from '@/src/lib/stylist/catalog'
 import { classifyWithGemini } from '@/src/lib/stylist/gemini'
 import { resolveIntent, type Collection, type Intent } from '@/src/lib/stylist/intent'
+import { discoveryGap } from '@/src/lib/stylist/discovery-gap'
 import { discoveryEnabled, discoverRetailerLeads } from '@/src/lib/stylist/product-discovery'
 import { recommendations } from '@/src/lib/stylist/recommend'
 import { reserveStylistQuota, beginStylistAi, finishStylistAi } from '@/src/lib/stylist/quota'
@@ -81,9 +82,10 @@ export async function POST(request: Request) {
     const discoveryIntent: Intent = daily
       ? {mode:'shop',occasion:context.signals?.primaryOccasion==='work-university'?'work':context.signals?.primaryOccasion==='going-out'?'going-out':'everyday',role:null,budget}
       : {...explicit,budget:explicit.budget===null?budget:budget===null?explicit.budget:Math.min(explicit.budget,budget)}
+    if(daily) discoveryIntent.role=discoveryGap(context,discoveryIntent)
     if (requestId && context.items.length && catalog.length===0 && discoveryEnabled() &&
         process.env.ENABLE_METERED_SHOPPER_AI==='true' && discoveryIntent.mode==='shop' &&
-        (daily||discoveryIntent.role!==null) && discoveryIntent.budget!==null && discoveryIntent.budget>0) {
+        discoveryIntent.role!==null && discoveryIntent.budget!==null && discoveryIntent.budget>0) {
       metrics.stage('provider')
       const allowed=await reserveStylistQuota(user.id,'gemini_daily')
       const discovery=allowed?await discoverRetailerLeads(discoveryIntent,collection):{status:'unavailable' as const,leads:[]}
