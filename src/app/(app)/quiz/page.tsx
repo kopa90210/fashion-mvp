@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import {cookies} from 'next/headers'
 import {draftKey,parseDraft} from '@/src/lib/quiz/progress'
+import {onboardingDestination} from '@/src/lib/auth/onboarding'
 import {readQuizSignals} from '@/src/lib/quiz/scoring'
 import { CATALOG_COLLECTIONS, catalogSelectionHref, parseCatalogCollection } from '@/src/lib/quiz/catalog-collection'
 import { createClient } from '@/src/lib/supabase/server'
@@ -26,6 +27,7 @@ export default async function QuizPage({
     redirect('/login')
   }
 
+  if(await onboardingDestination(supabase,data.user.id)==='/outfits')redirect('/outfits')
   const params = await searchParams
   const raw=(await cookies()).get(draftKey(data.user.id))?.value
   const browserDraft=parseDraft(raw)
