@@ -10,6 +10,8 @@ import {
   getRankedPieces,
   searchPieces,
   saveWardrobeSelection,
+  finalizeOnboardingSelection,
+  addCuratedWardrobePieces,
   type PendingOwnedSelection,
 } from '@/src/app/actions/wardrobe'
 import { CATALOG_COLLECTIONS } from '@/src/lib/quiz/catalog-collection'
@@ -19,8 +21,10 @@ import { STYLE_SELECTION_COPY } from './selection-copy'
 
 const EMPTY_ITEMS: CuratedItem[] = []
 
-export default function PieceSelectionScreen({ pending, collection }: { pending: PendingOwnedSelection; collection: QuizImagePreference }) {
+export default function PieceSelectionScreen({ pending, collection,mode='onboarding',ownedIds=[] }: { pending: PendingOwnedSelection; collection: QuizImagePreference;mode?:'onboarding'|'wardrobe';ownedIds?:string[] }) {
   const router = useRouter()
+  const ownedSet=useMemo(()=>new Set(ownedIds),[ownedIds])
+  const submitLock=useRef(false)
   const selectionSteps = getSelectionSteps(collection)
   const [currentStepIndex, setCurrentStepIndex] = useState(0)
   const [selections, setSelections] = useState<Record<string, Set<string>>>(() => {
@@ -202,6 +206,7 @@ export default function PieceSelectionScreen({ pending, collection }: { pending:
   }
 
   const persistSelection = (next: Record<string, Set<string>>) => {
+    if(mode==='wardrobe')return
     const ids = Object.values(next).flatMap((set) => Array.from(set))
     saveQueue.current = saveQueue.current.then(async () => {
       const result = await saveWardrobeSelection(ids, versionRef.current)
@@ -229,9 +234,9 @@ export default function PieceSelectionScreen({ pending, collection }: { pending:
     return rawDisplayItems.filter((item) => {
       if (seen.has(item.id)) return false
       seen.add(item.id)
-      return !currentSelectedIds.has(item.id)
+      return !currentSelectedIds.has(item.id)&&!ownedSet.has(item.id)
     })
-  }, [rawDisplayItems, currentSelectedIds])
+  }, [rawDisplayItems, currentSelectedIds,ownedSet])
 
   // Move focus to adjacent card or rail action when a focused card disappears
   useEffect(() => {
@@ -266,7 +271,7 @@ export default function PieceSelectionScreen({ pending, collection }: { pending:
 
   // One-tap piece selection directly from rail
   const handleSelectPiece = (item: CuratedItem, index: number) => {
-    if (isSubmitting || currentSelectedIds.has(item.id)) return
+    if (isSubmitting || ownedSet.has(item.id)||currentSelectedIds.has(item.id)||totalSelectedCount>=100) return
 
     // If the card was focused (e.g. keyboard navigation), determine adjacent card to focus next
     const isCardFocused = document.activeElement?.id === `card-piece-${item.id}`
@@ -322,6 +327,8 @@ export default function PieceSelectionScreen({ pending, collection }: { pending:
   }
 
   const handleSubmit = async () => {
+    if(submitLock.current)return
+    submitLock.current=true
     setSubmitError(null)
     setIsSubmitting(true)
 
@@ -331,13 +338,20 @@ export default function PieceSelectionScreen({ pending, collection }: { pending:
     )
 
     try {
+      if(mode==='wardrobe'){
+        await addCuratedWardrobePieces(allSelectedIds)
+        router.push('/wardrobe')
+        return
+      }
       await saveQueue.current
       const result = await saveWardrobeSelection(allSelectedIds, versionRef.current)
       versionRef.current = result.version
       setSelectionVersion(result.version)
-      router.push('/outfits/calibration')
+      await finalizeOnboardingSelection(result.version)
+      router.push('/outfits')
     } catch (err) {
       console.error('Failed to submit style selection:', err)
+      submitLock.current=false
       setIsSubmitting(false)
       setSubmitError('We could not save your selections. Please try again.')
     }
@@ -525,7 +539,7 @@ export default function PieceSelectionScreen({ pending, collection }: { pending:
                   <div className="flex min-h-[220px] flex-col items-center justify-center rounded-2xl border border-[#38383D] bg-[#1E1E21] text-center p-6 space-y-3">
                     <p className="text-sm font-medium text-[#B5B0A8]">
                       {rawDisplayItems.length > 0
-                        ? 'All shown pieces are in your hand.'
+                        ? 'All shown pieces are selected or already in your wardrobe.'
                         : searchQuery.trim()
                           ? `No ${currentStep.label.toLowerCase()} match "${searchQuery}".`
                           : `No items in this category for this collection yet.`}
@@ -704,7 +718,7 @@ export default function PieceSelectionScreen({ pending, collection }: { pending:
             </button>
           </div>
         </div>
-        {isFinalStep && <p className="mx-auto mt-2 max-w-4xl text-right text-xs text-[#B5B0A8]/60">Your selected pieces will be added to your wardrobe after calibration.</p>}
+        {isFinalStep && <p className="mx-auto mt-2 max-w-4xl text-right text-xs text-[#B5B0A8]/60">Your selected pieces will be added to your wardrobe.</p>}
       </div>
     </div>
   )

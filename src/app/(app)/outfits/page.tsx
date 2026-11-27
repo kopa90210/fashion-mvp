@@ -1,7 +1,8 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/src/lib/supabase/server'
-import { getDailyOutfit, shouldShowOutfitCalibration } from '@/src/app/actions/outfit'
+import { getDailyOutfit } from '@/src/app/actions/outfit'
+import {onboardingDestination} from '@/src/lib/auth/onboarding'
 import { getFashionDnaSummary } from '@/src/app/actions/fashion-dna'
 import { getUserWardrobeItems } from '@/src/app/actions/wardrobe'
 import { isOutfitSaved } from '@/src/app/actions/profile'
@@ -13,9 +14,7 @@ export default async function OutfitsPage() {
   const { data, error } = await supabase.auth.getUser()
   if (error || !data?.user) redirect('/login')
 
-  if (await shouldShowOutfitCalibration()) {
-    redirect('/outfits/calibration')
-  }
+  if(await onboardingDestination(supabase,data.user.id)==='/quiz')redirect('/quiz')
 
   const [outfit, dnaSummary, ownedItems] = await Promise.all([
     getDailyOutfit(),

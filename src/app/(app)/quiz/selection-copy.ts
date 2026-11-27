@@ -5,6 +5,6 @@ export const STYLE_SELECTION_COPY = {
   continueWithCount: (count: number) => `Continue with ${count} pieces`,
   emptySelection: 'None of these',
   eligibilityError: 'Please try saving your selection again.',
-  submitTitle: 'Preparing your style check...',
-  submitBody: 'Your selected pieces will be added to your wardrobe after calibration.',
+  submitTitle: 'Preparing your wardrobe...',
+  submitBody: 'Your selected pieces will be added to your wardrobe.',
 } as const
