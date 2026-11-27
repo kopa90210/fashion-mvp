@@ -29,6 +29,10 @@ describe('stylist behavior evaluation', () => {
     ['بنطلون تحت ٨٩٩٫٥٠ جنيه', 899],
     ['بنطلون تحت ۱۵۰۰ جنيه', 1499],
     ['under 1 EGP', 0],
+    ['عايز اشتري قميص جديد يكون سعره 1000',1000],
+    ['قميص سعره ١٠٠٠',1000],
+    ['عايز حاجة في حدود ٢٠٠٠',2000],
+    ['سعره 1000 وأقل من 800 جنيه',799],
   ])('respects written budget: %s', (question, amount) => {
     expect(explicitBudget(question)).toBe(amount)
   })
