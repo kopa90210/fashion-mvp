@@ -16,7 +16,7 @@ function validProductUrl(url: URL): boolean {
 const MAX_AGE_MS = 48 * 60 * 60 * 1000
 export type Product = {
   id: string; title: string; brand: (typeof shops)[keyof typeof shops]; url: string; priceEgp: number
-  checkedAt: string; collection: Collection | 'shared'; role: Gap; occasions: Occasion[]; styleTags: Partial<StyleVector>
+  imageUrl?: string; liveVerified?: boolean; checkedAt: string; collection: Collection | 'shared'; role: Gap; occasions: Occasion[]; styleTags: Partial<StyleVector>
 }
 
 export type CatalogDiagnostics = { input: 'missing' | 'invalid' | 'ok'; total: number; accepted: number; invalidFields: number; staleOrInvalidDate: number; invalidOrDuplicateUrl: number }
