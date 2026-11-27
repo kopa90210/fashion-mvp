@@ -86,6 +86,16 @@ export async function POST(request: Request) {
     const discoveryIntent: Intent = daily
       ? {mode:'shop',occasion:context.signals?.primaryOccasion==='work-university'?'work':context.signals?.primaryOccasion==='going-out'?'going-out':'everyday',role:null,budget}
       : {...explicit,budget:explicit.budget===null?budget:budget===null?explicit.budget:Math.min(explicit.budget,budget)}
+    const ownedFallback=async()=>{
+      const intent:Intent={...discoveryIntent,mode:'restyle'}
+      const base=recommendations(context,[],intent,collection)
+      if(!requestId||!context.items.length||process.env.ENABLE_METERED_STYLIST_AI!=='true')return base
+      try{
+        const {styleOwned}=await import('@/src/lib/stylist/metered-stylist')
+        const styled=await styleOwned({userId:user.id,requestId,question:question||'Create distinct wearable outfits using my existing wardrobe.',collection,context,intent,singleAttempt:true})
+        return styled.result
+      }catch{return base}
+    }
     const liveEnabled=discoveryEnabled()
     const inferredGap=discoveryIntent.mode==='shop'&&discoveryIntent.role===null
     let gapSource='DETERMINISTIC_ONLY'
@@ -99,7 +109,7 @@ export async function POST(request: Request) {
         discoveryIntent.role=gap.role;gapSource=gap.source;criteria=gap.criteria
         console.info(JSON.stringify({event:'stylist.gap',source:gapSource,role:gap.role,hasCriteria:!!criteria}))
         if(!gap.role){
-          const owned=recommendations(context,[],{...discoveryIntent,mode:'restyle'},collection)
+          const owned=await ownedFallback()
           return respond({...owned,explanation:[/[\u0600-\u06ff]/.test(question)?'مفيش إضافة واضحة تستاهل الشراء دلوقتي بناءً على البيانات المتاحة.':'No worthwhile purchase category was identified from the available wardrobe evidence.']},200,'success')
         }
       }
@@ -128,7 +138,7 @@ export async function POST(request: Request) {
         return respond({...result,discovery,explanation:[...gapAdvice,...(result.explanation??[])]},200,'success')
       }
       metrics.stage('recommendation')
-      return respond({...recommendations(context,catalog,discoveryIntent,collection,daily),discovery,explanation:[...gapAdvice,arabic?'مفيش منتج اتأكدنا من سعره وتوفره؛ مش هنرشح شراء قبل التحقق.':'No product offer was verified. We cannot recommend a purchase yet.']},200,'success')
+      return respond({...await ownedFallback(),discovery,explanation:[...gapAdvice,arabic?'مفيش منتج اتأكدنا من سعره وتوفره؛ مش هنرشح شراء قبل التحقق.':'No product offer was verified. We cannot recommend a purchase yet.']},200,'success')
     }
     if (daily && requestId && context.items.length && process.env.ENABLE_METERED_SHOPPER_AI === 'true') {
       metrics.stage('provider')
