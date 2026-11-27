@@ -5,6 +5,11 @@ const shops = {
   'www.lcwaikiki.eg': 'LC Waikiki',
   'www.defacto.com.eg': 'DeFacto',
   'concrete.store': 'Concrete',
+  'shop.iravin.com': 'Ravin',
+  'townteam.com': 'Town Team',
+  'or-egypt.com': 'OR',
+  'www.mobaco.com': 'Mobaco',
+  'rasport.store': 'RA Sport',
 } as const
 // Reject obvious navigation, account and redirect paths; this is not live verification.
 function validProductUrl(url: URL): boolean {
