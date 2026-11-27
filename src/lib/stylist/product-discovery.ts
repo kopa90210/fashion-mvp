@@ -7,7 +7,7 @@ export type RetailerLead = { title:string; url:string; retailer:string }
 export type Discovery = { status:'ok'|'unavailable'|'disabled'; leads:RetailerLead[] }
 const categories = {base_layer:'shirts tops',bottom:'trousers chinos',one_piece:'dresses jumpsuits',footwear:'shoes',outerwear:'jackets coats'} as const
 export function discoveryQuery(intent:Intent,collection:Collection):string {
- return [collection==='masculine'?'men':'women',intent.role?categories[intent.role]:'clothing wardrobe basics',intent.occasion,'Egypt', 'product', 'EGP', 'under '+intent.budget+' EGP'].join(' ')
+ return [collection==='masculine'?'adult men':'adult women',intent.role?categories[intent.role]:'clothing wardrobe basics',intent.occasion,'Egypt', 'product', '-kids -boys -girls -teens', 'EGP', 'under '+intent.budget+' EGP'].join(' ')
 }
 export function normalizeLeads(raw:unknown, intent?:Intent, collection?:Collection):RetailerLead[] {
  if(!raw||typeof raw!=='object'||!('results' in raw)||!Array.isArray(raw.results))return []
