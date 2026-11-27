@@ -1,6 +1,7 @@
 import { recommendOutfits,isValidOutfitStructure,type WardrobeItem } from '@/src/lib/outfit/engine'
 import { searchCatalog,type Product } from './catalog'
 import { gaps,type Intent,type Collection } from './intent'
+import { suitableOutfit } from './fashion-quality'
 import { redundancyPenalty,type StylistContext,type Look } from './recommend'
 export type CandidateLook={id:string;items:WardrobeItem[]}
 export type ShopCandidate={product:Product;looks:CandidateLook[];penalty:number}
@@ -15,14 +16,14 @@ export function shopCandidates(ctx:StylistContext,catalog:Product[],intent:Inten
  const occasion={work:'work-university','going-out':'going-out',everyday:'everyday-errands'} as const
  const signals=ctx.signals?{...ctx.signals,primaryOccasion:occasion[intent.occasion]}:null
  return products.flatMap(product=>{
-  if(names.has(name(product.title)))return []
+  if(names.has(name(product.title))||redundancyPenalty(ctx.items,product)>=.8)return []
   const anchor='catalog:'+product.id
   const candidate:WardrobeItem={id:anchor,display_name:product.title,image_url:null,layer_role:product.role,style_tags:product.styleTags}
   const pool=new Set(owned.map(i=>i.id))
   const seen=new Set<string>()
   const looks:CandidateLook[]=[]
   for(const o of recommendOutfits([...owned,candidate],ctx.dna,{topN:8,anchorItemId:anchor,signals})){
-   if(!isValidOutfitStructure(o.items)||!o.items.some(i=>i.id===anchor)||o.items.some(i=>i.id!==anchor&&!pool.has(i.id)))continue
+   if(!suitableOutfit(o.items)||!isValidOutfitStructure(o.items)||!o.items.some(i=>i.id===anchor)||o.items.some(i=>i.id!==anchor&&!pool.has(i.id)))continue
    const key=o.items.map(i=>i.id).sort().join('|')
    if(seen.has(key))continue
    seen.add(key);looks.push({id:'look-'+looks.length,items:o.items})
