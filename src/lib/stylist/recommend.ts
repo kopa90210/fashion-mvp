@@ -5,7 +5,7 @@ import { attributeOverlap,suitableOutfit } from './fashion-quality'
 import { gaps, type Collection, type Intent } from './intent'
 
 export type StylistContext = { items: WardrobeItem[]; dna: StyleVector; signals: QuizSignals | null }
-export type Look = { pieces: { name: string; owned: boolean }[] }
+export type Look = { origin?: 'ai_selected' | 'deterministic'; pieces: { name: string; owned: boolean }[] }
 export type Result = {
   status: 'restyle' | 'shop' | 'clarify' | 'no-match' | 'empty'
   looks: Look[]
