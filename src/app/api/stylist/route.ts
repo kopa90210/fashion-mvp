@@ -6,9 +6,9 @@ import { readCatalog } from '@/src/lib/stylist/catalog'
 import { classifyWithGemini } from '@/src/lib/stylist/gemini'
 import { resolveIntent, type Collection, type Intent } from '@/src/lib/stylist/intent'
 import type {PurchaseCriteria} from '@/src/lib/stylist/purchase-criteria'
-import { enabledMerchants,searchAuthorizedMerchants } from '@/src/lib/stylist/merchant-search'
+import { parseShoppingSizes,requestedSize } from '@/src/lib/stylist/shopping-sizes'
 import { discoveryGap } from '@/src/lib/stylist/discovery-gap'
-import { discoveryEnabled, discoverRetailerLeads } from '@/src/lib/stylist/product-discovery'
+import { discoveryEnabled, discoverRetailerLeads,pilotRetailerHosts } from '@/src/lib/stylist/product-discovery'
 import { recommendations } from '@/src/lib/stylist/recommend'
 import { reserveStylistQuota, beginStylistAi, finishStylistAi } from '@/src/lib/stylist/quota'
 import { loadStylistWardrobe } from '@/src/lib/stylist/wardrobe'
@@ -63,6 +63,8 @@ export async function POST(request: Request) {
   if (budget !== null && (typeof budget !== 'number' || !Number.isInteger(budget) || budget < 1 || budget > 100_000)) {
     return respond({ error: 'Enter a whole EGP budget between 1 and 100,000' }, 400, 'invalid_input')
   }
+  const sizes=parseShoppingSizes(input.sizes)
+  if(!sizes)return respond({error:'Enter a standard clothing or shoe size, such as M, W32 or EU 42.'},400,'invalid_input')
   const requestId = request.headers.get('Idempotency-Key')
   if ((!daily || process.env.ENABLE_METERED_SHOPPER_AI === 'true') && (!requestId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(requestId))) {
     return respond({ error: 'A valid Idempotency-Key is required' }, 400, 'invalid_input')
@@ -77,15 +79,14 @@ export async function POST(request: Request) {
     }
     metrics.stage('wardrobe')
     const context = await loadStylistWardrobe(supabase, user.id)
-    const catalog = readCatalog(process.env.STYLIST_CATALOG_JSON)
+    const catalog = readCatalog(process.env.STYLIST_CATALOG_JSON).filter(p=>pilotRetailerHosts.some(host=>host===new URL(p.url).hostname))
     // Explicit shopping uses one discovery reservation and at most three model attempts.
     // Unverified leads never enter the recommendation engine.
     const explicit = resolveIntent(question, null)
     const discoveryIntent: Intent = daily
       ? {mode:'shop',occasion:context.signals?.primaryOccasion==='work-university'?'work':context.signals?.primaryOccasion==='going-out'?'going-out':'everyday',role:null,budget}
       : {...explicit,budget:explicit.budget===null?budget:budget===null?explicit.budget:Math.min(explicit.budget,budget)}
-    const merchantEnabled=enabledMerchants().length>0
-    const liveEnabled=merchantEnabled||discoveryEnabled()
+    const liveEnabled=discoveryEnabled()
     const inferredGap=discoveryIntent.mode==='shop'&&discoveryIntent.role===null
     let gapSource='DETERMINISTIC_ONLY'
     let criteria:PurchaseCriteria|null=null
@@ -107,17 +108,18 @@ export async function POST(request: Request) {
     const arabic=/[\u0600-\u06ff]/.test(question)
     const arLabels={base_layer:'قطع علوية',bottom:'بناطيل',one_piece:'فساتين',footwear:'أحذية',outerwear:'جاكيتات'} as const
     const gapAdvice=inferredGap&&discoveryIntent.role ? [arabic?`هنبحث عن ${arLabels[discoveryIntent.role]} بناءً على عدد التركيبات الممكنة من هدومك. ده ترشيح مبدئي للفئة، مش تأكيد إنك محتاج تشتري.`:`Search priority: ${labels[discoveryIntent.role]}, based on ${gapSource==='PRIMARY_AI'?'AI wardrobe assessment and structural eligibility':'structural wardrobe opportunities'}. This is a category hypothesis, not proof that you need a purchase.`] : []
+    const size=requestedSize(sizes,discoveryIntent.role)
+    if(size)gapAdvice.push(arabic?`المقاس المطلوب: ${size}. لازم تتأكد من توفره عند المتجر.`:`Preferred size: ${size}. Availability in this size must be checked with the retailer.`)
     if(criteria){const terms=[criteria.color,criteria.material,criteria.subtype].filter(Boolean).join(' ');if(terms)gapAdvice.push(arabic?`مواصفات البحث المقترحة: ${terms}`:`Suggested search criteria: ${terms}.`)}
     if (requestId && context.items.length && catalog.length===0 && liveEnabled &&
         process.env.ENABLE_METERED_SHOPPER_AI==='true' && discoveryIntent.mode==='shop' &&
         discoveryIntent.role!==null && discoveryIntent.budget!==null && discoveryIntent.budget>0) {
       metrics.stage('provider')
       const allowed=await reserveStylistQuota(user.id,'gemini_daily')
-      const merchantProducts=allowed&&merchantEnabled?await searchAuthorizedMerchants(discoveryIntent,collection):[]
-      const discovery=allowed&&!merchantProducts.length&&discoveryEnabled()?await discoverRetailerLeads(discoveryIntent,collection,fetch,criteria):{status:'unavailable' as const,leads:[]}
+      const discovery=allowed&&discoveryEnabled()?await discoverRetailerLeads(discoveryIntent,collection,fetch,criteria):{status:'unavailable' as const,leads:[]}
       const {verifyRetailerProducts}=await import('@/src/lib/stylist/retailer-verification')
-      const verified=merchantProducts.length?merchantProducts:await verifyRetailerProducts(discovery.leads,discoveryIntent,collection)
-      console.info(JSON.stringify({event:'stylist.retailer_verification',discovered:discovery.leads.length,verified:verified.length,merchantVerified:merchantProducts.length}))
+      const verified=await verifyRetailerProducts(discovery.leads,discoveryIntent,collection)
+      console.info(JSON.stringify({event:'stylist.retailer_verification',discovered:discovery.leads.length,verified:verified.length}))
       if(verified.length){
         const {meteredShopper}=await import('@/src/lib/stylist/metered-shopper')
         const result=await meteredShopper({userId:user.id,requestId,context,catalog:verified,intent:discoveryIntent,collection,daily,singleAttempt:true})
