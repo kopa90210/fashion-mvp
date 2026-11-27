@@ -83,7 +83,7 @@ export async function POST(request: Request) {
       ? {mode:'shop',occasion:context.signals?.primaryOccasion==='work-university'?'work':context.signals?.primaryOccasion==='going-out'?'going-out':'everyday',role:null,budget}
       : {...explicit,budget:explicit.budget===null?budget:budget===null?explicit.budget:Math.min(explicit.budget,budget)}
     const inferredGap=discoveryIntent.mode==='shop'&&discoveryIntent.role===null
-    if(inferredGap) discoveryIntent.role=discoveryGap(context,discoveryIntent)
+    if(inferredGap) discoveryIntent.role=discoveryGap(context,discoveryIntent,collection)
     const labels={base_layer:'tops',bottom:'trousers',one_piece:'dresses',footwear:'shoes',outerwear:'jackets'} as const
     const gapAdvice=inferredGap&&discoveryIntent.role ? [`Consider ${labels[discoveryIntent.role]} first: this category offers a strong structural opportunity for new outfits with your current wardrobe. This is not yet a verified product recommendation.`] : []
     if (requestId && context.items.length && catalog.length===0 && discoveryEnabled() &&
