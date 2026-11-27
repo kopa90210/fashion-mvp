@@ -1,7 +1,9 @@
 'use client'
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState, useTransition } from 'react'
 import { Sparkles, X } from 'lucide-react'
+import {QUIZ_SIGNAL_DEFINITIONS} from '@/src/lib/profile/quiz-signals'
+import {editQuizPreference} from '@/src/app/(app)/quiz/actions'
 import type { ProfileStylePassport } from '@/src/lib/profile/types'
 
 export interface StylePassportDialogProps {
@@ -15,6 +17,14 @@ export default function StylePassportDialog({
   passport,
   onClose,
 }: StylePassportDialogProps) {
+  const [pending,startTransition]=useTransition()
+  const editing=useRef(false)
+  const [saveError,setSaveError]=useState('')
+  const changePreference=(key:string,value:string)=>{
+    if(editing.current)return
+    editing.current=true;setSaveError('')
+    startTransition(async()=>{try{await editQuizPreference(key,value)}catch{setSaveError('Could not save preference. Please try again.')}finally{editing.current=false}})
+  }
   const dialogRef = useRef<HTMLDivElement>(null)
   const closeButtonRef = useRef<HTMLButtonElement>(null)
   const previousFocusRef = useRef<HTMLElement | null>(null)
@@ -173,11 +183,12 @@ export default function StylePassportDialog({
                         {signal.label}
                       </dt>
                       <dd className="mt-1 text-sm font-medium text-[#1D1B18]">
-                        {signal.valueLabel}
+                        <select aria-label={'Edit '+signal.label} className="w-full rounded bg-transparent text-sm font-medium text-[#1D1B18] focus-visible:outline-2 focus-visible:outline-[#1D1B18]" value={signal.valueKey} disabled={pending} onChange={e=>changePreference(signal.key,e.target.value)}>{Object.entries(QUIZ_SIGNAL_DEFINITIONS.find(d=>d.key===signal.key)?.options??{[signal.valueKey]:signal.valueLabel}).map(([id,label])=><option key={id} value={id}>{label}</option>)}</select>
                       </dd>
                     </div>
                   ))}
                 </dl>
+                {saveError&&<p role="alert" className="mt-2 text-xs text-[#6D6257]">{saveError}</p>}
               </div>
             ) : (
               <div className="border-t border-[#E4DBD0] pt-4 text-xs italic text-[#6D6257]">
