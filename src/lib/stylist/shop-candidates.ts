@@ -46,3 +46,36 @@ export function materializeLooks(candidate:ShopCandidate,ids:string[]):Look[]{
  const selected=new Set(ids)
  return candidate.looks.filter(l=>selected.has(l.id)).map(l=>({pieces:l.items.map(i=>({name:i.display_name,owned:i.id!=='catalog:'+candidate.product.id}))}))
 }
+
+/** AI constructs looks; this boundary accepts only canonical owned IDs plus one product. */
+export function shoppingWardrobe(ctx:StylistContext,intent:Intent):WardrobeItem[]{
+ const range={work:[0.3,1],'going-out':[0.25,1],everyday:[0,0.8]}[intent.occasion]
+ const roles=new Set(['base_layer','bottom','one_piece','footwear','outerwear','accessory'])
+ return [...new Map(ctx.items.filter(i=>i.id&&!i.id.startsWith('catalog:')&&i.display_name?.trim()&&roles.has(i.layer_role)&&
+ (typeof i.formality_score!=='number'||!Number.isFinite(i.formality_score)||(i.formality_score>=range[0]&&i.formality_score<=range[1]))).map(i=>[i.id,i])).values()].sort((a,b)=>a.id.localeCompare(b.id)).slice(0,250)
+}
+export function validateCreativeShoppingLooks(raw:unknown,owned:WardrobeItem[],product:Product):{outfits:string[][]}|null{
+ if(!raw||typeof raw!=='object')return null
+ const outfits=(raw as Record<string,unknown>).outfits
+ if(!Array.isArray(outfits)||outfits.length>4)return null
+ const anchor='catalog:'+product.id
+ const candidate:WardrobeItem={id:anchor,display_name:product.title,image_url:null,layer_role:product.role,style_tags:product.styleTags}
+ const pool=new Map(owned.filter(i=>!i.id.startsWith('catalog:')).map(i=>[i.id,i]))
+ pool.set(anchor,candidate)
+ const seen=new Set<string>()
+ const result:string[][]=[]
+ for(const ids of outfits){
+  if(!Array.isArray(ids)||ids.length<2||ids.length>5||!ids.every(id=>typeof id==='string'&&pool.has(id))||new Set(ids).size!==ids.length||!ids.includes(anchor))return null
+  const items=ids.map(id=>pool.get(id)!)
+  if(!isValidOutfitStructure(items)||!suitableOutfit(items))return null
+  const key=JSON.stringify(items.filter(i=>i.id===anchor||['base_layer','bottom','one_piece','footwear'].includes(i.layer_role)).map(i=>i.id).sort())
+  if(seen.has(key))return null
+  seen.add(key);result.push(ids)
+ }
+ return {outfits:result}
+}
+export function materializeCreativeShoppingLooks(outfits:string[][],owned:WardrobeItem[],product:Product):Look[]{
+ const pool=new Map(owned.map(i=>[i.id,i.display_name]))
+ const anchor='catalog:'+product.id
+ return outfits.map(ids=>({origin:'ai_selected',pieces:ids.map(id=>({name:id===anchor?product.title:pool.get(id)!,owned:id!==anchor}))}))
+}
