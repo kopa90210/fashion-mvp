@@ -76,18 +76,31 @@ export async function POST(request: Request) {
     metrics.stage('wardrobe')
     const context = await loadStylistWardrobe(supabase, user.id)
     const catalog = readCatalog(process.env.STYLIST_CATALOG_JSON)
-    // Explicit shopping uses one discovery reservation and at most two model attempts.
+    // Explicit shopping uses one discovery reservation and at most three model attempts.
     // Unverified leads never enter the recommendation engine.
     const explicit = resolveIntent(question, null)
     const discoveryIntent: Intent = daily
       ? {mode:'shop',occasion:context.signals?.primaryOccasion==='work-university'?'work':context.signals?.primaryOccasion==='going-out'?'going-out':'everyday',role:null,budget}
       : {...explicit,budget:explicit.budget===null?budget:budget===null?explicit.budget:Math.min(explicit.budget,budget)}
     const inferredGap=discoveryIntent.mode==='shop'&&discoveryIntent.role===null
-    if(inferredGap) discoveryIntent.role=discoveryGap(context,discoveryIntent,collection)
+    let gapSource='DETERMINISTIC_ONLY'
+    if(inferredGap){
+      discoveryIntent.role=discoveryGap(context,discoveryIntent,collection)
+      if(requestId&&context.items.length&&catalog.length===0&&discoveryEnabled()&&process.env.ENABLE_METERED_SHOPPER_AI==='true'&&discoveryIntent.budget!==null&&discoveryIntent.budget>0){
+        const {meteredGap}=await import('@/src/lib/stylist/metered-gap')
+        const gap=await meteredGap({userId:user.id,requestId,context,intent:{...discoveryIntent,role:null},collection,question})
+        if(!gap)return respond({error:'Wardrobe analysis is still processing. Try again shortly.',code:'STYLIST_BUSY'},409,'busy')
+        discoveryIntent.role=gap.role;gapSource=gap.source
+        if(!gap.role){
+          const owned=recommendations(context,[],{...discoveryIntent,mode:'restyle'},collection)
+          return respond({...owned,explanation:[/[\u0600-\u06ff]/.test(question)?'مفيش إضافة واضحة تستاهل الشراء دلوقتي بناءً على البيانات المتاحة.':'No worthwhile purchase category was identified from the available wardrobe evidence.']},200,'success')
+        }
+      }
+    }
     const labels={base_layer:'tops',bottom:'trousers',one_piece:'dresses',footwear:'shoes',outerwear:'jackets'} as const
     const arabic=/[\u0600-\u06ff]/.test(question)
     const arLabels={base_layer:'قطع علوية',bottom:'بناطيل',one_piece:'فساتين',footwear:'أحذية',outerwear:'جاكيتات'} as const
-    const gapAdvice=inferredGap&&discoveryIntent.role ? [arabic?`هنبحث عن ${arLabels[discoveryIntent.role]} بناءً على عدد التركيبات الممكنة من هدومك. ده ترشيح مبدئي للفئة، مش تأكيد إنك محتاج تشتري.`:`Search priority: ${labels[discoveryIntent.role]}, based on structural wardrobe opportunities. This is a category hypothesis, not proof that you need a purchase.`] : []
+    const gapAdvice=inferredGap&&discoveryIntent.role ? [arabic?`هنبحث عن ${arLabels[discoveryIntent.role]} بناءً على عدد التركيبات الممكنة من هدومك. ده ترشيح مبدئي للفئة، مش تأكيد إنك محتاج تشتري.`:`Search priority: ${labels[discoveryIntent.role]}, based on ${gapSource==='PRIMARY_AI'?'AI wardrobe assessment and structural eligibility':'structural wardrobe opportunities'}. This is a category hypothesis, not proof that you need a purchase.`] : []
     if (requestId && context.items.length && catalog.length===0 && discoveryEnabled() &&
         process.env.ENABLE_METERED_SHOPPER_AI==='true' && discoveryIntent.mode==='shop' &&
         discoveryIntent.role!==null && discoveryIntent.budget!==null && discoveryIntent.budget>0) {
