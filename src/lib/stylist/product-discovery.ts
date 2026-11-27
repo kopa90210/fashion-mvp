@@ -3,7 +3,8 @@ import type { Intent, Collection } from './intent'
 import {validateCriteria,type PurchaseCriteria} from './purchase-criteria'
 import { adultLead } from './fashion-quality'
 
-const hosts = ['www.defacto.com.eg','www.lcwaikiki.eg','concrete.store'] as const
+export const pilotRetailerHosts = ['www.defacto.com.eg','www.lcwaikiki.eg'] as const
+const hosts = pilotRetailerHosts
 export type RetailerLead = { title:string; url:string; retailer:string }
 export type Discovery = { status:'ok'|'unavailable'|'disabled'; leads:RetailerLead[] }
 const categories = {base_layer:'shirts tops',bottom:'trousers chinos',one_piece:'dresses jumpsuits',footwear:'shoes',outerwear:'jackets coats'} as const
@@ -21,8 +22,7 @@ export function normalizeLeads(raw:unknown, intent?:Intent, collection?:Collecti
   if(u.protocol!=='https:'||u.username||u.password||u.port||u.search||u.hash||!hosts.some(h=>h===u.hostname))continue
   if(/%(?:2f|5c|00|2e)/i.test(u.pathname))continue
   // Require known product-shaped paths; do not accept search/category pages.
-  const productPath=u.hostname==='concrete.store'? /^\/products\/[a-z0-9][a-z0-9-]+\/?$/i.test(u.pathname)
-    : /(?:^|\/)[^/]+-\d{5,}\/?$/i.test(u.pathname)
+  const productPath=/(?:^|\/)[^/]+-\d{5,}\/?$/i.test(u.pathname)
   if(!productPath||/(?:^|\/)(?:login|account|cart|checkout|redirect|search|collections|category|categories)(?:\/|$)/i.test(u.pathname))continue
   const title=entry.title.trim().slice(0,160)
   if(!title||found.has(u.href)||(intent&&collection&&!adultLead(title,u.href,collection,intent.role)))continue
