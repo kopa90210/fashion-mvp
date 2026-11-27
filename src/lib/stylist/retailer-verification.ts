@@ -32,7 +32,18 @@ export function productFromHtml(html:string,lead:RetailerLead,intent:Intent,coll
  const prices=eligible.map(o=>typeof o.price==='number'?o.price:typeof o.price==='string'&&/^\d+(\.\d{1,2})?$/.test(o.price)?Number(o.price):NaN)
  if(!prices.length||prices.some(v=>!Number.isFinite(v)||v<=0)||new Set(prices).size!==1||prices[0]>intent.budget)return null
  const result=readCatalog(JSON.stringify([{id:createHash('sha256').update(lead.url).digest('hex').slice(0,32),title:p.name,url:lead.url,priceEgp:prices[0],currency:'EGP',stock:'in_stock',checkedAt:new Date(now).toISOString(),collection,role:intent.role,occasions:[intent.occasion],styleTags:{}}]),now)[0]
- return result??null
+ if(!result)return null
+ const imageValue=Array.isArray(p.image)?p.image[0]:p.image
+ let imageUrl:string|undefined
+ if(typeof imageValue==='string'&&imageValue.length<=1000){
+  try{
+   const u=new URL(imageValue,lead.url)
+   // Restrict direct browser image requests to retailer-owned domains or the retailer's documented CDN hostname.
+   const allowed=u.hostname==='www.defacto.com.eg'||u.hostname==='dfcdn.defacto.com.tr'||u.hostname==='www.lcwaikiki.eg'||u.hostname==='concrete.store'
+   if(allowed&&u.protocol==='https:'&&!u.username&&!u.password&&!u.port&&/\.(?:jpg|jpeg|png|webp)$/i.test(u.pathname))imageUrl=u.href
+  }catch{/* no image is better than an untrusted URL */}
+ }
+ return {...result,liveVerified:true,...(imageUrl?{imageUrl}:{})}
 }
 export async function verifyRetailerProducts(leads:RetailerLead[],intent:Intent,collection:Collection,fetcher:typeof fetch=fetch):Promise<Product[]>{
  const verified=await Promise.all(leads.slice(0,3).map(async lead=>{
