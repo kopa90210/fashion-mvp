@@ -1,5 +1,4 @@
 import StylistSearch from './StylistSearch'
-import WardrobeIntelligence from './WardrobeIntelligence'
 
 export default function SearchPage() {
   if (process.env.ENABLE_STYLIST !== 'true') {
@@ -15,9 +14,8 @@ export default function SearchPage() {
   return (
     <main className="mx-auto max-w-5xl px-5 pb-12 pt-8 text-[#1d1b18] sm:px-8 sm:pt-14 font-[family-name:var(--font-geist-sans,system-ui)]">
       <h1 className="mt-3 font-serif text-5xl tracking-tight sm:text-7xl">The Style Edit.</h1>
-      <p className="mt-3 max-w-md text-[#6d6257]">Restyle what you own. Find one piece worth adding when you need it.</p>
+      <p className="mt-3 max-w-md text-[#6d6257]">Your wardrobe, your style. Ask what to wear or discover a useful addition with daily research.</p>
       <StylistSearch />
-      {(process.env.ENABLE_WARDROBE_INTELLIGENCE==='true'||process.env.ENABLE_STYLE_TRANSFORMATION==='true')&&<WardrobeIntelligence analysis={process.env.ENABLE_WARDROBE_INTELLIGENCE==='true'} transformation={process.env.ENABLE_STYLE_TRANSFORMATION==='true'}/>}
     </main>
   )
 }
