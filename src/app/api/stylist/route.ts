@@ -76,8 +76,8 @@ export async function POST(request: Request) {
     metrics.stage('wardrobe')
     const context = await loadStylistWardrobe(supabase, user.id)
     const catalog = readCatalog(process.env.STYLIST_CATALOG_JSON)
-    // Empty-catalog discovery is a separate, deterministic lead-only path.
-    // No model calls occur on this path; charge the shared durable daily quota before search.
+    // Explicit shopping uses one discovery reservation and at most two model attempts.
+    // Unverified leads never enter the recommendation engine.
     const explicit = resolveIntent(question, null)
     const discoveryIntent: Intent = daily
       ? {mode:'shop',occasion:context.signals?.primaryOccasion==='work-university'?'work':context.signals?.primaryOccasion==='going-out'?'going-out':'everyday',role:null,budget}
@@ -89,6 +89,16 @@ export async function POST(request: Request) {
       metrics.stage('provider')
       const allowed=await reserveStylistQuota(user.id,'gemini_daily')
       const discovery=allowed?await discoverRetailerLeads(discoveryIntent,collection):{status:'unavailable' as const,leads:[]}
+      const {verifyRetailerProducts}=await import('@/src/lib/stylist/retailer-verification')
+      const verified=await verifyRetailerProducts(discovery.leads,discoveryIntent,collection)
+      console.info(JSON.stringify({event:'stylist.retailer_verification',discovered:discovery.leads.length,verified:verified.length}))
+      if(verified.length){
+        const {meteredShopper}=await import('@/src/lib/stylist/metered-shopper')
+        const result=await meteredShopper({userId:user.id,requestId,context,catalog:verified,intent:discoveryIntent,collection,daily,singleAttempt:true})
+        if(!result)return respond({error:'Shopping decision unavailable or still processing. Try again shortly.',code:'STYLIST_BUSY'},409,'busy')
+        metrics.stage('recommendation')
+        return respond({...result,discovery},200,'success')
+      }
       metrics.stage('recommendation')
       return respond({...recommendations(context,catalog,discoveryIntent,collection,daily),discovery},200,'success')
     }
