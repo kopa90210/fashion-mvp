@@ -31,6 +31,7 @@ export default function StylistSearch() {
   const [question, setQuestion] = useState('')
   const [shoppingOptionsOpen, setShoppingOptionsOpen] = useState(false)
   const [budget, setBudget] = useState('')
+  const [sizes,setSizes]=useState({top:'',bottom:'',shoe:''})
   const [collection, setCollection] = useState<Collection>('masculine')
   const [result, setResult] = useState<Result | null>(null)
   const [pending, setPending] = useState(false)
@@ -62,7 +63,7 @@ export default function StylistSearch() {
     setResult(null)
     setError('')
     try {
-      const body = JSON.stringify({ view, ...(view === 'ask' ? { question } : {}), collection, budget: budget ? Number(budget) : null })
+      const body = JSON.stringify({ view, ...(view === 'ask' ? { question } : {}), collection, budget: budget ? Number(budget) : null, ...(view==='daily'?{sizes}:{}) })
       if (retry.current?.body !== body) retry.current = { body, key: crypto.randomUUID() }
       const r = await fetch('/api/stylist', {
         method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': retry.current.key }, body, signal: ticket.signal,
@@ -85,13 +86,14 @@ export default function StylistSearch() {
           <option value="masculine">Men’s</option><option value="feminine">Women’s</option>
         </select>
       </label>
-      <label className="text-sm">Budget in EGP (optional)
+      <label className="text-sm">{view==='daily'?'Maximum budget (EGP)':'Budget in EGP (optional)'}
         <input className={'mt-1 block min-h-11 w-full max-w-44 rounded-xl border border-[#d8cec2] px-3 ' + focus} type="number"
-          min={1} max={100000} step={1} value={budget} disabled={pending}
+          min={1} max={100000} step={1} required={view==='daily'} value={budget} disabled={pending}
           onChange={(e) => { invalidateInputs(); setBudget(e.target.value) }} />
       </label>
     </div>
   )
+  const sizeFields=<fieldset className="space-y-2"><legend className="text-sm font-medium">Your usual sizes</legend><div className="grid grid-cols-3 gap-2">{(['top','bottom','shoe'] as const).map(key=><label key={key} className="text-xs">{{top:'Tops / jackets',bottom:'Bottoms',shoe:'Shoes (EU)'}[key]}<input className={'mt-1 block min-h-11 w-full rounded-xl border border-[#d8cec2] px-2 '+focus} value={sizes[key]} maxLength={12} placeholder={{top:'M',bottom:'32',shoe:'42'}[key]} disabled={pending} onChange={e=>{invalidateInputs();setSizes(old=>({...old,[key]:e.target.value}))}}/></label>)}</div><p className="text-xs text-[#6d6257]">Optional preferences. Retailer size availability must be confirmed separately.</p></fieldset>
   return (
     <div className="mt-6">
       <div className="inline-flex gap-1 rounded-full bg-[#ebe3d8] p-1" aria-label="Stylist views" role="group">
@@ -103,8 +105,8 @@ export default function StylistSearch() {
       </div>
       <form className={`mt-4 space-y-4 ${panel}`} onSubmit={submit}>
         <div>
-          <h2 className="font-serif text-3xl">{view === 'ask' ? 'What are you dressing for?' : 'Refresh your wardrobe'}</h2>
-          <p className="mt-2 text-sm text-[#6d6257]">{view === 'ask' ? 'Ask about an outfit or a piece you want to buy.' : 'See a look you already own. Set a budget to look for one useful addition.'}</p>
+          <h2 className="font-serif text-3xl">{view === 'ask' ? 'What are you dressing for?' : 'Your daily shopping research'}</h2>
+          <p className="mt-2 text-sm text-[#6d6257]">{view === 'ask' ? 'Ask about an outfit or a piece you want to buy.' : 'Set your budget and usual sizes. We research useful additions based on your wardrobe and style.'}</p>
         </div>
         {view === 'ask' && <>
           <label className="block text-sm">Your question
@@ -117,16 +119,16 @@ export default function StylistSearch() {
               onClick={() => updateQuestion(text)}>{text}</button>)}
           </div>
         </>}
-        {view === 'daily' ? shoppingFields : (
+        {view === 'daily' ? <>{shoppingFields}{sizeFields}</> : (
           <details open={shoppingOptionsOpen} onToggle={(event) => setShoppingOptionsOpen(event.currentTarget.open)}>
             <summary className={'flex min-h-11 w-fit cursor-pointer items-center gap-2 rounded-lg px-1 text-sm underline underline-offset-4 ' + focus}>Shopping options</summary>
             {shoppingFields}
           </details>
         )}
         <button type="submit" aria-disabled={pending} className={'min-h-11 rounded-full bg-[#1d1b18] px-5 text-sm text-[#fffdfa] aria-disabled:cursor-wait ' + focus}>
-          {error ? 'Try again' : view === 'ask' ? 'Ask Stylist' : 'Show my finds'}
+          {error ? 'Try again' : view === 'ask' ? 'Ask Stylist' : 'Research for me'}
         </button>
-        <p role="status" className={pending ? 'text-sm text-[#6d6257]' : 'sr-only'}>{pending ? 'Putting looks together…' : ''}</p>
+        <p role="status" className={pending ? 'text-sm text-[#6d6257]' : 'sr-only'}>{pending ? view==='daily'?'Researching useful wardrobe additions…':'Putting looks together…' : ''}</p>
       </form>
       <div className="mt-4 space-y-4" aria-live="polite" aria-busy={pending}>
         {error && <p role="alert" className={panel}>{error}</p>}
@@ -175,7 +177,7 @@ export default function StylistSearch() {
           {result.suggestion.product.imageUrl && <div className="mt-3 overflow-hidden rounded-2xl bg-[#f7f4ef]"><img src={result.suggestion.product.imageUrl} alt={result.suggestion.product.title} referrerPolicy="no-referrer" loading="lazy" className="mx-auto h-64 max-w-full object-contain" /></div>}
           <h4 dir="auto" className="mt-2 font-medium">{result.suggestion.product.title}</h4>
           <p className="mt-2 text-sm">{result.suggestion.product.brand} · {Intl.NumberFormat('en-EG', { style: 'currency', currency: 'EGP' }).format(result.suggestion.product.priceEgp)}</p>
-          {result.suggestion.unlockBasis && <p className="mt-3 text-sm">{result.suggestion.unlockCount} {result.suggestion.unlockBasis==='ai_reviewed_sample'?'AI-reviewed compatible':'structurally valid'} looks among {result.suggestion.evaluatedCount} sampled combinations. Not a total wardrobe unlock estimate.</p>}
+          {result.suggestion.unlockBasis && <p className="mt-3 text-sm">{result.suggestion.unlockCount} {result.suggestion.unlockBasis==='ai_reviewed_sample'?'AI-generated, structurally validated':'structurally valid'} looks. Not a total wardrobe unlock estimate.</p>}
           <p className="my-3 text-sm text-[#6d6257]">Ways to wear it with pieces you own.</p>
           <div className="grid gap-2 sm:grid-cols-2">{result.suggestion.looks.map((look, i) => <LookCard key={i} look={look} />)}</div>
           <a className={'mt-4 inline-flex min-h-11 items-center rounded-full border border-[#d8cec2] px-4 text-sm ' + focus} href={result.suggestion.product.url} target="_blank" rel="noopener noreferrer">View at {result.suggestion.product.brand} ↗</a>
