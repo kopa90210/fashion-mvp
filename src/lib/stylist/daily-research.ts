@@ -35,7 +35,7 @@ export function researchTtl(result:Result):number{
  if(result.discovery?.status==='unavailable'||result.discovery?.status==='disabled')return 300
  if(result.suggestion){
   const remaining=Math.floor((Date.parse(result.suggestion.product.checkedAt)+48*3600000-Date.now())/1000)
-  return Math.max(0,Math.min(21600,remaining))
+  return Number.isFinite(remaining)?Math.max(0,Math.min(21600,remaining)):0
  }
  return 21600
 }
