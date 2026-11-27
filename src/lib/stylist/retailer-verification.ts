@@ -1,6 +1,7 @@
 import 'server-only'
 import {createHash} from 'node:crypto'
 import {readCatalog,type Product} from './catalog'
+import {adultLead} from './fashion-quality'
 import {normalizeLeads,type RetailerLead} from './product-discovery'
 import type {Collection,Intent} from './intent'
 
@@ -19,7 +20,7 @@ export function productFromHtml(html:string,lead:RetailerLead,intent:Intent,coll
  const products=nodes.filter(n=>n['@type']==='Product'||(Array.isArray(n['@type'])&&n['@type'].includes('Product')))
  if(products.length!==1)return null
  const p=products[0]
- if(typeof p.name!=='string'||!roles[intent.role].test(p.name)||p.name.length>100)return null
+ if(typeof p.name!=='string'||!adultLead(p.name,lead.url,collection,intent.role)||!roles[intent.role].test(p.name)||p.name.length>100)return null
  // Require explicit collection evidence, not the search query.
  const gender=typeof p.audience==='object'&&object(p.audience)?p.audience.suggestedGender:null
  const evidence=String(gender??'')+' '+p.name
