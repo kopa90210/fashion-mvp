@@ -1,5 +1,6 @@
 import 'server-only'
 import type { Intent, Collection } from './intent'
+import { adultLead } from './fashion-quality'
 
 const hosts = ['www.defacto.com.eg','www.lcwaikiki.eg','concrete.store'] as const
 export type RetailerLead = { title:string; url:string; retailer:string }
@@ -8,7 +9,7 @@ const categories = {base_layer:'shirts tops',bottom:'trousers chinos',one_piece:
 export function discoveryQuery(intent:Intent,collection:Collection):string {
  return [collection==='masculine'?'men':'women',intent.role?categories[intent.role]:'clothing wardrobe basics',intent.occasion,'Egypt', 'product', 'EGP', 'under '+intent.budget+' EGP'].join(' ')
 }
-export function normalizeLeads(raw:unknown):RetailerLead[] {
+export function normalizeLeads(raw:unknown, intent?:Intent, collection?:Collection):RetailerLead[] {
  if(!raw||typeof raw!=='object'||!('results' in raw)||!Array.isArray(raw.results))return []
  const found=new Map<string,RetailerLead>()
  for(const entry of raw.results.slice(0,8)){
@@ -22,7 +23,7 @@ export function normalizeLeads(raw:unknown):RetailerLead[] {
     : /(?:^|\/)[^/]+-\d{5,}\/?$/i.test(u.pathname)
   if(!productPath||/(?:^|\/)(?:login|account|cart|checkout|redirect|search|collections|category|categories)(?:\/|$)/i.test(u.pathname))continue
   const title=entry.title.trim().slice(0,160)
-  if(!title||found.has(u.href))continue
+  if(!title||found.has(u.href)||(intent&&collection&&!adultLead(title,u.href,collection,intent.role)))continue
   found.set(u.href,{title,url:u.href,retailer:u.hostname})
  }
  return [...found.values()].slice(0,5)
@@ -35,7 +36,7 @@ export async function discoverRetailerLeads(intent:Intent,collection:Collection,
  try{
   const res=await fetcher('https://api.tavily.com/search',{method:'POST',redirect:'error',cache:'no-store',signal:AbortSignal.timeout(5000),headers:{Authorization:'Bearer '+process.env.TAVILY_API_KEY,'Content-Type':'application/json'},body:JSON.stringify({query:discoveryQuery(intent,collection),search_depth:'basic',auto_parameters:false,max_results:8,include_domains:hosts,include_answer:false,include_raw_content:false})})
   if(!res.ok){console.info(JSON.stringify({event:'stylist.discovery',status:'provider_error',httpStatus:res.status}));return {status:'unavailable',leads:[]}}
-  const leads=normalizeLeads(await res.json())
+  const leads=normalizeLeads(await res.json(),intent,collection)
   console.info(JSON.stringify({event:'stylist.discovery',status:'ok',count:leads.length}))
   return {status:'ok',leads}
  }catch{console.info(JSON.stringify({event:'stylist.discovery',status:'unavailable'}));return {status:'unavailable',leads:[]}}
