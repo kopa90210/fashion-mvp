@@ -46,7 +46,7 @@ export function explicitBudget(question: string): number | null {
     .replace(/[۰-۹]/g, (digit) => String(digit.charCodeAt(0) - '۰'.charCodeAt(0)))
     .replace(/[,٬](?=\d{3}(?!\d))/g, '')
     .replace(/٫/g, '.')
-  const limits = [...text.matchAll(/(?:under|below|up to|max(?:imum)?|تحت|أقل من|اقل من|حتى|لحد|ميزانيتي|بميزانية)\s*([\d]+)(?:\s*\.(\d+))?/gi)]
+  const limits = [...text.matchAll(/(?:under|below|up to|max(?:imum)?|تحت|أقل من|اقل من|حتى|لحد|ميزانيتي|بميزانية|في حدود|فى حدود|سعر(?:ه|ها)?(?:\s*يكون)?|بحد أقصى|بحد اقصى)\s*([\d]+)(?:\s*\.(\d+))?/gi)]
   const amounts = [...text.matchAll(/([\d]+)(?:\s*\.(\d+))?\s*(?:egp|جنيه)/gi)]
   const matches = [...limits, ...amounts]
   if (!matches.length) return null
