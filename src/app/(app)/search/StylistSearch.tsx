@@ -150,7 +150,7 @@ export default function StylistSearch() {
             <a href={lead.url} target="_blank" rel="noopener noreferrer" className={'mt-2 inline-flex min-h-11 items-center underline '+focus}>View retailer page ↗</a>
           </li>)}</ul>
         </section>}
-        {!!result?.looks.length && <section className={panel}><h3 className="mb-3 font-serif text-2xl">Restyle what you own</h3>{result.looks.map((look, i) => <div key={i} className="mt-3"><p className="mb-1 text-xs font-medium">{i===0?'Recommended look':`Alternative ${i}`}</p><LookCard look={look}/></div>)}</section>}
+        {!!result?.looks.length && <section className={panel}><h3 className="mb-3 font-serif text-2xl">Restyle what you own</h3>{result.looks.map((look, i) => <div key={i} className="mt-3"><p className="mb-1 text-xs font-medium">{i===0?'Recommended look':`Alternative ${i}`} {look.origin==='ai_selected'?' · AI styled':look.origin==='deterministic'?' · Rules-based fallback':''}</p><LookCard look={look}/></div>)}</section>}
         {result?.provenance && <details className={panel}>
           <summary className="cursor-pointer text-sm font-medium">Generation Inspector</summary>
           <div className="mt-3 space-y-3 text-xs text-[#6d6257]">
