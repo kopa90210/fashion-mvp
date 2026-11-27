@@ -18,7 +18,7 @@ describe('retailer discovery',()=>{
   expect(discoveryEnabled({...env,VERCEL_GIT_COMMIT_REF:'main'})).toBe(false)
   expect(discoveryEnabled({...env,NEXT_PUBLIC_SUPABASE_URL:'https://other.supabase.co'})).toBe(false)
  })
- it('builds a normalized category and budget query',()=>expect(discoveryQuery(intent,'masculine')).toBe('men trousers chinos work Egypt product EGP under 1499 EGP'))
+ it('builds a normalized category and budget query',()=>expect(discoveryQuery(intent,'masculine')).toBe('adult men trousers chinos work Egypt product -kids -boys -girls -teens EGP under 1499 EGP'))
  it('makes exactly one bounded basic search and handles provider rejection',async()=>{
   for(const [k,v] of Object.entries(env))vi.stubEnv(k,v)
   const fetcher=vi.fn<typeof fetch>().mockResolvedValueOnce(new Response(JSON.stringify({results:[good]}))).mockResolvedValueOnce(new Response('',{status:429}))
