@@ -11,7 +11,8 @@ import {saveShoppingPreferences} from '@/src/lib/stylist/shopping-preferences-se
 import { parseShoppingSizes,requestedSize } from '@/src/lib/stylist/shopping-sizes'
 import { discoveryGap } from '@/src/lib/stylist/discovery-gap'
 import { discoveryEnabled, discoverRetailerLeads,pilotRetailerHosts } from '@/src/lib/stylist/product-discovery'
-import { recommendations } from '@/src/lib/stylist/recommend'
+import {claimResearch,finishResearch,researchFingerprint} from '@/src/lib/stylist/daily-research'
+import { recommendations,type Result } from '@/src/lib/stylist/recommend'
 import { reserveStylistQuota, beginStylistAi, finishStylistAi } from '@/src/lib/stylist/quota'
 import { loadStylistWardrobe } from '@/src/lib/stylist/wardrobe'
 
@@ -45,7 +46,17 @@ async function readInput(request: Request): Promise<Record<string, unknown> | nu
 export async function POST(request: Request) {
   const metrics = createStylistMetrics()
   let preferencesSaved:boolean|undefined
-  const respond = (data: unknown, status: number, outcome: Outcome) => { metrics.finish(status, outcome); return json(status===200&&preferencesSaved!==undefined&&data&&typeof data==='object'?{...data,preferencesSaved}:data, status) }
+  let researchClaim:{userId:string;token:string}|null=null
+  const respond = async (data: unknown, status: number, outcome: Outcome) => {
+    if(researchClaim){
+      const claim=researchClaim;researchClaim=null
+      const result=status===200&&data&&typeof data==='object'&&'looks' in data?data as Result:null
+      const saved=await finishResearch(claim.userId,claim.token,result).catch(()=>false)
+      if(result)data={...result,researchCached:false,researchSaved:saved}
+    }
+    metrics.finish(status, outcome)
+    return json(status===200&&preferencesSaved!==undefined&&data&&typeof data==='object'?{...data,preferencesSaved}:data,status)
+  }
   try {
   if (process.env.ENABLE_STYLIST !== 'true') return respond({ error: 'Stylist is not enabled' }, 404, 'disabled')
   const origin = request.headers.get('origin')
@@ -88,6 +99,12 @@ export async function POST(request: Request) {
     metrics.stage('wardrobe')
     const context = await loadStylistWardrobe(supabase, user.id)
     const catalog = readCatalog(process.env.STYLIST_CATALOG_JSON).filter(p=>pilotRetailerHosts.some(host=>host===new URL(p.url).hostname))
+    if(daily&&preferencesEnabled()&&context.items.length){
+      const claim=await claimResearch(user.id,researchFingerprint(context,collection,budget,sizes,catalog,discoveryEnabled()))
+      if(claim.status==='busy')return respond({error:'Your daily research is already running or cooling down. Try again shortly.',code:'STYLIST_BUSY'},409,'busy')
+      if(claim.status==='completed')return respond({...claim.result,researchCached:true,researchCheckedAt:claim.checkedAt},200,'success')
+      researchClaim={userId:user.id,token:claim.token}
+    }
     // Explicit shopping uses one discovery reservation and at most three model attempts.
     // Unverified leads never enter the recommendation engine.
     const explicit = resolveIntent(question, null)
