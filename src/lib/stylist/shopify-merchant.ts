@@ -7,20 +7,21 @@ import type {Intent,Collection} from './intent'
 export const merchantHosts={ravin:'shop.iravin.com',townteam:'townteam.com',or:'or-egypt.com',concrete:'concrete.store',mobaco:'www.mobaco.com',rasport:'rasport.store'} as const
 export type MerchantId=keyof typeof merchantHosts
 const names={ravin:'Ravin',townteam:'Town Team',or:'OR',concrete:'Concrete',mobaco:'Mobaco',rasport:'RA Sport'} as const
-export type MerchantOffer=Omit<Product,'brand'>&{brand:typeof names[MerchantId]}
+export type MerchantOffer=Product
 type Obj=Record<string,unknown>
 const obj=(v:unknown):v is Obj=>!!v&&typeof v==='object'&&!Array.isArray(v)
 export function normalizeMerchantProducts(raw:unknown,merchant:MerchantId,intent:Intent,collection:Collection,now=Date.now()):MerchantOffer[]{
- if(!intent.role||!intent.budget||intent.budget<1||!obj(raw)||!obj(raw.data)||!obj(raw.data.products)||!Array.isArray(raw.data.products.nodes)||raw.errors)return []
+ if(!intent.role||!intent.budget||!Number.isFinite(intent.budget)||intent.budget<1||!obj(raw)||!obj(raw.data)||!obj(raw.data.products)||!Array.isArray(raw.data.products.nodes)||raw.errors)return []
  const host=merchantHosts[merchant],seen=new Set<string>(),out:MerchantOffer[]=[]
  for(const p of raw.data.products.nodes.slice(0,20)){
-  if(!obj(p)||typeof p.id!=='string'||!/^gid:\/\/shopify\/Product\/\d+$/.test(p.id)||typeof p.title!=='string'||p.title.length>100||typeof p.handle!=='string'||!(/^[a-z0-9][a-z0-9-]{0,150}$/).test(p.handle)||p.availableForSale!==true)continue
+  if(!obj(p)||typeof p.id!=='string'||!/^gid:\/\/shopify\/Product\/\d+$/.test(p.id)||typeof p.title!=='string'||!p.title.trim()||p.title.length>100||typeof p.handle!=='string'||!(/^[a-z0-9][a-z0-9-]{0,150}$/).test(p.handle)||p.availableForSale!==true)continue
   const url='https://'+host+'/products/'+p.handle
   if(p.onlineStoreUrl!==url||!adultLead(p.title,url,collection,intent.role)||seen.has(p.id))continue
   const evidence=p.title+' '+String(p.productType??'')+' '+(Array.isArray(p.tags)?p.tags.filter(x=>typeof x==='string').join(' '):'')
   const male=/\b(men|man|male|mens)\b/i.test(evidence),female=/\b(women|woman|female|womens|ladies)\b/i.test(evidence)
   if(!adultLead(evidence,url,collection,intent.role)||(collection==='masculine'?(!male||female):(!female||male)))continue
   if(!obj(p.variants)||!Array.isArray(p.variants.nodes)||!obj(p.variants.pageInfo)||p.variants.pageInfo.hasNextPage!==false)continue
+  if(p.variants.nodes.some(v=>!obj(v)||typeof v.availableForSale!=='boolean'))continue
   const variants=p.variants.nodes.filter(obj).filter(v=>v.availableForSale===true)
   const prices=variants.map(v=>obj(v.price)&&v.price.currencyCode==='EGP'&&typeof v.price.amount==='string'&&/^\d+(\.\d{1,2})?$/.test(v.price.amount)?Number(v.price.amount):NaN)
   if(!prices.length||prices.some(v=>!Number.isFinite(v)||v<=0||v>intent.budget!)||new Set(prices).size!==1)continue
