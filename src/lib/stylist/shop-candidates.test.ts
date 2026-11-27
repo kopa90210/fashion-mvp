@@ -43,7 +43,7 @@ describe('AI creative shopping boundary',()=>{
  const product=catalog[0],anchor='catalog:p1'
  const first=['t1',anchor,'s1'],second=['t2',anchor,'s1']
  it('accepts distinct original outfits',()=>expect(validateCreativeShoppingLooks({outfits:[first,second]},items,product)).toEqual({outfits:[first,second]}))
- it.each([[['t1',anchor,'foreign']],[['t1','b1','s1']],[['t1',anchor,anchor,'s1']],[first,[...first].reverse()],[['t1','t2',anchor,'s1']]])('rejects unsupported combinations %j',(outfits)=>expect(validateCreativeShoppingLooks({outfits},items,product)).toBeNull())
+ it.each([[['t1',anchor,'foreign']],[['t1','b1','s1']],[['t1',anchor,anchor,'s1']],[first,[...first].reverse()],[['t1','t2',anchor,'s1']]].map(outfits=>({outfits})))('rejects unsupported combinations %j',({outfits})=>expect(validateCreativeShoppingLooks({outfits},items,product)).toBeNull())
  it('rejects accessory-only variations',()=>{
  const owned=[...items,{id:'a1',display_name:'Belt',layer_role:'accessory' as const,image_url:null,style_tags:{}}]
  expect(validateCreativeShoppingLooks({outfits:[first,[...first,'a1']]},owned,product)).toBeNull()
