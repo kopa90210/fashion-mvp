@@ -11,7 +11,7 @@ const mocks = vi.hoisted(() => ({
   clicks: new Map<string, () => void>(), tasks: [] as Promise<void>[], effects: [] as (() => void | (() => void))[],
   redirect: vi.fn((path: string) => { throw new Error('REDIRECT:' + path) }),
 }))
-vi.mock('@/src/lib/supabase/server', () => ({ createClient: async () => ({ auth: { getUser: mocks.getUser } }) }))
+vi.mock('@/src/lib/supabase/server', () => ({ createClient: async () => ({ auth: { getUser: mocks.getUser }, from:()=>({select:()=>({eq:()=>({maybeSingle:async()=>({data:{has_completed_calibration:!(await mocks.calibration())},error:null})})})}) }) }))
 vi.mock('react', async (importOriginal) => {
   const original = await importOriginal<typeof import('react')>()
   return { ...original, useTransition: () => [false, (callback: () => Promise<void>) => { mocks.tasks.push(callback()) }], useEffect: (fn: () => void | (() => void)) => { mocks.effects.push(fn) } }
@@ -390,7 +390,7 @@ describe('Today presentation', () => {
   })
 })
 
-describe('Today server orchestration remains unchanged', () => {
+describe('Today server orchestration after direct onboarding', () => {
   it('redirects signed-out visitors before querying wardrobe or generating outfits', async () => {
     mocks.getUser.mockResolvedValue({ data: { user: null }, error: null })
     await expect(OutfitsPage()).rejects.toThrow('REDIRECT:/login')
@@ -398,9 +398,9 @@ describe('Today server orchestration remains unchanged', () => {
     expect(mocks.daily).not.toHaveBeenCalled()
     expect(mocks.owned).not.toHaveBeenCalled()
   })
-  it('preserves the calibration redirect before daily generation', async () => {
+  it('routes unfinished accounts to onboarding before daily generation', async () => {
     mocks.calibration.mockResolvedValue(true)
-    await expect(OutfitsPage()).rejects.toThrow('REDIRECT:/outfits/calibration')
+    await expect(OutfitsPage()).rejects.toThrow('REDIRECT:/quiz')
     expect(mocks.daily).not.toHaveBeenCalled()
     expect(mocks.owned).not.toHaveBeenCalled()
   })

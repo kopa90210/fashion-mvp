@@ -1,0 +1,25 @@
+name: Dependency audit
+on:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Full dependency audit
+        run: |
+          npx --yes npm@11.6.2 audit --json > audit-all.json || true
+          node -e "const a=require('./audit-all.json'); if(!a.metadata||!a.vulnerabilities) process.exit(1); console.log(JSON.stringify(a.metadata)); for(const [name,v] of Object.entries(a.vulnerabilities)) console.log(name,v.severity,JSON.stringify(v.via),JSON.stringify(v.fixAvailable))"
+      - name: Runtime dependency audit
+        run: npx --yes npm@11.6.2 audit --omit=dev --audit-level=high --json > audit-runtime.json
+      - name: Upload audit evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-audit
+          path: audit-*.json

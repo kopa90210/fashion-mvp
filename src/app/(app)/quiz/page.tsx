@@ -1,4 +1,8 @@
 import Link from 'next/link'
+import {cookies} from 'next/headers'
+import {draftKey,parseDraft} from '@/src/lib/quiz/progress'
+import {onboardingDestination} from '@/src/lib/auth/onboarding'
+import {readQuizSignals} from '@/src/lib/quiz/scoring'
 import { CATALOG_COLLECTIONS, catalogSelectionHref, parseCatalogCollection } from '@/src/lib/quiz/catalog-collection'
 import { createClient } from '@/src/lib/supabase/server'
 import { redirect } from 'next/navigation'
@@ -23,13 +27,22 @@ export default async function QuizPage({
     redirect('/login')
   }
 
+  if(await onboardingDestination(supabase,data.user.id)==='/outfits')redirect('/outfits')
   const params = await searchParams
-  const isDone = params?.done === 'true'
+  const raw=(await cookies()).get(draftKey(data.user.id))?.value
+  const browserDraft=parseDraft(raw)
+  const {data:dna,error:dnaError}=await supabase.from('fashion_dna').select('quiz_signals').eq('user_id',data.user.id).maybeSingle()
+  if(dnaError)throw new Error('Could not load quiz progress')
+  const pending=await getPendingOwnedSelection()
+  if(pending.committed)redirect('/outfits')
+  const isDone = Boolean(readQuizSignals(dna?.quiz_signals))
+  const {data:accountDraft,error:draftError}=await supabase.from('style_quiz_drafts').select('draft,version').eq('user_id',data.user.id).maybeSingle()
+  if(draftError)throw new Error('Could not load account quiz progress')
+  const draft=accountDraft?parseDraft(JSON.stringify(accountDraft.draft)):browserDraft
+  const draftVersion=accountDraft?.version??0
 
   if (isDone) {
-    const pending = await getPendingOwnedSelection()
-    if (pending.committed) redirect('/outfits')
-    const collection = parseCatalogCollection(params.collection)
+    const collection = parseCatalogCollection(params.collection)??draft?.imageSet
     if (!collection) {
       return (
         <main className="stylegraph-quiz-surface flex min-h-[100dvh] flex-col items-center justify-center gap-6 bg-[#141416] px-6 text-center text-[#F5F1E9]">
@@ -48,5 +61,5 @@ export default async function QuizPage({
     return <PieceSelectionScreen key={collection} pending={pending} collection={collection} />
   }
 
-  return <StyleQuiz />
+  return <StyleQuiz userId={data.user.id} initialDraft={draft} initialVersion={draftVersion}/>
 }

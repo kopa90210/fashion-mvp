@@ -69,10 +69,7 @@ select pg_temp.expect_error('insert into public.user_wardrobe_items(user_id,item
 select pg_temp.expect_error('update public.onboarding_owned_selections set committed_at = now()', '42501');
 
 set local role postgres;
-insert into public.preference_events(user_id, event_type, idempotency_key, payload)
-select 'd1000000-0000-0000-0000-000000000001', 'outfit_feedback',
-       'onboarding-check-' || n, '{"source":"calibration"}'::jsonb
-from generate_series(1, 3) n;
+select public.submit_style_quiz('{"minimal":1,"casual":0,"smart_casual":0,"streetwear":0,"classic":0,"old_money":0,"sporty":0,"relaxed":0,"vintage":0,"trend_forward":0,"formal":0,"edgy":0}'::jsonb,null,null,'{"primaryOccasion":"mixed","style":"minimal","fit":"regular","formality":"casual","exploration":"familiar"}'::jsonb);
 update public.wardrobe_items set status = 'rejected' where id = 'd1000000-0000-0000-0000-000000000102';
 set local role authenticated;
 select pg_temp.expect_error('select public.finalize_onboarding_owned_selection(3)', '22023');
@@ -101,10 +98,7 @@ select pg_temp.assert_true((select count(*) = 0 from public.onboarding_owned_sel
 select pg_temp.assert_true((select count(*) = 1 from public.user_wardrobe_items where user_id = 'd1000000-0000-0000-0000-000000000002'), 'other user unchanged');
 select pg_temp.assert_true(public.set_onboarding_owned_selection('{}'::uuid[], 0) = 1, 'empty selection allowed');
 set local role postgres;
-insert into public.preference_events(user_id, event_type, idempotency_key, payload)
-select 'd1000000-0000-0000-0000-000000000002', 'outfit_feedback',
-       'empty-check-' || n, '{"source":"calibration"}'::jsonb
-from generate_series(1, 3) n;
+select public.submit_style_quiz('{"minimal":1,"casual":0,"smart_casual":0,"streetwear":0,"classic":0,"old_money":0,"sporty":0,"relaxed":0,"vintage":0,"trend_forward":0,"formal":0,"edgy":0}'::jsonb,null,null,'{"primaryOccasion":"mixed","style":"minimal","fit":"regular","formality":"casual","exploration":"familiar"}'::jsonb);
 set local role authenticated;
 select pg_temp.assert_true((select item_count = 0 and completed from public.finalize_onboarding_owned_selection(1)), 'empty selection completes with zero new memberships');
 select pg_temp.assert_true((select count(*) = 1 from public.user_wardrobe_items where user_id = 'd1000000-0000-0000-0000-000000000002'), 'empty selection preserves existing clothes');

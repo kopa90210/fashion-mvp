@@ -20,6 +20,8 @@ vi.mock('@/src/app/actions/wardrobe', () => ({
   getRankedPieces: vi.fn().mockResolvedValue({ items: [], hasMore: false }),
   searchPieces: vi.fn().mockResolvedValue([]),
   saveWardrobeSelection: vi.fn().mockResolvedValue({ version: 1 }),
+  finalizeOnboardingSelection:vi.fn(),
+  addCuratedWardrobePieces:vi.fn(),
 }))
 
 // Mock GarmentCard
@@ -149,13 +151,13 @@ describe('PieceSelectionScreen with Category Tabs', () => {
 })
 
 describe('Direct One-Tap Piece Selection Flow', () => {
-  it('excludes selected pieces from the browsing rail and shows "All shown pieces are in your hand."', () => {
+  it('excludes selected pieces from the browsing rail and shows "All shown pieces are selected or already in your wardrobe."', () => {
     const html = renderToStaticMarkup(
       React.createElement(PieceSelectionScreen, { pending: samplePendingWithMultiCategory, collection: 'feminine' }),
     )
 
     // Since both loaded tops ('top-1' and 'top-2') are selected, the rail shows the empty-in-hand notice
-    expect(html).toContain('All shown pieces are in your hand.')
+    expect(html).toContain('All shown pieces are selected or already in your wardrobe.')
     // Hand tray displays the selected pieces
     expect(html).toContain('I own something similar')
     // No preview dialog modal
@@ -197,4 +199,12 @@ describe('Direct One-Tap Piece Selection Flow', () => {
     expect(html).toContain('role="status"')
     expect(html).toContain('aria-live="polite"')
   })
+})
+
+it('reuses the existing picker and excludes previously owned garments in wardrobe mode',()=>{
+ const pending={...samplePendingWithMultiCategory,itemIds:[]}
+ const html=renderToStaticMarkup(React.createElement(PieceSelectionScreen,{pending,collection:'feminine',mode:'wardrobe',ownedIds:['top-1']}))
+ expect(html).not.toContain('aria-label="Select White Tee"')
+ expect(html).toContain('aria-label="Select Silk Blouse"')
+ expect(html).toContain('role="tablist"')
 })

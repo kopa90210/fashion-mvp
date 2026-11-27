@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/src/lib/supabase/server'
+import {onboardingDestination} from '@/src/lib/auth/onboarding'
 import { appOrigin, signupFailure } from '@/src/lib/auth/signup'
 
 export async function login(formData: FormData) {
@@ -13,15 +14,16 @@ export async function login(formData: FormData) {
     password: formData.get('password') as string,
   }
 
-  const { error } = await supabase.auth.signInWithPassword(data)
+  const { data: authData, error } = await supabase.auth.signInWithPassword(data)
 
-  if (error) {
-    console.error('Login error:', error)
+  if (error || !authData?.user) {
+    console.error('Login failed')
     redirect('/login?error=Could not authenticate user')
   }
 
+  const destination=await onboardingDestination(supabase,authData.user.id)
   revalidatePath('/', 'layout')
-  redirect('/quiz')
+  redirect(destination)
 }
 
 export async function signup(formData: FormData) {

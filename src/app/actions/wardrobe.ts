@@ -153,7 +153,7 @@ async function updateWardrobeStatus(itemId: string, status: 'confirmed' | 'rejec
       return { success: true }
     }
   }
-  const { error } = await supabase.from('wardrobe_items').update({ status }).eq('id', itemId)
+  const { error } = await supabase.rpc('set_owned_wardrobe_draft_status', { p_item_id: itemId, p_status: status })
   if (error) throw new Error('Could not update wardrobe item')
   revalidateOwnedWardrobeExperience()
   return { success: true }
@@ -718,4 +718,21 @@ export async function getCuratedPieces(collection: QuizImagePreference): Promise
   }
 
   return grouped
+}
+
+/** Append curated references without altering the customer's existing wardrobe. */
+export async function addCuratedWardrobePieces(itemIds:string[]){
+ if(!Array.isArray(itemIds)||itemIds.length>100||new Set(itemIds).size!==itemIds.length||!itemIds.every(id=>typeof id==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)))throw new Error('Invalid selection')
+ const {supabase}=await getAuthenticatedClient()
+ const {data,error}=await supabase.rpc('add_curated_wardrobe_pieces',{p_item_ids:itemIds})
+ if(error||typeof data!=='number')throw new Error('Could not add selected pieces')
+ revalidateOwnedWardrobeExperience()
+ revalidatePath('/search')
+ return {added:data}
+}
+export async function getOwnedCuratedIds():Promise<string[]>{
+ const {supabase,userId}=await getAuthenticatedClient()
+ const {data,error}=await supabase.from('user_wardrobe_items').select('item_id,wardrobe_items!inner(source,status)').eq('user_id',userId).is('retired_at',null).eq('wardrobe_items.source','curated').eq('wardrobe_items.status','confirmed')
+ if(error)throw new Error('Could not load owned pieces')
+ return (data??[]).map(r=>r.item_id)
 }

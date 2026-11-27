@@ -1,8 +1,8 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
 
-const mocks = vi.hoisted(() => ({ signUp: vi.fn(), signInWithPassword: vi.fn(), verifyOtp: vi.fn(), revalidate: vi.fn() }))
-vi.mock('@/src/lib/supabase/server', () => ({ createClient: async () => ({ auth: mocks }) }))
+const mocks = vi.hoisted(() => ({ signUp: vi.fn(), signInWithPassword: vi.fn(), verifyOtp: vi.fn(), revalidate: vi.fn(), onboarding: vi.fn() }))
+vi.mock('@/src/lib/supabase/server', () => ({ createClient: async () => ({ auth: mocks, from:()=>({select:()=>({eq:()=>({maybeSingle:mocks.onboarding})})}) }) }))
 vi.mock('next/cache', () => ({ revalidatePath: mocks.revalidate }))
 vi.mock('next/navigation', () => ({ redirect: (path: string) => { throw new Error(`REDIRECT:${path}`) } }))
 
@@ -73,10 +73,24 @@ describe('email signup', () => {
   })
 
   it('preserves password login', async () => {
-    mocks.signInWithPassword.mockResolvedValue({ error: null })
+    mocks.signInWithPassword.mockResolvedValue({ data:{user:{id:'test-user'}}, error: null })
+    mocks.onboarding.mockResolvedValue({data:{has_completed_calibration:false},error:null})
     await expect(login(form())).rejects.toThrow('REDIRECT:/quiz')
     expect(mocks.signInWithPassword).toHaveBeenCalledExactlyOnceWith({ email: 'person@example.test', password: 'test-password' })
     expect(mocks.signUp).not.toHaveBeenCalled()
+  })
+
+  it('routes completed accounts directly to outfits after password login',async()=>{
+    mocks.signInWithPassword.mockResolvedValue({data:{user:{id:'returning-user'}},error:null})
+    mocks.onboarding.mockResolvedValue({data:{has_completed_calibration:true},error:null})
+    await expect(login(form())).rejects.toThrow('REDIRECT:/outfits')
+    expect(mocks.onboarding).toHaveBeenCalledOnce()
+  })
+
+  it('does not assume an account is new when onboarding lookup fails',async()=>{
+    mocks.signInWithPassword.mockResolvedValue({data:{user:{id:'returning-user'}},error:null})
+    mocks.onboarding.mockResolvedValue({data:null,error:{message:'unavailable'}})
+    await expect(login(form())).rejects.toThrow('Could not read onboarding status')
   })
 
   it('rejects an unsafe or missing hosted app origin before signup', async () => {

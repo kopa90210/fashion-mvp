@@ -1,7 +1,9 @@
 'use client'
 
-import { useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import Link from 'next/link'
+import { createRequestGuard } from '@/src/lib/stylist/request-guard'
+import type { ShoppingPreferences } from '@/src/lib/stylist/shopping-preferences'
 import type { Collection } from '@/src/lib/stylist/intent'
 import type { Look, Result } from '@/src/lib/stylist/recommend'
 
@@ -25,57 +27,77 @@ function LookCard({ look }: { look: Look }) {
   )
 }
 
-export default function StylistSearch() {
+export default function StylistSearch({initialPreferences=null,persistenceEnabled=false}:{initialPreferences?:ShoppingPreferences|null;persistenceEnabled?:boolean}={}) {
   const [view, setView] = useState<View>('ask')
   const [question, setQuestion] = useState('')
   const [shoppingOptionsOpen, setShoppingOptionsOpen] = useState(false)
-  const [budget, setBudget] = useState('')
-  const [collection, setCollection] = useState<Collection>('masculine')
+  const [budget, setBudget] = useState(initialPreferences?String(initialPreferences.budget):'')
+  const [sizes,setSizes]=useState(initialPreferences?.sizes??{top:'',bottom:'',shoe:''})
+  const [collection, setCollection] = useState<Collection>(initialPreferences?.collection??'masculine')
   const [result, setResult] = useState<Result | null>(null)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState('')
-  const changeView = (next: View) => {
-    if (view !== next) { setView(next); setResult(null); setError('') }
-  }
-  function updateQuestion(value: string) {
-    setQuestion(value)
+  const [preferenceNotice,setPreferenceNotice]=useState(initialPreferences?'Saved shopping preferences loaded.':'')
+  const retry = useRef<{ body: string; key: string } | null>(null)
+  const submitting = useRef(false)
+  const guard = useRef(createRequestGuard())
+  useEffect(() => { const current = guard.current; return () => current.invalidate() }, [])
+  function invalidateInputs() {
+    guard.current.invalidate()
+    submitting.current = false
+    setPending(false)
     setResult(null)
     setError('')
+    setPreferenceNotice('')
+  }
+  const changeView = (next: View) => {
+    if (view !== next) { invalidateInputs(); setView(next) }
+  }
+  function updateQuestion(value: string) {
+    invalidateInputs()
+    setQuestion(value)
   }
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
-    if (pending) return
+    if (submitting.current) return
+    submitting.current = true
+    const ticket = guard.current.begin()
     setPending(true)
     setResult(null)
     setError('')
     try {
+      const body = JSON.stringify({ view, ...(view === 'ask' ? { question } : {}), collection, budget: budget ? Number(budget) : null, ...(view==='daily'?{sizes}:{}) })
+      if (retry.current?.body !== body) retry.current = { body, key: crypto.randomUUID() }
       const r = await fetch('/api/stylist', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ view, ...(view === 'ask' ? { question } : {}), collection, budget: budget ? Number(budget) : null }),
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': retry.current.key }, body, signal: ticket.signal,
       })
       const data = await r.json()
+      if (!ticket.isCurrent()) return
       if (!r.ok) { setError(typeof data.error === 'string' ? data.error : 'Could not load the stylist.'); return }
       if (view === 'ask' && data.clarification === 'budget') setShoppingOptionsOpen(true)
+      retry.current = null
+      if(view==='daily'&&persistenceEnabled)setPreferenceNotice(data.preferencesSaved?'Shopping preferences saved.':'Research completed, but preferences could not be saved.')
       setResult(data)
-    } catch { setError('Could not load the stylist. Try again.') }
-    finally { setPending(false) }
+    } catch { if (ticket.isCurrent()) setError('Could not load the stylist. Try again.') }
+    finally { if (ticket.isCurrent()) { submitting.current = false; setPending(false) } }
   }
   const panel = 'rounded-3xl border border-[#d8cec2] bg-[#fffdfa] p-5 sm:p-6'
   const shoppingFields = (
     <div className="flex flex-wrap gap-3">
       <label className="text-sm">Shop collection
         <select className={'mt-1 block min-h-11 rounded-xl border border-[#d8cec2] px-3 ' + focus} value={collection} disabled={pending}
-          onChange={(e) => { setCollection(e.target.value as Collection); setResult(null) }}>
+          onChange={(e) => { invalidateInputs(); setCollection(e.target.value as Collection) }}>
           <option value="masculine">Men’s</option><option value="feminine">Women’s</option>
         </select>
       </label>
-      <label className="text-sm">Budget in EGP (optional)
+      <label className="text-sm">{view==='daily'?'Maximum budget (EGP)':'Budget in EGP (optional)'}
         <input className={'mt-1 block min-h-11 w-full max-w-44 rounded-xl border border-[#d8cec2] px-3 ' + focus} type="number"
-          min={1} max={100000} step={1} value={budget} disabled={pending}
-          onChange={(e) => { setBudget(e.target.value); setResult(null) }} />
+          min={1} max={100000} step={1} required={view==='daily'} value={budget} disabled={pending}
+          onChange={(e) => { invalidateInputs(); setBudget(e.target.value) }} />
       </label>
     </div>
   )
+  const sizeFields=<fieldset className="space-y-2"><legend className="text-sm font-medium">Your usual sizes</legend><div className="grid grid-cols-3 gap-2">{(['top','bottom','shoe'] as const).map(key=><label key={key} className="text-xs">{{top:'Tops / jackets',bottom:'Bottoms',shoe:'Shoes (EU)'}[key]}<input className={'mt-1 block min-h-11 w-full rounded-xl border border-[#d8cec2] px-2 '+focus} value={sizes[key]} maxLength={12} placeholder={{top:'M',bottom:'32',shoe:'42'}[key]} disabled={pending} onChange={e=>{invalidateInputs();setSizes(old=>({...old,[key]:e.target.value}))}}/></label>)}</div><p className="text-xs text-[#6d6257]">Optional preferences. Retailer size availability must be confirmed separately.</p></fieldset>
   return (
     <div className="mt-6">
       <div className="inline-flex gap-1 rounded-full bg-[#ebe3d8] p-1" aria-label="Stylist views" role="group">
@@ -87,8 +109,8 @@ export default function StylistSearch() {
       </div>
       <form className={`mt-4 space-y-4 ${panel}`} onSubmit={submit}>
         <div>
-          <h2 className="font-serif text-3xl">{view === 'ask' ? 'What are you dressing for?' : 'Refresh your wardrobe'}</h2>
-          <p className="mt-2 text-sm text-[#6d6257]">{view === 'ask' ? 'Ask about an outfit or a piece you want to buy.' : 'See a look you already own. Set a budget to look for one useful addition.'}</p>
+          <h2 className="font-serif text-3xl">{view === 'ask' ? 'What are you dressing for?' : 'Your daily shopping research'}</h2>
+          <p className="mt-2 text-sm text-[#6d6257]">{view === 'ask' ? 'Ask about an outfit or a piece you want to buy.' : 'Set your budget and usual sizes. We research useful additions based on your wardrobe and style.'}</p>
         </div>
         {view === 'ask' && <>
           <label className="block text-sm">Your question
@@ -101,16 +123,16 @@ export default function StylistSearch() {
               onClick={() => updateQuestion(text)}>{text}</button>)}
           </div>
         </>}
-        {view === 'daily' ? shoppingFields : (
+        {view === 'daily' ? <>{shoppingFields}{sizeFields}{persistenceEnabled&&<p className="text-xs text-[#6d6257]">Your budget and sizes are saved to your account when you request research.</p>}{preferenceNotice&&<p role="status" className="text-xs text-[#6d6257]">{preferenceNotice}</p>}</> : (
           <details open={shoppingOptionsOpen} onToggle={(event) => setShoppingOptionsOpen(event.currentTarget.open)}>
             <summary className={'flex min-h-11 w-fit cursor-pointer items-center gap-2 rounded-lg px-1 text-sm underline underline-offset-4 ' + focus}>Shopping options</summary>
             {shoppingFields}
           </details>
         )}
         <button type="submit" aria-disabled={pending} className={'min-h-11 rounded-full bg-[#1d1b18] px-5 text-sm text-[#fffdfa] aria-disabled:cursor-wait ' + focus}>
-          {error ? 'Try again' : view === 'ask' ? 'Ask Stylist' : 'Show my finds'}
+          {error ? 'Try again' : view === 'ask' ? 'Ask Stylist' : 'Research for me'}
         </button>
-        <p role="status" className={pending ? 'text-sm text-[#6d6257]' : 'sr-only'}>{pending ? 'Putting looks together…' : ''}</p>
+        <p role="status" className={pending ? 'text-sm text-[#6d6257]' : 'sr-only'}>{pending ? view==='daily'?'Researching useful wardrobe additions…':'Putting looks together…' : ''}</p>
       </form>
       <div className="mt-4 space-y-4" aria-live="polite" aria-busy={pending}>
         {error && <p role="alert" className={panel}>{error}</p>}
@@ -120,17 +142,50 @@ export default function StylistSearch() {
           category: 'Which piece are you looking for? Try a shirt, trousers, shoes, a dress, or a jacket.',
           budget: 'What is your maximum budget in EGP?',
         }[result.clarification ?? 'intent']}</p>}
-        {result?.status === 'no-match' && <p className={panel}>{result.looks.length
+        {result?.status === 'no-match' && !result.discovery?.leads.length && <p className={panel}>{result.looks.length
           ? 'No checked product matched your request and formed two looks with your pieces.'
           : 'No complete look matched. Add more pieces to your wardrobe and try again.'}</p>}
-        {!!result?.looks.length && <section className={panel}><h3 className="mb-3 font-serif text-2xl">Restyle what you own</h3>{result.looks.map((look, i) => <LookCard key={i} look={look} />)}</section>}
+        {!!result?.explanation?.length && <section className={panel}><h3 className="font-medium">Your stylist’s advice</h3><ul className="mt-2 space-y-1 text-sm">{result.explanation.map((reason,i)=><li key={i} dir="auto">{reason}</li>)}</ul>{result.stylingTip && <p className="mt-3 text-sm" dir="auto">{result.stylingTip}</p>}</section>}
+        {result?.discovery && <section className={panel}>
+          <h3 className="font-serif text-2xl">Retailer search results</h3>
+          <p className="mt-2 text-sm text-[#6d6257]">Discovered product pages, not verified shopping recommendations. Check current price, availability and suitability at the retailer.</p>
+          {result.discovery.status==='unavailable' && <p className="mt-3 text-sm">Retailer search is temporarily unavailable or the testing allowance is exhausted.</p>}
+          {result.discovery.status==='ok' && !result.discovery.leads.length && <p className="mt-3 text-sm">No eligible retailer links were found.</p>}
+          <ul className="mt-3 space-y-3">{result.discovery.leads.map(lead=><li key={lead.url} className="rounded-xl border border-[#d8cec2] p-3">
+            <p className="font-medium" dir="auto">{lead.title}</p><p className="text-xs text-[#6d6257]">{lead.retailer}</p>
+            <a href={lead.url} target="_blank" rel="noopener noreferrer" className={'mt-2 inline-flex min-h-11 items-center underline '+focus}>View retailer page ↗</a>
+          </li>)}</ul>
+        </section>}
+        {!!result?.looks.length && <section className={panel}><h3 className="mb-3 font-serif text-2xl">Restyle what you own</h3>{result.looks.map((look, i) => <div key={i} className="mt-3"><p className="mb-1 text-xs font-medium">{i===0?'Recommended look':`Alternative ${i}`} {look.origin==='ai_selected'?' · AI styled':look.origin==='deterministic'?' · Rules-based fallback':''}</p><LookCard look={look}/></div>)}</section>}
+        {result?.provenance && <details className={panel}>
+          <summary className="cursor-pointer text-sm font-medium">Generation Inspector</summary>
+          <div className="mt-3 space-y-3 text-xs text-[#6d6257]">
+            {([['Intent',result.provenance.intent],['Outfit selection',result.provenance.selection]] as const).map(([label,trace])=><section key={label}>
+              <h4 className="font-medium">{label}: {trace ? trace.source.replaceAll('_',' ') : 'Not executed'}</h4>
+              {trace?.model && <p>{trace.provider} · {trace.model}</p>}
+              {trace?.attempts.map((a,i)=><p key={i}>{a.provider} · {a.model} · {a.outcome} · {a.latencyMs} ms</p>)}
+            </section>)}
+            {result.suggestion && !result.shoppingTrace && <p>Product ranking and unlock count: deterministic</p>}
+          </div>
+        </details>}
+
+        {result?.shoppingTrace && <details className={panel}>
+          <summary className="cursor-pointer text-sm font-medium">Shopping generation trace</summary>
+          {([['Product selection',result.shoppingTrace.product],['Compatibility review',result.shoppingTrace.compatibility]] as const).map(([label,trace])=><section key={label} className="mt-3 text-xs">
+            <h4 className="font-medium">{label}: {trace?.source.replaceAll('_',' ') ?? 'Not executed'}{trace?.cached?' · Cached review (no new compatibility calls)':''}</h4>
+            {trace?.attempts.map((a,i)=><p key={i}>{a.provider} · {a.model} · {a.outcome} · {a.latencyMs} ms</p>)}
+          </section>)}
+          <p className="mt-3 text-xs">Unlock count: deterministic calculation of unique sampled outfits.</p>
+        </details>}
         {result?.suggestion && <section className={panel}><h3 className="font-serif text-2xl">One piece worth adding</h3>
+          {result.suggestion.product.imageUrl && <div className="mt-3 overflow-hidden rounded-2xl bg-[#f7f4ef]"><img src={result.suggestion.product.imageUrl} alt={result.suggestion.product.title} referrerPolicy="no-referrer" loading="lazy" className="mx-auto h-64 max-w-full object-contain" /></div>}
           <h4 dir="auto" className="mt-2 font-medium">{result.suggestion.product.title}</h4>
           <p className="mt-2 text-sm">{result.suggestion.product.brand} · {Intl.NumberFormat('en-EG', { style: 'currency', currency: 'EGP' }).format(result.suggestion.product.priceEgp)}</p>
-          <p className="my-3 text-sm text-[#6d6257]">Two ways to wear it with pieces you own.</p>
+          {result.suggestion.unlockBasis && <p className="mt-3 text-sm">{result.suggestion.unlockCount} {result.suggestion.unlockBasis==='ai_reviewed_sample'?'AI-generated, structurally validated':'structurally valid'} looks. Not a total wardrobe unlock estimate.</p>}
+          <p className="my-3 text-sm text-[#6d6257]">Ways to wear it with pieces you own.</p>
           <div className="grid gap-2 sm:grid-cols-2">{result.suggestion.looks.map((look, i) => <LookCard key={i} look={look} />)}</div>
           <a className={'mt-4 inline-flex min-h-11 items-center rounded-full border border-[#d8cec2] px-4 text-sm ' + focus} href={result.suggestion.product.url} target="_blank" rel="noopener noreferrer">View at {result.suggestion.product.brand} ↗</a>
-          <p className="mt-2 text-xs text-[#6d6257]">Checked {result.suggestion.product.checkedAt.slice(0, 10)}. Confirm price, size and availability at the retailer.</p>
+          <p className="mt-2 text-xs text-[#6d6257]">{result.suggestion.product.liveVerified?'Retailer offer checked':'Catalog recorded'} {result.suggestion.product.checkedAt.slice(0, 10)}. {result.suggestion.product.liveVerified?'Availability is not guaranteed for your size.':'Not live-verified.'} Confirm price, size and availability at the retailer.</p>
         </section>}
       </div>
     </div>

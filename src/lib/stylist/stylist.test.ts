@@ -3,7 +3,7 @@ import type { WardrobeItem } from '@/src/lib/outfit/engine'
 import { readCatalog, searchCatalog } from './catalog'
 import { classifyWithGemini } from './gemini'
 import { explicitBudget, fallbackIntent, resolveIntent, type Intent } from './intent'
-import { recommendations } from './recommend'
+import { recommendations, incrementalUnlockCount, redundancyPenalty } from './recommend'
 
 const now = Date.parse('2026-11-19T08:00:00Z')
 const row = {
@@ -29,6 +29,10 @@ describe('stylist behavior evaluation', () => {
     ['بنطلون تحت ٨٩٩٫٥٠ جنيه', 899],
     ['بنطلون تحت ۱۵۰۰ جنيه', 1499],
     ['under 1 EGP', 0],
+    ['عايز اشتري قميص جديد يكون سعره 1000',1000],
+    ['قميص سعره ١٠٠٠',1000],
+    ['عايز حاجة في حدود ٢٠٠٠',2000],
+    ['سعره 1000 وأقل من 800 جنيه',799],
   ])('respects written budget: %s', (question, amount) => {
     expect(explicitBudget(question)).toBe(amount)
   })
@@ -109,5 +113,48 @@ describe('Gemini provider contract', () => {
       .mockResolvedValueOnce(Response.json({ candidates: [{ finishReason: 'STOP', content: { parts: [{ text: '{"mode":"buy_anything"}' }] } }] }))
     const options = { model: 'gemini-3.1-flash-lite', key: 'test-only', fetcher }
     for (let i = 0; i < 3; i++) expect(await classifyWithGemini('question', options)).toBeNull()
+  })
+})
+
+describe('P0-04 safety regressions', () => {
+  it('uses the lowest recognized budget ceiling', () => {
+    expect(explicitBudget('under 1500 EGP, maximum 800 EGP')).toBe(800)
+    expect(explicitBudget('لحد ١٥٠٠ جنيه وأقل من ٨٠٠ جنيه')).toBe(799)
+  })
+  it('prioritizes explicit occasion and garment role', () => {
+    expect(resolveIntent('buy work trousers under 1000', { ...shop, occasion: 'going-out', role: 'outerwear' })).toMatchObject({ occasion: 'work', role: 'bottom', budget: 999 })
+  })
+  it('filters known formality extremes even without quiz signals', () => {
+    const casual = { ...ctx, items: ctx.items.map(i => ({ ...i, formality_score: 0.1 })) }
+    expect(recommendations(casual, catalog, { ...shop, mode: 'restyle' }, 'masculine').looks).toEqual([])
+  })
+  it('counts incremental structural combinations independently of top-N examples', () => {
+    const items = [...ctx.items, item('second shoe', 'footwear'), item('dress', 'one_piece')]
+    expect(incrementalUnlockCount(items, 'bottom')).toBe(4)
+    expect(incrementalUnlockCount(items, 'footwear')).toBe(3)
+    expect(incrementalUnlockCount(items, 'outerwear')).toBe(6)
+  })
+  it('does not inflate unlock count with duplicate IDs or synthetic owned pieces', () => {
+    const result = recommendations({ ...ctx, items: [...ctx.items, ctx.items[0], item('catalog:fake', 'base_layer')] }, catalog, shop, 'masculine')
+    expect(result.suggestion?.unlockCount).toBe(2)
+    expect(result.looks.flatMap(l => l.pieces).some(p => p.name === 'catalog:fake')).toBe(false)
+  })
+  it('rejects obvious navigation and redirect paths', () => {
+    expect(readCatalog(JSON.stringify(['redirect', 'account', 'collections'].map((s,i) => ({ ...row, id: 'bad'+i, url: 'https://concrete.store/'+s+'/item' }))), now)).toEqual([])
+  })
+  it('rejects non-finite shopping budgets', () => {
+    expect(searchCatalog(catalog, { ...shop, budget: Infinity }, 'masculine')).toEqual([])
+  })
+})
+
+describe('P0-04 redundancy', () => {
+  it('penalizes matching color and subtype only for the same garment role', () => {
+    expect(redundancyPenalty([item('Beige chinos slim', 'bottom')], catalog[0])).toBeCloseTo(.9)
+    expect(redundancyPenalty([item('Beige chinos slim', 'base_layer')], catalog[0])).toBe(0)
+  })
+  it('prefers a less redundant candidate even when it costs more', () => {
+    const context = { ...ctx, items: [...ctx.items, item('Beige chinos slim', 'bottom')] }
+    const alternative = { ...catalog[0], id: 'alternative', title: 'Charcoal trousers', priceEgp: 999 }
+    expect(recommendations(context, [catalog[0], alternative], shop, 'masculine').suggestion?.product.id).toBe('alternative')
   })
 })

@@ -1,8 +1,19 @@
+import { createStylistMetrics, type Outcome } from '@/src/lib/stylist/observability'
+import type { AiTelemetry } from '@/src/lib/stylist/telemetry'
+import { createHash } from 'node:crypto'
 import { createClient } from '@/src/lib/supabase/server'
 import { readCatalog } from '@/src/lib/stylist/catalog'
 import { classifyWithGemini } from '@/src/lib/stylist/gemini'
 import { resolveIntent, type Collection, type Intent } from '@/src/lib/stylist/intent'
-import { recommendations } from '@/src/lib/stylist/recommend'
+import type {PurchaseCriteria} from '@/src/lib/stylist/purchase-criteria'
+import {preferencesEnabled,parseShoppingPreferences} from '@/src/lib/stylist/shopping-preferences'
+import {saveShoppingPreferences} from '@/src/lib/stylist/shopping-preferences-server'
+import { parseShoppingSizes,requestedSize } from '@/src/lib/stylist/shopping-sizes'
+import { discoveryGap } from '@/src/lib/stylist/discovery-gap'
+import { discoveryEnabled, discoverRetailerLeads,pilotRetailerHosts } from '@/src/lib/stylist/product-discovery'
+import {claimResearch,finishResearch,researchFingerprint} from '@/src/lib/stylist/daily-research'
+import { recommendations,type Result } from '@/src/lib/stylist/recommend'
+import { reserveStylistQuota, beginStylistAi, finishStylistAi } from '@/src/lib/stylist/quota'
 import { loadStylistWardrobe } from '@/src/lib/stylist/wardrobe'
 
 const MAX_BYTES = 4096
@@ -33,39 +44,174 @@ async function readInput(request: Request): Promise<Record<string, unknown> | nu
 }
 
 export async function POST(request: Request) {
-  if (process.env.ENABLE_STYLIST !== 'true') return json({ error: 'Stylist is not enabled' }, 404)
+  const metrics = createStylistMetrics()
+  let preferencesSaved:boolean|undefined
+  let researchClaim:{userId:string;token:string}|null=null
+  const respond = async (data: unknown, status: number, outcome: Outcome) => {
+    if(researchClaim){
+      const claim=researchClaim;researchClaim=null
+      const result=status===200&&data&&typeof data==='object'&&'looks' in data?data as Result:null
+      const saved=await finishResearch(claim.userId,claim.token,result).catch(()=>false)
+      if(result)data={...result,researchCached:false,researchSaved:saved}
+    }
+    metrics.finish(status, outcome)
+    return json(status===200&&preferencesSaved!==undefined&&data&&typeof data==='object'?{...data,preferencesSaved}:data,status)
+  }
+  try {
+  if (process.env.ENABLE_STYLIST !== 'true') return respond({ error: 'Stylist is not enabled' }, 404, 'disabled')
   const origin = request.headers.get('origin')
   const url = new URL(request.url)
   // Next can normalize the hostname in request.url to localhost in development.
   const host = request.headers.get('host') ?? url.host
   if (request.headers.get('sec-fetch-site') === 'cross-site' ||
-      (origin && origin !== url.protocol + '//' + host)) return json({ error: 'Request origin is not allowed' }, 403)
+      (origin && origin !== url.protocol + '//' + host)) return respond({ error: 'Request origin is not allowed' }, 403, 'origin_denied')
   const input = await readInput(request)
   if (!input || (input.view !== 'ask' && input.view !== 'daily') ||
-      (input.collection !== 'masculine' && input.collection !== 'feminine')) return json({ error: 'Invalid request' }, 400)
+      (input.collection !== 'masculine' && input.collection !== 'feminine')) return respond({ error: 'Invalid request' }, 400, 'invalid_input')
   const collection: Collection = input.collection
   const daily = input.view === 'daily'
+  metrics.view(input.view)
   const question = typeof input.question === 'string' ? input.question.trim() : ''
-  if (!daily && (!question || question.length > 280)) return json({ error: 'Enter a question of up to 280 characters' }, 400)
+  if (!daily && (!question || question.length > 280)) return respond({ error: 'Enter a question of up to 280 characters' }, 400, 'invalid_input')
   const budget = input.budget ?? null
   if (budget !== null && (typeof budget !== 'number' || !Number.isInteger(budget) || budget < 1 || budget > 100_000)) {
-    return json({ error: 'Enter a whole EGP budget between 1 and 100,000' }, 400)
+    return respond({ error: 'Enter a whole EGP budget between 1 and 100,000' }, 400, 'invalid_input')
   }
-  try {
+  const sizes=parseShoppingSizes(input.sizes)
+  if(!sizes)return respond({error:'Enter a standard clothing or shoe size, such as M, W32 or EU 42.'},400,'invalid_input')
+  const requestId = request.headers.get('Idempotency-Key')
+  if ((!daily || process.env.ENABLE_METERED_SHOPPER_AI === 'true') && (!requestId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(requestId))) {
+    return respond({ error: 'A valid Idempotency-Key is required' }, 400, 'invalid_input')
+  }
+    metrics.stage('auth')
     const supabase = await createClient()
     const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return json({ error: 'Sign in to use your wardrobe' }, 401)
+    if (!user) return respond({ error: 'Sign in to use your wardrobe' }, 401, 'unauthenticated')
+    metrics.stage('api_quota')
+    if (!await reserveStylistQuota(user.id, 'api_hourly')) {
+      return respond({ error: 'Stylist hourly limit reached. Try again later.', code: 'STYLIST_RATE_LIMIT' }, 429, 'rate_limited')
+    }
+    if(daily&&preferencesEnabled()){
+      const preferences=parseShoppingPreferences({collection,budget,sizes})
+      if(!preferences)return respond({error:'Set a valid budget and clothing sizes before research.'},400,'invalid_input')
+      preferencesSaved=await saveShoppingPreferences(supabase,user.id,preferences).catch(()=>false)
+    }
+    metrics.stage('wardrobe')
     const context = await loadStylistWardrobe(supabase, user.id)
+    const catalog = readCatalog(process.env.STYLIST_CATALOG_JSON).filter(p=>pilotRetailerHosts.some(host=>host===new URL(p.url).hostname))
+    if(daily&&preferencesEnabled()&&context.items.length){
+      const claim=await claimResearch(user.id,researchFingerprint(context,collection,budget,sizes,catalog,discoveryEnabled()))
+      if(claim.status==='busy')return respond({error:'Your daily research is already running or cooling down. Try again shortly.',code:'STYLIST_BUSY'},409,'busy')
+      if(claim.status==='completed')return respond({...claim.result,researchCached:true,researchCheckedAt:claim.checkedAt},200,'success')
+      researchClaim={userId:user.id,token:claim.token}
+    }
+    // Explicit shopping uses one discovery reservation and at most three model attempts.
+    // Unverified leads never enter the recommendation engine.
+    const explicit = resolveIntent(question, null)
+    const discoveryIntent: Intent = daily
+      ? {mode:'shop',occasion:context.signals?.primaryOccasion==='work-university'?'work':context.signals?.primaryOccasion==='going-out'?'going-out':'everyday',role:null,budget}
+      : {...explicit,budget:explicit.budget===null?budget:budget===null?explicit.budget:Math.min(explicit.budget,budget)}
+    const ownedFallback=async()=>{
+      const intent:Intent={...discoveryIntent,mode:'restyle'}
+      const base=recommendations(context,[],intent,collection)
+      if(!requestId||!context.items.length||process.env.ENABLE_METERED_STYLIST_AI!=='true')return base
+      try{
+        const {styleOwned}=await import('@/src/lib/stylist/metered-stylist')
+        const styled=await styleOwned({userId:user.id,requestId,question:question||'Create distinct wearable outfits using my existing wardrobe.',collection,context,intent,singleAttempt:true})
+        return styled.result
+      }catch{return base}
+    }
+    const liveEnabled=discoveryEnabled()
+    const inferredGap=discoveryIntent.mode==='shop'&&discoveryIntent.role===null
+    let gapSource='DETERMINISTIC_ONLY'
+    let criteria:PurchaseCriteria|null=null
+    if(inferredGap){
+      discoveryIntent.role=discoveryGap(context,discoveryIntent,collection)
+      if(requestId&&context.items.length&&catalog.length===0&&liveEnabled&&process.env.ENABLE_METERED_SHOPPER_AI==='true'&&discoveryIntent.budget!==null&&discoveryIntent.budget>0){
+        const {meteredGap}=await import('@/src/lib/stylist/metered-gap')
+        const gap=await meteredGap({userId:user.id,requestId,context,intent:{...discoveryIntent,role:null},collection,question})
+        if(!gap)return respond({error:'Wardrobe analysis is still processing. Try again shortly.',code:'STYLIST_BUSY'},409,'busy')
+        discoveryIntent.role=gap.role;gapSource=gap.source;criteria=gap.criteria
+        console.info(JSON.stringify({event:'stylist.gap',source:gapSource,role:gap.role,hasCriteria:!!criteria}))
+        if(!gap.role){
+          const owned=await ownedFallback()
+          return respond({...owned,explanation:[/[\u0600-\u06ff]/.test(question)?'مفيش إضافة واضحة تستاهل الشراء دلوقتي بناءً على البيانات المتاحة.':'No worthwhile purchase category was identified from the available wardrobe evidence.']},200,'success')
+        }
+      }
+    }
+    const labels={base_layer:'tops',bottom:'trousers',one_piece:'dresses',footwear:'shoes',outerwear:'jackets'} as const
+    const arabic=/[\u0600-\u06ff]/.test(question)
+    const arLabels={base_layer:'قطع علوية',bottom:'بناطيل',one_piece:'فساتين',footwear:'أحذية',outerwear:'جاكيتات'} as const
+    const gapAdvice=inferredGap&&discoveryIntent.role ? [arabic?`هنبحث عن ${arLabels[discoveryIntent.role]} بناءً على عدد التركيبات الممكنة من هدومك. ده ترشيح مبدئي للفئة، مش تأكيد إنك محتاج تشتري.`:`Search priority: ${labels[discoveryIntent.role]}, based on ${gapSource==='PRIMARY_AI'?'AI wardrobe assessment and structural eligibility':'structural wardrobe opportunities'}. This is a category hypothesis, not proof that you need a purchase.`] : []
+    const size=requestedSize(sizes,discoveryIntent.role)
+    if(size)gapAdvice.push(arabic?`المقاس المطلوب: ${size}. لازم تتأكد من توفره عند المتجر.`:`Preferred size: ${size}. Availability in this size must be checked with the retailer.`)
+    if(criteria){const terms=[criteria.color,criteria.material,criteria.subtype].filter(Boolean).join(' ');if(terms)gapAdvice.push(arabic?`مواصفات البحث المقترحة: ${terms}`:`Suggested search criteria: ${terms}.`)}
+    if (requestId && context.items.length && catalog.length===0 && liveEnabled &&
+        process.env.ENABLE_METERED_SHOPPER_AI==='true' && discoveryIntent.mode==='shop' &&
+        discoveryIntent.role!==null && discoveryIntent.budget!==null && discoveryIntent.budget>0) {
+      metrics.stage('provider')
+      const allowed=await reserveStylistQuota(user.id,'gemini_daily')
+      const discovery=allowed&&discoveryEnabled()?await discoverRetailerLeads(discoveryIntent,collection,fetch,criteria):{status:'unavailable' as const,leads:[]}
+      const {verifyRetailerProducts}=await import('@/src/lib/stylist/retailer-verification')
+      const verified=await verifyRetailerProducts(discovery.leads,discoveryIntent,collection)
+      console.info(JSON.stringify({event:'stylist.retailer_verification',discovered:discovery.leads.length,verified:verified.length}))
+      if(verified.length){
+        const {meteredShopper}=await import('@/src/lib/stylist/metered-shopper')
+        const result=await meteredShopper({userId:user.id,requestId,context,catalog:verified,intent:discoveryIntent,collection,daily,singleAttempt:true})
+        if(!result)return respond({error:'Shopping decision unavailable or still processing. Try again shortly.',code:'STYLIST_BUSY'},409,'busy')
+        metrics.stage('recommendation')
+        return respond({...result,discovery,explanation:[...gapAdvice,...(result.explanation??[])]},200,'success')
+      }
+      metrics.stage('recommendation')
+      return respond({...await ownedFallback(),discovery,explanation:[...gapAdvice,arabic?'مفيش منتج اتأكدنا من سعره وتوفره؛ مش هنرشح شراء قبل التحقق.':'No product offer was verified. We cannot recommend a purchase yet.']},200,'success')
+    }
+    if (daily && requestId && context.items.length && process.env.ENABLE_METERED_SHOPPER_AI === 'true') {
+      metrics.stage('provider')
+      const { meteredShopper } = await import('@/src/lib/stylist/metered-shopper')
+      const intent: Intent = { mode: 'shop', occasion: context.signals?.primaryOccasion === 'work-university' ? 'work' : context.signals?.primaryOccasion === 'going-out' ? 'going-out' : 'everyday', role: null, budget }
+      const result = await meteredShopper({userId:user.id,requestId,context,catalog,intent,collection,daily:true})
+      if (!result) return respond({error:'Shopping decision unavailable or still processing. Try again shortly.',code:'STYLIST_BUSY'},409,'busy')
+      metrics.stage('recommendation')
+      return respond(result,200,'success')
+    }
+    if (!daily && requestId && context.items.length && process.env.ENABLE_METERED_STYLIST_AI === 'true') {
+      metrics.stage('provider')
+      const { meteredStylist } = await import('@/src/lib/stylist/metered-stylist')
+      const result = await meteredStylist({ userId: user.id, requestId, question, collection, budget, context, catalog })
+      if (!result) return respond({ error: 'Styling decision unavailable or still processing. Try again shortly.', code: 'STYLIST_BUSY' }, 409, 'busy')
+      metrics.stage('recommendation')
+      return respond(result, 200, 'success')
+    }
     const key = process.env.GEMINI_STYLIST_API_KEY
     // Never send the wardrobe, Style DNA, item IDs, or product data to Gemini.
-    const model = !daily && context.items.length && key ? await classifyWithGemini(question, {
-      key, model: process.env.GEMINI_STYLIST_MODEL ?? 'gemini-3.1-flash-lite',
-    }) : null
+    let model: Intent | null = null
+    metrics.aiPath(daily ? 'daily_rules' : !context.items.length ? 'empty_wardrobe' : !key ? 'missing_key' : 'not_evaluated')
+    if (!daily && context.items.length && key && requestId) {
+      metrics.stage('ai_claim')
+      const fingerprint = createHash('sha256').update(JSON.stringify([question, collection, budget])).digest('hex')
+      const providerModel = process.env.GEMINI_STYLIST_MODEL ?? 'gemini-3.1-flash-lite'
+      if (!/^[a-z0-9][a-z0-9.-]{0,79}$/i.test(providerModel)) { metrics.aiPath('invalid_model'); return respond({ error: 'Stylist provider configuration unavailable' }, 503, 'configuration_error') }
+      const claim = await beginStylistAi(user.id, requestId, fingerprint, providerModel)
+      if (claim.status === 'busy') { metrics.aiPath('busy'); return respond({ error: 'A styling request is still processing. Try again shortly.', code: 'STYLIST_BUSY' }, 409, 'busy') }
+      if (claim.status === 'conflict') { metrics.aiPath('conflict'); return respond({ error: 'Request identifier was already used for different inputs.', code: 'STYLIST_KEY_CONFLICT' }, 409, 'conflict') }
+      if (claim.status === 'completed') { model = claim.intent; metrics.aiPath(model ? 'cached_intent' : 'cached_null_or_quota') }
+      if (claim.status === 'claimed') {
+        metrics.stage('provider')
+        let usage: AiTelemetry = { status: 'network_error', input: null, output: null, thought: null, latency: 0 }
+        model = await classifyWithGemini(question, {
+          key, model: providerModel, onTelemetry: value => { usage = value },
+        })
+        metrics.aiPath(model ? 'provider_success' : 'provider_fallback')
+        metrics.stage('ai_finish')
+        await finishStylistAi(user.id, requestId, claim.token, model, providerModel, usage)
+      }
+    }
+    metrics.stage('recommendation')
     const resolved = resolveIntent(question, model)
     const intent: Intent = daily ? { mode: 'shop', occasion: context.signals?.primaryOccasion === 'work-university' ? 'work' : context.signals?.primaryOccasion === 'going-out' ? 'going-out' : 'everyday', role: null, budget }
       : { ...resolved, budget: resolved.budget === null ? budget : budget === null ? resolved.budget : Math.min(resolved.budget, budget) }
-    return json({ ...recommendations(context, readCatalog(process.env.STYLIST_CATALOG_JSON), intent, collection, daily), source: model ? 'gemini' : 'rules' })
+    return respond({ ...recommendations(context, catalog, intent, collection, daily), source: model ? 'gemini' : 'rules' }, 200, 'success')
   } catch {
-    return json({ error: 'Could not load your styling recommendations. Try again.' }, 503)
+    return respond({ error: 'Could not load your styling recommendations. Try again.' }, 503, 'failure')
   }
 }

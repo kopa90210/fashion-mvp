@@ -1,15 +1,16 @@
 'use client'
 
-import { useState, useCallback, useTransition } from 'react'
+import { useState, useCallback, useTransition, useRef } from 'react'
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion'
 import type { Variants } from 'framer-motion'
-import { Sparkles } from 'lucide-react'
+import { Sparkles, ChevronLeft } from 'lucide-react'
 import { QUIZ_QUESTIONS } from '@/src/lib/quiz/questions'
 import type { QuizAnswer } from '@/src/lib/quiz/scoring'
 import { getOptionImage } from '@/src/lib/quiz/imageSet'
 import type { QuizImagePreference } from '@/src/lib/quiz/imageSet'
 import ImageSetIntroScreen from './ImageSetIntroScreen'
-import { submitStyleQuiz } from './actions'
+import { submitStyleQuiz,saveQuizAccountDraft } from './actions'
+import {replaceAnswer,type QuizDraft} from '@/src/lib/quiz/progress'
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -67,9 +68,17 @@ const cardVariants: Variants = {
 // Component
 // ---------------------------------------------------------------------------
 
-export default function StyleQuiz() {
-  const [currentStep, setCurrentStep] = useState(0)
-  const [answers, setAnswers] = useState<QuizAnswer[]>([])
+export default function StyleQuiz({userId,initialDraft=null,initialVersion=0}:{userId?:string;initialDraft?:QuizDraft|null;initialVersion?:number}={}) {
+  const [currentStep, setCurrentStep] = useState(initialDraft?.step??0)
+  const [answers, setAnswers] = useState<QuizAnswer[]>(initialDraft?.answers??[])
+  const activeStep=useRef(initialDraft?.step??0)
+  const submitting=useRef(false)
+  const [error,setError]=useState('')
+  const version=useRef(initialVersion)
+  const saveDraft=useCallback(async(draft:QuizDraft)=>{
+    if(!userId)throw new Error('Sign in to save progress')
+    version.current=await saveQuizAccountDraft(userId,JSON.stringify(draft),version.current)
+  },[userId])
   const [direction, setDirection] = useState(1) // 1 = forward, -1 = back
   const [isPending, startTransition] = useTransition()
   const [imgErrors, setImgErrors] = useState<Set<string>>(new Set())
@@ -78,40 +87,62 @@ export default function StyleQuiz() {
   // Display-only image preference
   // Also selects the next screen’s catalog. It does not affect scoring
   // and is not stored as a profile attribute.
-  const [imageSet, setImageSet] = useState<QuizImagePreference>('feminine')
-  const [showIntro, setShowIntro] = useState(true)
+  const [imageSet, setImageSet] = useState<QuizImagePreference>(initialDraft?.imageSet??'feminine')
+  const [showIntro, setShowIntro] = useState(!initialDraft)
 
   const handleIntroSelect = useCallback((selected: QuizImagePreference) => {
-    setImageSet(selected)
-    setShowIntro(false)
-  }, [])
+    if(submitting.current)return
+    submitting.current=true
+    setError('')
+    startTransition(async()=>{
+      try{
+        await saveDraft({answers,step:currentStep,imageSet:selected})
+        setImageSet(selected)
+        setShowIntro(false)
+      }catch{setError('Could not save your progress. Refresh to resume or try again.')}
+      finally{submitting.current=false}
+    })
+  },[answers,currentStep,saveDraft])
 
   const question = QUIZ_QUESTIONS[currentStep]
   const progress = ((currentStep + 1) / TOTAL_QUESTIONS) * 100
 
-  const handleSelect = useCallback(
-    (optionId: string) => {
-      if (isPending) return
-
-      const newAnswers: QuizAnswer[] = [
-        ...answers,
-        { questionId: question.id, optionId },
-      ]
-      setAnswers(newAnswers)
-
-      if (currentStep < TOTAL_QUESTIONS - 1) {
-        // Advance to next question
-        setDirection(1)
-        setCurrentStep((s) => s + 1)
-      } else {
-        // Last question: submit answer IDs for server-side scoring.
-        startTransition(async () => {
-          await submitStyleQuiz(newAnswers, imageSet)
-        })
-      }
-    },
-    [answers, currentStep, imageSet, isPending, question.id],
-  )
+  const handleSelect=useCallback((optionId:string)=>{
+    if(isPending||submitting.current||activeStep.current!==currentStep)return
+    const newAnswers=replaceAnswer(answers,question.id,optionId)
+    const next=Math.min(currentStep+1,TOTAL_QUESTIONS-1)
+    submitting.current=true
+    setError('')
+    startTransition(async()=>{
+      try{
+        await saveDraft({answers:newAnswers,step:next,imageSet})
+        setAnswers(newAnswers)
+        if(currentStep<TOTAL_QUESTIONS-1){
+          activeStep.current=next
+          setDirection(1)
+          setCurrentStep(next)
+        }else{
+          await submitStyleQuiz(newAnswers,imageSet)
+        }
+      }catch{setError('Could not save your progress. Refresh to resume or tap your answer to retry.')}
+      finally{submitting.current=false}
+    })
+  },[answers,currentStep,imageSet,isPending,question.id,saveDraft])
+  const handleBack=()=>{
+    if(isPending||submitting.current||activeStep.current!==currentStep||currentStep===0)return
+    const previous=currentStep-1
+    submitting.current=true
+    setError('')
+    startTransition(async()=>{
+      try{
+        await saveDraft({answers,step:previous,imageSet})
+        activeStep.current=previous
+        setDirection(-1)
+        setCurrentStep(previous)
+      }catch{setError('Could not save your progress. Refresh to resume or try again.')}
+      finally{submitting.current=false}
+    })
+  }
 
   const handleImageError = useCallback((imageKey: string) => {
     setImgErrors((prev) => new Set(prev).add(imageKey))
@@ -169,6 +200,7 @@ export default function StyleQuiz() {
             StyleGraph Quiz
           </motion.p>
           <ImageSetIntroScreen onSelect={handleIntroSelect} />
+          {error&&<p role="alert" className="mt-3 text-sm text-[#F5F1E9]">{error}</p>}
         </div>
       ) : (
         /* Question area */
@@ -207,8 +239,9 @@ export default function StyleQuiz() {
                       whileTap="tap"
                       onClick={() => handleSelect(option.id)}
                       disabled={isPending}
-                      className="group relative flex w-full cursor-pointer flex-col overflow-hidden rounded-2xl border border-[#38383D] bg-[#1E1E21] p-2 text-left shadow-xs outline-none transition-all duration-200 hover:border-[#E8C568] hover:shadow-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#E8C568] disabled:pointer-events-none disabled:opacity-40 sm:p-2.5"
+                      className="group aria-pressed:border-[#E8C568] relative flex w-full cursor-pointer flex-col overflow-hidden rounded-2xl border border-[#38383D] bg-[#1E1E21] p-2 text-left shadow-xs outline-none transition-all duration-200 hover:border-[#E8C568] hover:shadow-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#E8C568] disabled:pointer-events-none disabled:opacity-40 sm:p-2.5"
                       aria-label={option.label}
+                      aria-pressed={answers.some(a=>a.questionId===question.id&&a.optionId===option.id)}
                       id={`quiz-option-${option.id}`}
                     >
                       {/* Dedicated 4:5 image area */}
@@ -255,6 +288,8 @@ export default function StyleQuiz() {
             Question {currentStep + 1} of {TOTAL_QUESTIONS}
           </p>
 
+          {currentStep>0&&<button type="button" disabled={isPending} onClick={handleBack} className="mt-3 inline-flex min-h-11 items-center gap-1 text-sm text-[#B5B0A8] focus-visible:outline-2 focus-visible:outline-[#E8C568]"><ChevronLeft className="size-4"/> Back</button>}
+          {error&&<p role="alert" className="mt-3 text-sm text-[#F5F1E9]">{error}</p>}
           {/* Submitting state */}
           {isPending && (
             <motion.div
@@ -265,7 +300,7 @@ export default function StyleQuiz() {
               aria-live="polite"
             >
               <div className="size-3.5 animate-spin rounded-full border-2 border-[#38383D] border-t-[#E8C568]" />
-              <span>Crafting your style DNA…</span>
+              <span>{currentStep===TOTAL_QUESTIONS-1?'Crafting your style DNA…':'Saving your choices…'}</span>
             </motion.div>
           )}
         </div>

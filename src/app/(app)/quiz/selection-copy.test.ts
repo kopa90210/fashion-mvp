@@ -10,7 +10,7 @@ describe('curated selection product language', () => {
     expect(STYLE_SELECTION_COPY.continueWithCount(3)).toBe('Continue with 3 pieces')
   })
 
-  it('explains delayed commitment', () => {
-    expect(STYLE_SELECTION_COPY.submitBody).toContain('after calibration')
+  it('explains direct commitment', () => {
+    expect(STYLE_SELECTION_COPY.submitBody).toBe('Your selected pieces will be added to your wardrobe.')
   })
 })
