@@ -32,7 +32,8 @@ export function fallbackIntent(question: string): Intent {
     : /dress|jumpsuit|فستان/i.test(question) ? 'one_piece' : null
   const own = /my wardrobe|my closet|already own|\bwithout (?:buying|shopping)\b|\b(?:don.t|do not) (?:buy|shop)\b|دولابي|من هدومي|من اللي عندي|بدون شراء|من غير شراء/i.test(question)
   const shop = /\bbuy\b|\bshop\b|اشتري|أشتري|للشراء/i.test(question)
-  const mode = own ? 'restyle' : shop ? 'shop'
+  const noPurchase = /\bwithout (?:buying|shopping)\b|\b(?:don.t|do not|not going to) (?:buy|shop)\b|بدون شراء|من غير شراء|مش عايز اشتري/i.test(question)
+  const mode = noPurchase ? 'restyle' : shop ? 'shop' : own ? 'restyle'
     : /\bwear\b|\boutfit\b|\bstyle\b|ألبس|البس|طقم|نسق|نسّق/i.test(question) ? 'restyle'
     : role && explicitBudget(question) !== null ? 'shop' : 'clarify'
   return { mode, occasion, role, budget: null }
