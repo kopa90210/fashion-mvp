@@ -144,8 +144,8 @@ describe('P0-04 safety regressions', () => {
 })
 
 describe('P0-04 redundancy', () => {
-  it('penalizes overlapping names only for the same garment role', () => {
-    expect(redundancyPenalty([item('Beige chinos slim', 'bottom')], catalog[0])).toBeCloseTo(2/3)
+  it('penalizes matching color and subtype only for the same garment role', () => {
+    expect(redundancyPenalty([item('Beige chinos slim', 'bottom')], catalog[0])).toBeCloseTo(.9)
     expect(redundancyPenalty([item('Beige chinos slim', 'base_layer')], catalog[0])).toBe(0)
   })
   it('prefers a less redundant candidate even when it costs more', () => {
