@@ -104,8 +104,9 @@ export function recommendations(ctx: StylistContext, catalog: Product[], intent:
       !Number.isFinite(i.formality_score) || (i.formality_score >= range[0] && i.formality_score <= range[1])),
     signals: ctx.signals ? { ...ctx.signals, primaryOccasion: occasion[intent.occasion] } : null,
   }
-  const looks = recommendOutfits(effective.items, effective.dna, { topN: 1, signals: effective.signals })
+  const looks = recommendOutfits(effective.items, effective.dna, { topN: 4, signals: effective.signals })
     .filter(o => isValidOutfitStructure(o.items))
+    .filter((o,index,all)=>all.findIndex(other=>other.items.map(i=>i.id).sort().join('|')===o.items.map(i=>i.id).sort().join('|'))===index)
     .map((o) => look(o))
   if (!daily && intent.mode === 'clarify') return { status: 'clarify', looks: [], clarification: 'intent' }
   if (!daily && intent.mode === 'restyle') return { status: looks.length ? 'restyle' : 'no-match', looks }
