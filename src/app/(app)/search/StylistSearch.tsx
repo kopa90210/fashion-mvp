@@ -149,7 +149,7 @@ export default function StylistSearch() {
             <a href={lead.url} target="_blank" rel="noopener noreferrer" className={'mt-2 inline-flex min-h-11 items-center underline '+focus}>View retailer page ↗</a>
           </li>)}</ul>
         </section>}
-        {!!result?.looks.length && <section className={panel}><h3 className="mb-3 font-serif text-2xl">Restyle what you own</h3>{result.looks.map((look, i) => <LookCard key={i} look={look} />)}</section>}
+        {!!result?.looks.length && <section className={panel}><h3 className="mb-3 font-serif text-2xl">Restyle what you own</h3>{result.looks.map((look, i) => <div key={i} className="mt-3"><p className="mb-1 text-xs font-medium">{i===0?'Recommended look':`Alternative ${i}`}</p><LookCard look={look}/></div>)}</section>}
         {result?.provenance && <details className={panel}>
           <summary className="cursor-pointer text-sm font-medium">Generation Inspector</summary>
           <div className="mt-3 space-y-3 text-xs text-[#6d6257]">
@@ -174,7 +174,7 @@ export default function StylistSearch() {
           <h4 dir="auto" className="mt-2 font-medium">{result.suggestion.product.title}</h4>
           <p className="mt-2 text-sm">{result.suggestion.product.brand} · {Intl.NumberFormat('en-EG', { style: 'currency', currency: 'EGP' }).format(result.suggestion.product.priceEgp)}</p>
           {result.suggestion.unlockBasis && <p className="mt-3 text-sm">{result.suggestion.unlockCount} {result.suggestion.unlockBasis==='ai_reviewed_sample'?'AI-reviewed compatible':'structurally valid'} looks among {result.suggestion.evaluatedCount} sampled combinations. Not a total wardrobe unlock estimate.</p>}
-          <p className="my-3 text-sm text-[#6d6257]">Two ways to wear it with pieces you own.</p>
+          <p className="my-3 text-sm text-[#6d6257]">Ways to wear it with pieces you own.</p>
           <div className="grid gap-2 sm:grid-cols-2">{result.suggestion.looks.map((look, i) => <LookCard key={i} look={look} />)}</div>
           <a className={'mt-4 inline-flex min-h-11 items-center rounded-full border border-[#d8cec2] px-4 text-sm ' + focus} href={result.suggestion.product.url} target="_blank" rel="noopener noreferrer">View at {result.suggestion.product.brand} ↗</a>
           <p className="mt-2 text-xs text-[#6d6257]">Catalog recorded {result.suggestion.product.checkedAt.slice(0, 10)}. Not live-verified. Confirm price, size and availability at the retailer.</p>
