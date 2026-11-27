@@ -139,6 +139,7 @@ export default function StylistSearch() {
         {result?.status === 'no-match' && !result.discovery?.leads.length && <p className={panel}>{result.looks.length
           ? 'No checked product matched your request and formed two looks with your pieces.'
           : 'No complete look matched. Add more pieces to your wardrobe and try again.'}</p>}
+        {!!result?.explanation?.length && <section className={panel}><h3 className="font-medium">Your stylist’s advice</h3><ul className="mt-2 space-y-1 text-sm">{result.explanation.map((reason,i)=><li key={i} dir="auto">{reason}</li>)}</ul>{result.stylingTip && <p className="mt-3 text-sm" dir="auto">{result.stylingTip}</p>}</section>}
         {result?.discovery && <section className={panel}>
           <h3 className="font-serif text-2xl">Retailer search results</h3>
           <p className="mt-2 text-sm text-[#6d6257]">Discovered product pages, not verified shopping recommendations. Check current price, availability and suitability at the retailer.</p>
@@ -161,7 +162,7 @@ export default function StylistSearch() {
             {result.suggestion && !result.shoppingTrace && <p>Product ranking and unlock count: deterministic</p>}
           </div>
         </details>}
-        {!!result?.explanation?.length && <section className={panel}><h3 className="font-medium">Why this works</h3><ul className="mt-2 space-y-1 text-sm">{result.explanation.map((reason,i)=><li key={i} dir="auto">{reason}</li>)}</ul>{result.stylingTip && <p className="mt-3 text-sm" dir="auto">{result.stylingTip}</p>}</section>}
+
         {result?.shoppingTrace && <details className={panel}>
           <summary className="cursor-pointer text-sm font-medium">Shopping generation trace</summary>
           {([['Product selection',result.shoppingTrace.product],['Compatibility review',result.shoppingTrace.compatibility]] as const).map(([label,trace])=><section key={label} className="mt-3 text-xs">
@@ -171,13 +172,14 @@ export default function StylistSearch() {
           <p className="mt-3 text-xs">Unlock count: deterministic calculation of unique sampled outfits.</p>
         </details>}
         {result?.suggestion && <section className={panel}><h3 className="font-serif text-2xl">One piece worth adding</h3>
+          {result.suggestion.product.imageUrl && <div className="mt-3 overflow-hidden rounded-2xl bg-[#f7f4ef]"><img src={result.suggestion.product.imageUrl} alt={result.suggestion.product.title} referrerPolicy="no-referrer" loading="lazy" className="mx-auto h-64 max-w-full object-contain" /></div>}
           <h4 dir="auto" className="mt-2 font-medium">{result.suggestion.product.title}</h4>
           <p className="mt-2 text-sm">{result.suggestion.product.brand} · {Intl.NumberFormat('en-EG', { style: 'currency', currency: 'EGP' }).format(result.suggestion.product.priceEgp)}</p>
           {result.suggestion.unlockBasis && <p className="mt-3 text-sm">{result.suggestion.unlockCount} {result.suggestion.unlockBasis==='ai_reviewed_sample'?'AI-reviewed compatible':'structurally valid'} looks among {result.suggestion.evaluatedCount} sampled combinations. Not a total wardrobe unlock estimate.</p>}
           <p className="my-3 text-sm text-[#6d6257]">Ways to wear it with pieces you own.</p>
           <div className="grid gap-2 sm:grid-cols-2">{result.suggestion.looks.map((look, i) => <LookCard key={i} look={look} />)}</div>
           <a className={'mt-4 inline-flex min-h-11 items-center rounded-full border border-[#d8cec2] px-4 text-sm ' + focus} href={result.suggestion.product.url} target="_blank" rel="noopener noreferrer">View at {result.suggestion.product.brand} ↗</a>
-          <p className="mt-2 text-xs text-[#6d6257]">Catalog recorded {result.suggestion.product.checkedAt.slice(0, 10)}. Not live-verified. Confirm price, size and availability at the retailer.</p>
+          <p className="mt-2 text-xs text-[#6d6257]">{result.suggestion.product.liveVerified?'Retailer offer checked':'Catalog recorded'} {result.suggestion.product.checkedAt.slice(0, 10)}. {result.suggestion.product.liveVerified?'Availability is not guaranteed for your size.':'Not live-verified.'} Confirm price, size and availability at the retailer.</p>
         </section>}
       </div>
     </div>
