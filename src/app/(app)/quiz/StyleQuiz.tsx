@@ -9,8 +9,8 @@ import type { QuizAnswer } from '@/src/lib/quiz/scoring'
 import { getOptionImage } from '@/src/lib/quiz/imageSet'
 import type { QuizImagePreference } from '@/src/lib/quiz/imageSet'
 import ImageSetIntroScreen from './ImageSetIntroScreen'
-import { submitStyleQuiz } from './actions'
-import {draftKey,replaceAnswer,type QuizDraft} from '@/src/lib/quiz/progress'
+import { submitStyleQuiz,saveQuizAccountDraft } from './actions'
+import {replaceAnswer,type QuizDraft} from '@/src/lib/quiz/progress'
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -68,15 +68,16 @@ const cardVariants: Variants = {
 // Component
 // ---------------------------------------------------------------------------
 
-export default function StyleQuiz({userId,initialDraft=null}:{userId?:string;initialDraft?:QuizDraft|null}={}) {
+export default function StyleQuiz({userId,initialDraft=null,initialVersion=0}:{userId?:string;initialDraft?:QuizDraft|null;initialVersion?:number}={}) {
   const [currentStep, setCurrentStep] = useState(initialDraft?.step??0)
   const [answers, setAnswers] = useState<QuizAnswer[]>(initialDraft?.answers??[])
   const activeStep=useRef(initialDraft?.step??0)
   const submitting=useRef(false)
   const [error,setError]=useState('')
-  const saveDraft=useCallback((draft:QuizDraft)=>{
-    if(!userId)return
-    try{document.cookie=draftKey(userId)+'='+encodeURIComponent(JSON.stringify(draft))+'; Path=/quiz; Max-Age=604800; SameSite=Lax'+(location.protocol==='https:'?'; Secure':'')}catch{/* browser storage may be disabled */}
+  const version=useRef(initialVersion)
+  const saveDraft=useCallback(async(draft:QuizDraft)=>{
+    if(!userId)throw new Error('Sign in to save progress')
+    version.current=await saveQuizAccountDraft(userId,JSON.stringify(draft),version.current)
   },[userId])
   const [direction, setDirection] = useState(1) // 1 = forward, -1 = back
   const [isPending, startTransition] = useTransition()
@@ -90,45 +91,57 @@ export default function StyleQuiz({userId,initialDraft=null}:{userId?:string;ini
   const [showIntro, setShowIntro] = useState(!initialDraft)
 
   const handleIntroSelect = useCallback((selected: QuizImagePreference) => {
-    setImageSet(selected)
-    setShowIntro(false)
-    saveDraft({answers,step:currentStep,imageSet:selected})
-  }, [answers,currentStep,saveDraft])
+    if(submitting.current)return
+    submitting.current=true
+    setError('')
+    startTransition(async()=>{
+      try{
+        await saveDraft({answers,step:currentStep,imageSet:selected})
+        setImageSet(selected)
+        setShowIntro(false)
+      }catch{setError('Could not save your progress. Refresh to resume or try again.')}
+      finally{submitting.current=false}
+    })
+  },[answers,currentStep,saveDraft])
 
   const question = QUIZ_QUESTIONS[currentStep]
   const progress = ((currentStep + 1) / TOTAL_QUESTIONS) * 100
 
-  const handleSelect = useCallback(
-    (optionId: string) => {
-      if (isPending||submitting.current||activeStep.current!==currentStep) return
-      const newAnswers=replaceAnswer(answers,question.id,optionId)
-      setAnswers(newAnswers)
-      setError('')
-      const next=Math.min(currentStep+1,TOTAL_QUESTIONS-1)
-      saveDraft({answers:newAnswers,step:next,imageSet})
-      if(currentStep<TOTAL_QUESTIONS-1){
-        activeStep.current=next
-        setDirection(1)
-        setCurrentStep(next)
-      }else{
-        submitting.current=true
-        startTransition(async()=>{
-          try{await submitStyleQuiz(newAnswers,imageSet)}
-          catch{setError('Could not save your choices. Tap your answer to retry.')}
-          finally{submitting.current=false}
-        })
-      }
-    },
-    [answers,currentStep,imageSet,isPending,question.id,saveDraft],
-  )
+  const handleSelect=useCallback((optionId:string)=>{
+    if(isPending||submitting.current||activeStep.current!==currentStep)return
+    const newAnswers=replaceAnswer(answers,question.id,optionId)
+    const next=Math.min(currentStep+1,TOTAL_QUESTIONS-1)
+    submitting.current=true
+    setError('')
+    startTransition(async()=>{
+      try{
+        await saveDraft({answers:newAnswers,step:next,imageSet})
+        setAnswers(newAnswers)
+        if(currentStep<TOTAL_QUESTIONS-1){
+          activeStep.current=next
+          setDirection(1)
+          setCurrentStep(next)
+        }else{
+          await submitStyleQuiz(newAnswers,imageSet)
+        }
+      }catch{setError('Could not save your progress. Refresh to resume or tap your answer to retry.')}
+      finally{submitting.current=false}
+    })
+  },[answers,currentStep,imageSet,isPending,question.id,saveDraft])
   const handleBack=()=>{
     if(isPending||submitting.current||activeStep.current!==currentStep||currentStep===0)return
     const previous=currentStep-1
-    activeStep.current=previous
-    setDirection(-1)
+    submitting.current=true
     setError('')
-    setCurrentStep(previous)
-    saveDraft({answers,step:previous,imageSet})
+    startTransition(async()=>{
+      try{
+        await saveDraft({answers,step:previous,imageSet})
+        activeStep.current=previous
+        setDirection(-1)
+        setCurrentStep(previous)
+      }catch{setError('Could not save your progress. Refresh to resume or try again.')}
+      finally{submitting.current=false}
+    })
   }
 
   const handleImageError = useCallback((imageKey: string) => {
@@ -187,6 +200,7 @@ export default function StyleQuiz({userId,initialDraft=null}:{userId?:string;ini
             StyleGraph Quiz
           </motion.p>
           <ImageSetIntroScreen onSelect={handleIntroSelect} />
+          {error&&<p role="alert" className="mt-3 text-sm text-[#F5F1E9]">{error}</p>}
         </div>
       ) : (
         /* Question area */
@@ -286,7 +300,7 @@ export default function StyleQuiz({userId,initialDraft=null}:{userId?:string;ini
               aria-live="polite"
             >
               <div className="size-3.5 animate-spin rounded-full border-2 border-[#38383D] border-t-[#E8C568]" />
-              <span>Crafting your style DNA…</span>
+              <span>{currentStep===TOTAL_QUESTIONS-1?'Crafting your style DNA…':'Saving your choices…'}</span>
             </motion.div>
           )}
         </div>

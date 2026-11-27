@@ -28,12 +28,16 @@ export default async function QuizPage({
 
   const params = await searchParams
   const raw=(await cookies()).get(draftKey(data.user.id))?.value
-  const draft=parseDraft(raw)
+  const browserDraft=parseDraft(raw)
   const {data:dna,error:dnaError}=await supabase.from('fashion_dna').select('quiz_signals').eq('user_id',data.user.id).maybeSingle()
   if(dnaError)throw new Error('Could not load quiz progress')
   const pending=await getPendingOwnedSelection()
   if(pending.committed)redirect('/outfits')
   const isDone = Boolean(readQuizSignals(dna?.quiz_signals))
+  const {data:accountDraft,error:draftError}=await supabase.from('style_quiz_drafts').select('draft,version').eq('user_id',data.user.id).maybeSingle()
+  if(draftError)throw new Error('Could not load account quiz progress')
+  const draft=accountDraft?parseDraft(JSON.stringify(accountDraft.draft)):browserDraft
+  const draftVersion=accountDraft?.version??0
 
   if (isDone) {
     const collection = parseCatalogCollection(params.collection)??draft?.imageSet
@@ -55,5 +59,5 @@ export default async function QuizPage({
     return <PieceSelectionScreen key={collection} pending={pending} collection={collection} />
   }
 
-  return <StyleQuiz userId={data.user.id} initialDraft={draft}/>
+  return <StyleQuiz userId={data.user.id} initialDraft={draft} initialVersion={draftVersion}/>
 }

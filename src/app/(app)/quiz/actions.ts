@@ -4,7 +4,7 @@ import { createClient } from '@/src/lib/supabase/server'
 import { catalogSelectionHref } from '@/src/lib/quiz/catalog-collection'
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
-import {answersFromSignals,replaceAnswer,signalKeys} from '@/src/lib/quiz/progress'
+import {answersFromSignals,replaceAnswer,signalKeys,parseDraft} from '@/src/lib/quiz/progress'
 import {readQuizSignals,STYLE_DIMENSIONS} from '@/src/lib/quiz/scoring'
 import { QUIZ_QUESTIONS_FOR_SCORING } from '@/src/lib/quiz/questions'
 import { computeStyleVector, parseQuizSignals, type QuizAnswer } from '@/src/lib/quiz/scoring'
@@ -61,4 +61,21 @@ export async function editQuizPreference(key:unknown,optionId:unknown){
  revalidatePath('/profile')
  revalidatePath('/search')
  revalidatePath('/outfits')
+}
+
+/** Persist a validated draft using optimistic concurrency and authenticated ownership. */
+export async function saveQuizAccountDraft(accountId:string,raw:string,expectedVersion:number):Promise<number>{
+ const draft=parseDraft(raw)
+ if(!draft||!Number.isSafeInteger(expectedVersion)||expectedVersion<0||expectedVersion>=2147483647)throw new Error('Invalid quiz progress')
+ const supabase=await createClient()
+ const {data:{user},error:authError}=await supabase.auth.getUser()
+ if(authError||!user||user.id!==accountId)throw new Error('Account changed. Reopen the quiz.')
+ const {data:dna,error:dnaError}=await supabase.from('fashion_dna').select('quiz_signals').eq('user_id',user.id).maybeSingle()
+ if(dnaError||readQuizSignals(dna?.quiz_signals))throw new Error('Quiz already completed or unavailable')
+ const row={draft,version:expectedVersion+1,updated_at:new Date().toISOString()}
+ const result=expectedVersion===0
+ ?await supabase.from('style_quiz_drafts').insert({user_id:user.id,...row}).select('version').single()
+ :await supabase.from('style_quiz_drafts').update(row).eq('user_id',user.id).eq('version',expectedVersion).select('version').maybeSingle()
+ if(result.error||result.data?.version!==expectedVersion+1)throw new Error('Progress changed or could not be saved. Refresh to resume.')
+ return result.data.version
 }
