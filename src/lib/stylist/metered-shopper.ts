@@ -32,13 +32,13 @@ export async function meteredShopper(args:{userId:string;requestId:string;contex
  const primary=outfitAdapter('groq',compatibilityPrompt,compatibilityInstruction)
  const secondary=args.singleAttempt?null:outfitAdapter('gemini',compatibilityPrompt,compatibilityInstruction)
  const fingerprint=compatibilityFingerprint({context,catalog,candidate,intent,collection,prompt:compatibilityPrompt,instruction:compatibilityInstruction,models:[primary?.model??null,secondary?.model??null]})
- const assessed=await decidePersisted({key:{userId,requestId,component:'unlock_compatibility'},fingerprint,catalogExpiresAt:catalogExpiry(catalog),primary,secondary,validate:v=>validateCompatibility(v,candidate),fallback:()=>({look_ids:candidate.looks.map(l=>l.id)})})
+ const assessed=await decidePersisted({key:{userId,requestId,component:'unlock_compatibility'},fingerprint,catalogExpiresAt:catalogExpiry(catalog),primary,secondary,validate:v=>validateCompatibility(v,candidate),fallback:()=>({look_ids:[]})})
  if(!assessed?.value)return null
  trace.compatibility=assessed.provenance
  const looks=materializeLooks(candidate,assessed.value.look_ids)
  const aiReviewed=assessed.provenance.source==='PRIMARY_AI'||assessed.provenance.source==='SECONDARY_AI'
  const {suggestion: _old,...rest}=base
  void _old
- if(looks.length<2)return {...rest,status:daily&&base.looks.length?'restyle':'no-match',shoppingTrace:trace}
+ if(!aiReviewed||looks.length<2)return {...rest,status:daily&&base.looks.length?'restyle':'no-match',shoppingTrace:trace}
  return {...rest,status:'shop',suggestion:{product:candidate.product,looks:looks.slice(0,4),unlockCount:looks.length,unlockBasis:aiReviewed?'ai_reviewed_sample':'structural_sample',evaluatedCount:candidate.looks.length},shoppingTrace:trace}
 }
