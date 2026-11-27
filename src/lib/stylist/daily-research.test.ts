@@ -18,7 +18,7 @@ describe('persistent daily research',()=>{
  it('uses short TTL for temporary discovery failures',()=>expect(researchTtl({status:'restyle',looks:[],discovery:{status:'unavailable',leads:[]}})).toBe(300))
  it('caps successful results at six hours',()=>expect(researchTtl({status:'restyle',looks:[]})).toBe(21600))
  it('does not cache expired or invalid retailer evidence',()=>{
- const result=(checkedAt:string)=>({status:'shop',looks:[],suggestion:{product:{checkedAt},looks:[],unlockCount:2}} as Result)
+ const result=(checkedAt:string):Result=>({status:'shop',looks:[],suggestion:{product:{id:'fixture',title:'Men chinos',brand:'DeFacto',url:'https://www.defacto.com.eg/en-eg/chino-123456',priceEgp:999,checkedAt,collection:'masculine',role:'bottom',occasions:['work'],styleTags:{}},looks:[],unlockCount:2}})
  expect(researchTtl(result('invalid'))).toBe(0)
  expect(researchTtl(result('2020-01-01T00:00:00Z'))).toBe(0)
  expect(researchTtl(result(new Date().toISOString()))).toBe(21600)
