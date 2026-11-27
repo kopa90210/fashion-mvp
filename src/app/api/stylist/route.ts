@@ -5,6 +5,7 @@ import { createClient } from '@/src/lib/supabase/server'
 import { readCatalog } from '@/src/lib/stylist/catalog'
 import { classifyWithGemini } from '@/src/lib/stylist/gemini'
 import { resolveIntent, type Collection, type Intent } from '@/src/lib/stylist/intent'
+import type {PurchaseCriteria} from '@/src/lib/stylist/purchase-criteria'
 import { discoveryGap } from '@/src/lib/stylist/discovery-gap'
 import { discoveryEnabled, discoverRetailerLeads } from '@/src/lib/stylist/product-discovery'
 import { recommendations } from '@/src/lib/stylist/recommend'
@@ -84,13 +85,15 @@ export async function POST(request: Request) {
       : {...explicit,budget:explicit.budget===null?budget:budget===null?explicit.budget:Math.min(explicit.budget,budget)}
     const inferredGap=discoveryIntent.mode==='shop'&&discoveryIntent.role===null
     let gapSource='DETERMINISTIC_ONLY'
+    let criteria:PurchaseCriteria|null=null
     if(inferredGap){
       discoveryIntent.role=discoveryGap(context,discoveryIntent,collection)
       if(requestId&&context.items.length&&catalog.length===0&&discoveryEnabled()&&process.env.ENABLE_METERED_SHOPPER_AI==='true'&&discoveryIntent.budget!==null&&discoveryIntent.budget>0){
         const {meteredGap}=await import('@/src/lib/stylist/metered-gap')
         const gap=await meteredGap({userId:user.id,requestId,context,intent:{...discoveryIntent,role:null},collection,question})
         if(!gap)return respond({error:'Wardrobe analysis is still processing. Try again shortly.',code:'STYLIST_BUSY'},409,'busy')
-        discoveryIntent.role=gap.role;gapSource=gap.source
+        discoveryIntent.role=gap.role;gapSource=gap.source;criteria=gap.criteria
+        console.info(JSON.stringify({event:'stylist.gap',source:gapSource,role:gap.role,hasCriteria:!!criteria}))
         if(!gap.role){
           const owned=recommendations(context,[],{...discoveryIntent,mode:'restyle'},collection)
           return respond({...owned,explanation:[/[\u0600-\u06ff]/.test(question)?'مفيش إضافة واضحة تستاهل الشراء دلوقتي بناءً على البيانات المتاحة.':'No worthwhile purchase category was identified from the available wardrobe evidence.']},200,'success')
@@ -101,12 +104,13 @@ export async function POST(request: Request) {
     const arabic=/[\u0600-\u06ff]/.test(question)
     const arLabels={base_layer:'قطع علوية',bottom:'بناطيل',one_piece:'فساتين',footwear:'أحذية',outerwear:'جاكيتات'} as const
     const gapAdvice=inferredGap&&discoveryIntent.role ? [arabic?`هنبحث عن ${arLabels[discoveryIntent.role]} بناءً على عدد التركيبات الممكنة من هدومك. ده ترشيح مبدئي للفئة، مش تأكيد إنك محتاج تشتري.`:`Search priority: ${labels[discoveryIntent.role]}, based on ${gapSource==='PRIMARY_AI'?'AI wardrobe assessment and structural eligibility':'structural wardrobe opportunities'}. This is a category hypothesis, not proof that you need a purchase.`] : []
+    if(criteria){const terms=[criteria.color,criteria.material,criteria.subtype].filter(Boolean).join(' ');if(terms)gapAdvice.push(arabic?`مواصفات البحث المقترحة: ${terms}`:`Suggested search criteria: ${terms}.`)}
     if (requestId && context.items.length && catalog.length===0 && discoveryEnabled() &&
         process.env.ENABLE_METERED_SHOPPER_AI==='true' && discoveryIntent.mode==='shop' &&
         discoveryIntent.role!==null && discoveryIntent.budget!==null && discoveryIntent.budget>0) {
       metrics.stage('provider')
       const allowed=await reserveStylistQuota(user.id,'gemini_daily')
-      const discovery=allowed?await discoverRetailerLeads(discoveryIntent,collection):{status:'unavailable' as const,leads:[]}
+      const discovery=allowed?await discoverRetailerLeads(discoveryIntent,collection,fetch,criteria):{status:'unavailable' as const,leads:[]}
       const {verifyRetailerProducts}=await import('@/src/lib/stylist/retailer-verification')
       const verified=await verifyRetailerProducts(discovery.leads,discoveryIntent,collection)
       console.info(JSON.stringify({event:'stylist.retailer_verification',discovered:discovery.leads.length,verified:verified.length}))
