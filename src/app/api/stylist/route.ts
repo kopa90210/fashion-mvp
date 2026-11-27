@@ -82,7 +82,10 @@ export async function POST(request: Request) {
     const discoveryIntent: Intent = daily
       ? {mode:'shop',occasion:context.signals?.primaryOccasion==='work-university'?'work':context.signals?.primaryOccasion==='going-out'?'going-out':'everyday',role:null,budget}
       : {...explicit,budget:explicit.budget===null?budget:budget===null?explicit.budget:Math.min(explicit.budget,budget)}
-    if(daily) discoveryIntent.role=discoveryGap(context,discoveryIntent)
+    const inferredGap=discoveryIntent.mode==='shop'&&discoveryIntent.role===null
+    if(inferredGap) discoveryIntent.role=discoveryGap(context,discoveryIntent)
+    const labels={base_layer:'tops',bottom:'trousers',one_piece:'dresses',footwear:'shoes',outerwear:'jackets'} as const
+    const gapAdvice=inferredGap&&discoveryIntent.role ? [`Consider ${labels[discoveryIntent.role]} first: this category offers a strong structural opportunity for new outfits with your current wardrobe. This is not yet a verified product recommendation.`] : []
     if (requestId && context.items.length && catalog.length===0 && discoveryEnabled() &&
         process.env.ENABLE_METERED_SHOPPER_AI==='true' && discoveryIntent.mode==='shop' &&
         discoveryIntent.role!==null && discoveryIntent.budget!==null && discoveryIntent.budget>0) {
@@ -97,10 +100,10 @@ export async function POST(request: Request) {
         const result=await meteredShopper({userId:user.id,requestId,context,catalog:verified,intent:discoveryIntent,collection,daily,singleAttempt:true})
         if(!result)return respond({error:'Shopping decision unavailable or still processing. Try again shortly.',code:'STYLIST_BUSY'},409,'busy')
         metrics.stage('recommendation')
-        return respond({...result,discovery},200,'success')
+        return respond({...result,discovery,explanation:[...gapAdvice,...(result.explanation??[])]},200,'success')
       }
       metrics.stage('recommendation')
-      return respond({...recommendations(context,catalog,discoveryIntent,collection,daily),discovery},200,'success')
+      return respond({...recommendations(context,catalog,discoveryIntent,collection,daily),discovery,explanation:gapAdvice},200,'success')
     }
     if (daily && requestId && context.items.length && process.env.ENABLE_METERED_SHOPPER_AI === 'true') {
       metrics.stage('provider')
