@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import Link from 'next/link'
 import { createRequestGuard } from '@/src/lib/stylist/request-guard'
+import type { ShoppingPreferences } from '@/src/lib/stylist/shopping-preferences'
 import type { Collection } from '@/src/lib/stylist/intent'
 import type { Look, Result } from '@/src/lib/stylist/recommend'
 
@@ -26,16 +27,17 @@ function LookCard({ look }: { look: Look }) {
   )
 }
 
-export default function StylistSearch() {
+export default function StylistSearch({initialPreferences=null,persistenceEnabled=false}:{initialPreferences?:ShoppingPreferences|null;persistenceEnabled?:boolean}={}) {
   const [view, setView] = useState<View>('ask')
   const [question, setQuestion] = useState('')
   const [shoppingOptionsOpen, setShoppingOptionsOpen] = useState(false)
-  const [budget, setBudget] = useState('')
-  const [sizes,setSizes]=useState({top:'',bottom:'',shoe:''})
-  const [collection, setCollection] = useState<Collection>('masculine')
+  const [budget, setBudget] = useState(initialPreferences?String(initialPreferences.budget):'')
+  const [sizes,setSizes]=useState(initialPreferences?.sizes??{top:'',bottom:'',shoe:''})
+  const [collection, setCollection] = useState<Collection>(initialPreferences?.collection??'masculine')
   const [result, setResult] = useState<Result | null>(null)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState('')
+  const [preferenceNotice,setPreferenceNotice]=useState(initialPreferences?'Saved shopping preferences loaded.':'')
   const retry = useRef<{ body: string; key: string } | null>(null)
   const submitting = useRef(false)
   const guard = useRef(createRequestGuard())
@@ -46,6 +48,7 @@ export default function StylistSearch() {
     setPending(false)
     setResult(null)
     setError('')
+    setPreferenceNotice('')
   }
   const changeView = (next: View) => {
     if (view !== next) { invalidateInputs(); setView(next) }
@@ -73,6 +76,7 @@ export default function StylistSearch() {
       if (!r.ok) { setError(typeof data.error === 'string' ? data.error : 'Could not load the stylist.'); return }
       if (view === 'ask' && data.clarification === 'budget') setShoppingOptionsOpen(true)
       retry.current = null
+      if(view==='daily'&&persistenceEnabled)setPreferenceNotice(data.preferencesSaved?'Shopping preferences saved.':'Research completed, but preferences could not be saved.')
       setResult(data)
     } catch { if (ticket.isCurrent()) setError('Could not load the stylist. Try again.') }
     finally { if (ticket.isCurrent()) { submitting.current = false; setPending(false) } }
@@ -119,7 +123,7 @@ export default function StylistSearch() {
               onClick={() => updateQuestion(text)}>{text}</button>)}
           </div>
         </>}
-        {view === 'daily' ? <>{shoppingFields}{sizeFields}</> : (
+        {view === 'daily' ? <>{shoppingFields}{sizeFields}{persistenceEnabled&&<p className="text-xs text-[#6d6257]">Your budget and sizes are saved to your account when you request research.</p>}{preferenceNotice&&<p role="status" className="text-xs text-[#6d6257]">{preferenceNotice}</p>}</> : (
           <details open={shoppingOptionsOpen} onToggle={(event) => setShoppingOptionsOpen(event.currentTarget.open)}>
             <summary className={'flex min-h-11 w-fit cursor-pointer items-center gap-2 rounded-lg px-1 text-sm underline underline-offset-4 ' + focus}>Shopping options</summary>
             {shoppingFields}
