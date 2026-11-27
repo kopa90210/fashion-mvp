@@ -1,6 +1,7 @@
 import { recommendOutfits, isValidOutfitStructure, type Outfit, type WardrobeItem } from '@/src/lib/outfit/engine'
 import type { QuizSignals, StyleVector } from '@/src/lib/quiz/scoring'
 import { searchCatalog, type Product } from './catalog'
+import { attributeOverlap,suitableOutfit } from './fashion-quality'
 import { gaps, type Collection, type Intent } from './intent'
 
 export type StylistContext = { items: WardrobeItem[]; dna: StyleVector; signals: QuizSignals | null }
@@ -31,7 +32,7 @@ export function redundancyPenalty(items: WardrobeItem[], product: Product): numb
     const owned = tokens(item.display_name)
     const union = new Set([...target, ...owned]).size
     const overlap = [...target].filter(t => owned.has(t)).length
-    if (union) max = Math.max(max, overlap / union)
+    if (union) max = Math.max(max, overlap / union,attributeOverlap(item,product.title,product.role))
   }
   return max
 }
@@ -59,6 +60,7 @@ function chooseProduct(context: StylistContext, candidates: Product[]) {
     const unlockCount = incrementalUnlockCount(context.items, product.role)
     if (unlockCount < 2) continue
     const penalty = redundancyPenalty(context.items, product)
+    if(penalty>=.8)continue
     const adjustedUnlock = unlockCount * (1 - 0.5 * penalty)
     const anchor = `catalog:${product.id}`
     const candidate: WardrobeItem = {
@@ -70,7 +72,7 @@ function chooseProduct(context: StylistContext, candidates: Product[]) {
     const ownedIds = new Set(pool.map(i => i.id))
     const unique = new Map<string, Outfit>()
     for (const outfit of options) {
-      if (!isValidOutfitStructure(outfit.items) || outfit.items.some(i => i.id !== anchor && !ownedIds.has(i.id))) continue
+      if (!suitableOutfit(outfit.items)||!isValidOutfitStructure(outfit.items) || outfit.items.some(i => i.id !== anchor && !ownedIds.has(i.id))) continue
       if (!outfit.items.some((i) => i.id === anchor) || !outfit.items.some((i) => i.id !== anchor)) continue
       const key = outfit.items.filter((i) => i.id !== anchor && core.has(i.layer_role)).map(i => i.id).sort().join('|')
       if (key && !unique.has(key)) unique.set(key, outfit)
@@ -105,7 +107,7 @@ export function recommendations(ctx: StylistContext, catalog: Product[], intent:
     signals: ctx.signals ? { ...ctx.signals, primaryOccasion: occasion[intent.occasion] } : null,
   }
   const looks = recommendOutfits(effective.items, effective.dna, { topN: 4, signals: effective.signals })
-    .filter(o => isValidOutfitStructure(o.items))
+    .filter(o => suitableOutfit(o.items)&&isValidOutfitStructure(o.items))
     .filter((o,index,all)=>all.findIndex(other=>other.items.map(i=>i.id).sort().join('|')===o.items.map(i=>i.id).sort().join('|'))===index)
     .map((o) => look(o))
   if (!daily && intent.mode === 'clarify') return { status: 'clarify', looks: [], clarification: 'intent' }
