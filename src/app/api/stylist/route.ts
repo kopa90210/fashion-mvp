@@ -85,7 +85,9 @@ export async function POST(request: Request) {
     const inferredGap=discoveryIntent.mode==='shop'&&discoveryIntent.role===null
     if(inferredGap) discoveryIntent.role=discoveryGap(context,discoveryIntent,collection)
     const labels={base_layer:'tops',bottom:'trousers',one_piece:'dresses',footwear:'shoes',outerwear:'jackets'} as const
-    const gapAdvice=inferredGap&&discoveryIntent.role ? [`Consider ${labels[discoveryIntent.role]} first: this category offers a strong structural opportunity for new outfits with your current wardrobe. This is not yet a verified product recommendation.`] : []
+    const arabic=/[\u0600-\u06ff]/.test(question)
+    const arLabels={base_layer:'قطع علوية',bottom:'بناطيل',one_piece:'فساتين',footwear:'أحذية',outerwear:'جاكيتات'} as const
+    const gapAdvice=inferredGap&&discoveryIntent.role ? [arabic?`هنبحث عن ${arLabels[discoveryIntent.role]} بناءً على عدد التركيبات الممكنة من هدومك. ده ترشيح مبدئي للفئة، مش تأكيد إنك محتاج تشتري.`:`Search priority: ${labels[discoveryIntent.role]}, based on structural wardrobe opportunities. This is a category hypothesis, not proof that you need a purchase.`] : []
     if (requestId && context.items.length && catalog.length===0 && discoveryEnabled() &&
         process.env.ENABLE_METERED_SHOPPER_AI==='true' && discoveryIntent.mode==='shop' &&
         discoveryIntent.role!==null && discoveryIntent.budget!==null && discoveryIntent.budget>0) {
@@ -103,7 +105,7 @@ export async function POST(request: Request) {
         return respond({...result,discovery,explanation:[...gapAdvice,...(result.explanation??[])]},200,'success')
       }
       metrics.stage('recommendation')
-      return respond({...recommendations(context,catalog,discoveryIntent,collection,daily),discovery,explanation:gapAdvice},200,'success')
+      return respond({...recommendations(context,catalog,discoveryIntent,collection,daily),discovery,explanation:[...gapAdvice,arabic?'مفيش منتج اتأكدنا من سعره وتوفره؛ مش هنرشح شراء قبل التحقق.':'No product offer was verified. We cannot recommend a purchase yet.']},200,'success')
     }
     if (daily && requestId && context.items.length && process.env.ENABLE_METERED_SHOPPER_AI === 'true') {
       metrics.stage('provider')
