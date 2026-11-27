@@ -6,6 +6,8 @@ import { readCatalog } from '@/src/lib/stylist/catalog'
 import { classifyWithGemini } from '@/src/lib/stylist/gemini'
 import { resolveIntent, type Collection, type Intent } from '@/src/lib/stylist/intent'
 import type {PurchaseCriteria} from '@/src/lib/stylist/purchase-criteria'
+import {preferencesEnabled,parseShoppingPreferences} from '@/src/lib/stylist/shopping-preferences'
+import {saveShoppingPreferences} from '@/src/lib/stylist/shopping-preferences-server'
 import { parseShoppingSizes,requestedSize } from '@/src/lib/stylist/shopping-sizes'
 import { discoveryGap } from '@/src/lib/stylist/discovery-gap'
 import { discoveryEnabled, discoverRetailerLeads,pilotRetailerHosts } from '@/src/lib/stylist/product-discovery'
@@ -42,7 +44,8 @@ async function readInput(request: Request): Promise<Record<string, unknown> | nu
 
 export async function POST(request: Request) {
   const metrics = createStylistMetrics()
-  const respond = (data: unknown, status: number, outcome: Outcome) => { metrics.finish(status, outcome); return json(data, status) }
+  let preferencesSaved:boolean|undefined
+  const respond = (data: unknown, status: number, outcome: Outcome) => { metrics.finish(status, outcome); return json(status===200&&preferencesSaved!==undefined&&data&&typeof data==='object'?{...data,preferencesSaved}:data, status) }
   try {
   if (process.env.ENABLE_STYLIST !== 'true') return respond({ error: 'Stylist is not enabled' }, 404, 'disabled')
   const origin = request.headers.get('origin')
@@ -76,6 +79,11 @@ export async function POST(request: Request) {
     metrics.stage('api_quota')
     if (!await reserveStylistQuota(user.id, 'api_hourly')) {
       return respond({ error: 'Stylist hourly limit reached. Try again later.', code: 'STYLIST_RATE_LIMIT' }, 429, 'rate_limited')
+    }
+    if(daily&&preferencesEnabled()){
+      const preferences=parseShoppingPreferences({collection,budget,sizes})
+      if(!preferences)return respond({error:'Set a valid budget and clothing sizes before research.'},400,'invalid_input')
+      preferencesSaved=await saveShoppingPreferences(supabase,user.id,preferences).catch(()=>false)
     }
     metrics.stage('wardrobe')
     const context = await loadStylistWardrobe(supabase, user.id)
